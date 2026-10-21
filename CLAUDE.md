@@ -120,7 +120,7 @@ Browser
 | `/auth` | `AuthPage` | Clerk sign-in/sign-up |
 | `/sso-callback` | `SsoCallback` | Clerk OAuth redirect handler |
 | `/registro` | `RegistroPage` | Account creation (Clerk sign-up, email code); no site header |
-| `/plataforma` | `plataforma/Plataforma` | Client area / site-manager workspace / admin panel (demo data, role switcher); no site header |
+| `/plataforma` | `plataforma/Plataforma` | Client area / site-manager workspace / admin panel (demo data, role switcher); signed-in users only (`RequireAuth` → `/auth?redirect=`); no site header |
 | `/servicios/:slug` | `ServicioPage` | Individual service detail page |
 | `/privacidad` | `PrivacidadPage` | Privacy policy |
 | `/terminos` | `TerminosPage` | Terms of service |

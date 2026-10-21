@@ -21,6 +21,7 @@ import CookiesPage from './components/CookiesPage.jsx';
 import CookieConsent from './components/CookieConsent.jsx';
 import RegistroPage from './components/RegistroPage.jsx';
 import Plataforma from './components/plataforma/Plataforma.jsx';
+import RequireAuth from './components/RequireAuth.jsx';
 
 /* The full landing page */
 function LandingPage({ onOpenLead }) {
@@ -63,10 +64,10 @@ export default function App() {
         <Route
           path="/plataforma"
           element={
-            <>
+            <RequireAuth>
               <Plataforma onOpenLead={openLead} />
               {leadOpen && <LeadModal onClose={closeLead} />}
-            </>
+            </RequireAuth>
           }
         />
         <Route

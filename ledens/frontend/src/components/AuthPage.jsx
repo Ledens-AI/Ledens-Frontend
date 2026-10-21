@@ -25,6 +25,8 @@ const MicrosoftIcon = () => (
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
 function isValidEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()); }
+// Only same-site paths ("/plataforma"), never "//evil.com" or absolute URLs.
+function safeRedirect(v) { return v && v.startsWith('/') && !v.startsWith('//') ? v : '/'; }
 
 /* ─────────────────────────────────────────────────────────────────────────
  * AuthForm — uses Clerk hooks; only rendered when ClerkProvider is present
@@ -35,6 +37,7 @@ function AuthForm() {
   const { isSignedIn } = useAuth();
   const { signIn, setActive: setSignInActive, isLoaded: siLoaded } = useSignIn();
   const { signUp, setActive: setSignUpActive, isLoaded: suLoaded } = useSignUp();
+  const redirectTo = safeRedirect(searchParams.get('redirect'));
 
   const [mode, setMode]         = useState(searchParams.get('mode') === 'signup' ? 'signup' : 'login');
   const [name, setName]         = useState('');
@@ -48,12 +51,15 @@ function AuthForm() {
   const [errors, setErrors]     = useState({});
   const [alert, setAlert]       = useState(null);
 
-  useEffect(() => { if (isSignedIn) navigate('/'); }, [isSignedIn]);
+  useEffect(() => { if (isSignedIn) navigate(redirectTo); }, [isSignedIn]);
 
   function switchMode(m) {
     setMode(m); setErrors({}); setAlert(null);
     setVerifying(false); setCode('');
-    navigate(`/auth${m === 'signup' ? '?mode=signup' : ''}`, { replace: true });
+    const q = new URLSearchParams();
+    if (m === 'signup') q.set('mode', 'signup');
+    if (redirectTo !== '/') q.set('redirect', redirectTo);
+    navigate(`/auth${q.toString() ? `?${q}` : ''}`, { replace: true });
   }
 
   function validate() {
@@ -72,7 +78,7 @@ function AuthForm() {
       await signIn.authenticateWithRedirect({
         strategy: `oauth_${provider}`,
         redirectUrl: `${window.location.origin}/sso-callback`,
-        redirectUrlComplete: '/',
+        redirectUrlComplete: redirectTo,
       });
     } catch (err) {
       setAlert({ type: 'error', title: 'Error OAuth', msg: err.errors?.[0]?.message ?? err.message });
@@ -87,7 +93,7 @@ function AuthForm() {
       const res = await signIn.create({ identifier: email, password });
       if (res.status === 'complete') {
         await setSignInActive({ session: res.createdSessionId });
-        navigate('/');
+        navigate(redirectTo);
       }
     } catch (err) {
       const c = err.errors?.[0]?.code;
@@ -127,7 +133,7 @@ function AuthForm() {
       const res = await signUp.attemptEmailAddressVerification({ code });
       if (res.status === 'complete') {
         await setSignUpActive({ session: res.createdSessionId });
-        navigate('/');
+        navigate(redirectTo);
       }
     } catch (err) {
       setAlert({ type: 'error', title: 'Código incorrecto', msg: err.errors?.[0]?.message ?? 'Código no válido.' });
