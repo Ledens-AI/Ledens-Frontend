@@ -20,6 +20,7 @@ import TerminosPage from './components/TerminosPage.jsx';
 import CookiesPage from './components/CookiesPage.jsx';
 import CookieConsent from './components/CookieConsent.jsx';
 import RegistroPage from './components/RegistroPage.jsx';
+import Plataforma from './components/plataforma/Plataforma.jsx';
 
 /* The full landing page */
 function LandingPage({ onOpenLead }) {
@@ -55,10 +56,19 @@ export default function App() {
 
   return (
     <>
-      {/* Header is shown on every route except /sso-callback and /registro */}
+      {/* Header is shown on every route except /sso-callback, /registro and /plataforma */}
       <Routes>
         <Route path="/sso-callback" element={<SsoCallback />} />
         <Route path="/registro" element={<RegistroPage />} />
+        <Route
+          path="/plataforma"
+          element={
+            <>
+              <Plataforma onOpenLead={openLead} />
+              {leadOpen && <LeadModal onClose={closeLead} />}
+            </>
+          }
+        />
         <Route
           path="*"
           element={

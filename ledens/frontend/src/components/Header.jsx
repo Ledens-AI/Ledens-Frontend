@@ -89,6 +89,7 @@ export default function Header() {
                 <Link to="/registro" className="btn btn-sm btn-blue">REGÍSTRATE</Link>
               </SignedOut>
               <SignedIn>
+                <Link to="/plataforma" className="btn btn-sm btn-blue">MI ÁREA</Link>
                 <UserButton afterSignOutUrl="/" />
               </SignedIn>
             </>

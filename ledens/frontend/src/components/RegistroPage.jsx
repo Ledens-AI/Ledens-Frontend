@@ -99,7 +99,7 @@ function RegistroClerk() {
         const res = await signUp.attemptEmailAddressVerification({ code });
         if (res.status === 'complete') {
           await setActive({ session: res.createdSessionId });
-          navigate('/');
+          navigate('/plataforma');
         }
       } catch (err) {
         throw new Error(clerkMessage(err));

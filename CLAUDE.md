@@ -119,6 +119,8 @@ Browser
 | `/` | `LandingPage` | Full landing (Hero, Proceso, Galeria, etc.) |
 | `/auth` | `AuthPage` | Clerk sign-in/sign-up |
 | `/sso-callback` | `SsoCallback` | Clerk OAuth redirect handler |
+| `/registro` | `RegistroPage` | Account creation (Clerk sign-up, email code); no site header |
+| `/plataforma` | `plataforma/Plataforma` | Client area / site-manager workspace / admin panel (demo data, role switcher); no site header |
 | `/servicios/:slug` | `ServicioPage` | Individual service detail page |
 | `/privacidad` | `PrivacidadPage` | Privacy policy |
 | `/terminos` | `TerminosPage` | Terms of service |
@@ -126,7 +128,7 @@ Browser
 | `*` | `LandingPage` | Fallback |
 
 ### Global components
-- `Header` — rendered on every route except `/sso-callback`
+- `Header` — rendered on every route except `/sso-callback`, `/registro` and `/plataforma`
 - `CookieConsent` — cookie consent modal, mounted once in `App.jsx` outside `<Routes>`
   - Public API: `window.LedensCookies = { open, close, get, reset }`
   - Saves preferences to `localStorage` key `ledens.cookieConsent.v1`
