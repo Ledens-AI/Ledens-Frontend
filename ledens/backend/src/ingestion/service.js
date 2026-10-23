@@ -1,3 +1,4 @@
+import {extractLines,storeInvoiceLines} from '../finance/ingestion.js';
 import { IngestError } from './validation.js';
 import { extractInvoice } from './ocr.js';
 
@@ -69,13 +70,18 @@ export class IngestionService {
           row.status='ready';row.invoice_date=extracted.date;
           row.destination_folder=`/Shared Documents/${this.config.archiveRoot}/${extracted.quarter}`;
           await c.query(`UPDATE ledens.documents SET document_on=$2,trimestre=$3,numerodocumento=$4,
-            tercero=$5,niftercero=$6,base_amount=$7,vat_amount=$8,total=$9 WHERE id=$1`,
+            tercero=$5,niftercero=$6,base_amount=$7,vat_amount=$8,total=$9,tipo=$10 WHERE id=$1`,
             [row.document_id,extracted.date,extracted.quarter,extracted.number,extracted.vendor,extracted.taxId,
-              extracted.subtotal,extracted.tax,extracted.total]);
+              extracted.subtotal,extracted.tax,extracted.total,extracted.direction]);
           await c.query(`UPDATE ledens.invoice_ingestions SET status='ready',invoice_date=$2,date_confidence=$3,
-            destination_folder=$4,content=NULL,updated_at=now() WHERE id=$1`,
-            [id,extracted.date,extracted.confidence,row.destination_folder]);
+            destination_folder=$4,invoice_currency=$5,total_confidence=$6,number_confidence=$7,
+            party_confidence=$8,tax_id_confidence=$9,direction_confidence=$10,
+            content=NULL,updated_at=now() WHERE id=$1`,
+            [id,extracted.date,extracted.confidence,row.destination_folder,extracted.currency,
+              extracted.totalConfidence,extracted.numberConfidence,extracted.partyConfidence,
+              extracted.taxIdConfidence,extracted.directionConfidence]);
         }
+        await storeInvoiceLines(c,row.document_id,extractLines(result),extracted);
         return this.response(row);
       } catch(e) {
         if(e instanceof IngestError) throw e;
