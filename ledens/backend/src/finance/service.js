@@ -173,8 +173,16 @@ export class FinanceService {
    });
  }
  async history(user,id,{limit=50,offset=0}={}){
-   await this.record(this.pool,id,user);
-   return (await this.pool.query('SELECT * FROM ledens.finance_events WHERE record_id=$1 ORDER BY id DESC LIMIT $2 OFFSET $3',[id,limit,offset])).rows;
+   const record=await this.record(this.pool,id,user);
+   const rows=(await this.pool.query('SELECT * FROM ledens.finance_events WHERE record_id=$1 ORDER BY id DESC LIMIT $2 OFFSET $3',[id,limit,offset])).rows;
+   if(record.document_id&&record.document&&!Object.hasOwn(record.document,'total')){
+     return rows.map(event=>{
+       const clean=value=>{const copy={...value};delete copy.document;return copy;};
+       return {...event,before_value:event.action==='document_changed'?{id:record.document_id}:clean(event.before_value),
+         after_value:event.action==='document_changed'?{id:record.document_id}:clean(event.after_value)};
+     });
+   }
+   return rows;
  }
  async lines(user,documentId,{limit=50,offset=0}={}){
    await this.documentPermission(this.pool,user,documentId);

@@ -186,3 +186,16 @@ test('HTTP rejects missing authentication, customer, invalid ids and cross-origi
  assert.equal((await db.query('SELECT count(*)::int n FROM ledens.finance_project_permissions WHERE user_id=$1',[user])).rows[0].n,0);
  }finally{await new Promise(resolve=>server.close(resolve));}
 });
+test('scoped project access redacts shared invoice totals and audit snapshots',async()=>{
+ const projects=(await db.query("INSERT INTO ledens.projects(name) VALUES('Privado A'),('Privado B') RETURNING id")).rows.map(p=>p.id);
+ const user={id:(await db.query("INSERT INTO users(email,role) VALUES('scoped@test','jefe') RETURNING id")).rows[0].id,role:'jefe'};
+ await db.query('INSERT INTO ledens.finance_project_permissions(user_id,project_id,can_write) VALUES($1,$2,true)',[user.id,projects[0]]);
+ const d=await doc();await storeInvoiceLines(pool,d,[1,2].map(i=>({line_number:i,net_amount:500,vat_amount:105,description:'Material'})),{direction:'Pagar',currency:'EUR'});
+ const records=(await db.query('SELECT * FROM ledens.financial_records WHERE document_id=$1 ORDER BY id',[d])).rows;
+ for(let i=0;i<2;i++){const r=(await replace(records[i],[share(projects[i],'605')])).records[0];await recognize(r,{net_amount:'500',vat_amount:'105'});}
+ assert.equal((await service.record(pool,records[0].id,user)).document.total,undefined);
+ await assert.rejects(service.lines(user,d),{status:403});
+ await db.query('UPDATE ledens.documents SET total=-2420 WHERE id=$1',[d]);
+ const history=await service.history(user,records[0].id);assert.ok(history.some(e=>e.action==='document_changed'));
+ assert.ok(history.every(e=>e.before_value.total===undefined&&e.before_value.document===undefined&&e.after_value.document===undefined));
+});
