@@ -174,6 +174,11 @@ Every user has one role in `users.role`; it decides what they get in `/plataform
   npm run users -- create <email> <role> <nombre completo>
   ```
   Every CLI change is also written to `audit_log` (actor "Sistema (consola)").
+- **Schema report** (`src/scripts/schema.js`): read-only Markdown dump of the real database structure — tables, columns, keys, relations, indexes, views, triggers; catalog only, never row data, inside a `READ ONLY` transaction. The accounting tables (documents, bank movements, cost/payment facts, projects) live in production but are **not defined in this repo**; anything built on them starts from this report:
+  ```bash
+  az containerapp exec -g rg-ledens -n ledens-backend --command "npm run -s schema"
+  npm run -s schema -- ledens            # only some schemas
+  ```
 
 ### Google &amp; Microsoft login (issues #11–12)
 
