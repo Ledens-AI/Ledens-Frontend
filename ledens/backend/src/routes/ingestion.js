@@ -1,0 +1,48 @@
+import express from 'express';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { getPool, isDbConfigured } from '../db/pool.js';
+import { validateInvoice, IngestError } from '../ingestion/validation.js';
+import { InvoiceOcr } from '../ingestion/ocr.js';
+import { IngestionService } from '../ingestion/service.js';
+
+export function createIngestionRouter({service,config,tokenHash}={}) {
+  const router=express.Router();
+  router.use((req,res,next)=>{
+    const expected=tokenHash ?? process.env.INGEST_TOKEN_SHA256;
+    if(!expected || !/^[a-f0-9]{64}$/.test(expected)) return res.status(503).json({error:'ingestion_not_configured'});
+    const token=req.get('authorization')?.match(/^Bearer ([A-Za-z0-9_-]{43,128})$/)?.[1] || '';
+    const actual=createHash('sha256').update(token).digest();
+    if(!token || !timingSafeEqual(actual,Buffer.from(expected,'hex'))) return res.status(401).json({error:'unauthorized'});
+    if(!service && !isDbConfigured()) return res.status(503).json({error:'database_not_configured'});
+    next();
+  });
+  // Parse only after authentication. Do not increase the public API's body limit.
+  router.use(express.json({limit:'6mb'}));
+  const settings=()=>config || {
+    site:process.env.INGEST_SITE_URL,
+    folder:process.env.INGEST_FOLDER || 'datasource/Landing facturas',
+    archiveRoot:process.env.INGEST_ARCHIVE_ROOT || 'datasource',
+  };
+  const getService=()=>service || new IngestionService(getPool(),
+    process.env.DI_ENDPOINT && process.env.DI_KEY ? new InvoiceOcr(process.env.DI_ENDPOINT,process.env.DI_KEY):null,settings());
+  const handle=fn=>async(req,res,next)=>{try{await fn(req,res);}catch(e){next(e);}};
+  router.post('/',handle(async(req,res)=>{
+    const file=await validateInvoice(req.body,settings());
+    const result=await getService().receive(file);
+    res.status(result.replay||result.duplicate?200:202).json(result);
+  }));
+  router.param('id',(req,res,next,id)=>{
+    if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return res.status(400).json({error:'invalid_id'});
+    next();
+  });
+  router.post('/:id/process',handle(async(req,res)=>res.json(await getService().process(req.params.id))));
+  router.post('/:id/archive',handle(async(req,res)=>res.json(await getService().archived(req.params.id,req.body?.archive_url))));
+  router.use((err,req,res,next)=>{
+    if(err instanceof IngestError) return res.status(err.status).json({error:err.code});
+    if(err.type==='entity.too.large') return res.status(413).json({error:'payload_too_large'});
+    if(err.type==='entity.parse.failed') return res.status(400).json({error:'invalid_json'});
+    console.error('[ingestion] request failed',err.code || err.name);
+    res.status(503).json({error:'ingestion_temporarily_unavailable'});
+  });
+  return router;
+}
