@@ -78,6 +78,7 @@ export default function Header() {
           {!loading && user ? (
             <div className="hdr-user">
               <span className="hdr-user-name">{(user.name || user.email).split(' ')[0]}</span>
+              <Link to="/plataforma" className="btn btn-sm btn-blue">MI ÁREA</Link>
               <button type="button" className="btn btn-sm btn-outline" onClick={logout}>
                 CERRAR SESIÓN
               </button>
@@ -85,7 +86,7 @@ export default function Header() {
           ) : (
             <>
               <Link to="/auth" className="btn btn-sm btn-outline">INICIA SESIÓN</Link>
-              <Link to="/auth?mode=signup" className="btn btn-sm btn-blue">REGÍSTRATE</Link>
+              <Link to="/registro" className="btn btn-sm btn-blue">REGÍSTRATE</Link>
             </>
           )}
         </div>

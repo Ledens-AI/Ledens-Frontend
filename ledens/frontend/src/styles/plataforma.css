@@ -1,0 +1,32 @@
+/* ============================================================
+ * Client platform  (/plataforma)
+ * The page keeps the design's inline styles; this file only carries the
+ * design's page basics (scoped to .plat) and a narrow-screen fallback.
+ * ============================================================ */
+.plat {
+  min-height: 100vh;
+  background: #F7F7F5;
+  font-family: "DM Sans", system-ui, sans-serif;
+  color: #1D1D1B;
+  -webkit-font-smoothing: antialiased;
+}
+.plat *, .plat *::before, .plat *::after { box-sizing: border-box; }
+.plat button, .plat input, .plat textarea, .plat select { font-family: inherit; }
+.plat a { color: #5567AE; text-decoration: none; }
+.plat a:hover { color: #3E4D85; text-decoration: underline; }
+.plat h1, .plat h2, .plat h3, .plat p { margin: 0; }
+
+/* The design is laid out for desktop. Below 900px the sidebar stacks on top
+   and the top bar wraps (inline styles need !important to be overridden). */
+@media (max-width: 900px) {
+  .plat > div { grid-template-columns: 1fr !important; }
+  .plat > div > aside { position: static !important; height: auto !important; }
+  .plat-spacer { display: none; }
+  .plat header { height: auto !important; flex-wrap: wrap; padding: 12px 16px !important; }
+  .plat main { padding: 20px 16px !important; }
+}
+
+/* The cookie-settings button sits bottom-left by default, which is where the
+   sidebar's user card is — move it to the opposite corner on this page. */
+body:has(.plat) .cc-reopen { left: auto; right: 24px; }
+@media (max-width: 640px) { body:has(.plat) .cc-reopen { right: 16px; } }

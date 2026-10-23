@@ -182,6 +182,8 @@ Sessions, not JWT: a `sessions` row per login (`002_sessions.sql`), the cookie o
 |---|---|---|
 | `/` | `LandingPage` | Full landing (Hero, Proceso, Galeria, etc.) |
 | `/auth` | `AuthPage` | Email/password + Google/Microsoft login, built and owned by this project (issue #14) — no third-party auth SDK |
+| `/registro` | `RegistroPage` | Account creation (design from Claude Design); posts to `/api/auth/register`; no site header |
+| `/plataforma` | `plataforma/Plataforma` | Client area / site-manager workspace / admin panel (demo data, role switcher); logged-in users only (`RequireAuth` → `/auth?redirect=`); no site header |
 | `/servicios/:slug` | `ServicioPage` | Individual service detail page |
 | `/privacidad` | `PrivacidadPage` | Privacy policy |
 | `/terminos` | `TerminosPage` | Terms of service |
@@ -189,7 +191,7 @@ Sessions, not JWT: a `sessions` row per login (`002_sessions.sql`), the cookie o
 | `*` | `LandingPage` | Fallback |
 
 ### Global components
-- `Header` — rendered on every route; shows login/register links or the logged-in user + logout, via `useAuth()`
+- `Header` — rendered on every route except `/registro` and `/plataforma`; shows login/register links or the logged-in user + logout, via `useAuth()`
 - `CookieConsent` — cookie consent modal, mounted once in `App.jsx` outside `<Routes>`
   - Public API: `window.LedensCookies = { open, close, get, reset }`
   - Saves preferences to `localStorage` key `ledens.cookieConsent.v1`
