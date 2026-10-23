@@ -24,7 +24,7 @@ test('UI and canonical API share exactly one allocation and source project',asyn
  assert.equal(r.project_id,p1);assert.equal(r.parts,0);assert.equal(r.importe,'1200');
  assert.equal((await db.query('SELECT count(*)::int n FROM ledens.project_financial_allocations WHERE record_id=$1',[r.record_id])).rows[0].n,1);
  assert.equal((await db.query("SELECT to_regclass('ledens.project_allocations') id")).rows[0].id,null);
- await assign(r,p2);assert.equal((await svc.getRecord(r.type,r.id)).project_id,p2);
+ await assign(r,p2);r=await svc.getRecord(r.type,r.id);assert.equal(r.project_id,p2);assert.ok(r.historial.some(e=>e.old_label==='Marbella'&&e.new_label==='Velez'));
 });
 test('distribution uses canonical caps, clears legacy project, rejects stale writes',async()=>{
  let r=await source();await svc.distribute({type:r.type,id:r.id,version:r.version,requestId:randomUUID(),parts:[{projectId:p1,amount:'700'},{projectId:p2,amount:'500'}]});

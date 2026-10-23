@@ -106,7 +106,7 @@ Browser
 | GET | `/api/admin/users` | **Admin only.** Every user with role, email verification, sign-in methods and last login. |
 | PATCH | `/api/admin/users/:id/role` | **Admin only.** `{ role, reason }` — changes a role (never your own) and writes an `audit_log` row. |
 | GET | `/api/admin/audit` | **Admin only.** Last 200 `audit_log` entries. |
-| * | `/api/finanzas/*` | **Admin + jefe.** Gestión financiera: imputing `ledens.material_expenses` / `worker_payments` / `customer_payments` to `ledens.projects`, splits, review flags, profitability. See `ledens/backend/FINANZAS.md`. |
+| * | `/api/finanzas/*` | **Admin + explicitly authorized jefe.** Gestión financiera: imputing `ledens.material_expenses` / `worker_payments` / `customer_payments` to `ledens.projects`, splits, review flags, profitability. See `ledens/backend/FINANZAS.md`. |
 
 All `/api/auth/*` routes return `503` if `DATABASE_URL` isn't set (production, until the DB is provisioned). The OAuth routes also return `503` until their own `*_CLIENT_ID`/`*_CLIENT_SECRET`/`*_REDIRECT_URI` are set (no app is registered with either provider yet — see the build log's open questions for who should own them).
 
@@ -143,7 +143,7 @@ All `/api/auth/*` routes return `503` if `DATABASE_URL` isn't set (production, u
 - `004_roles_and_audit.sql` adds `users.role` (`admin` / `jefe` / `client`, default `client`) and the `audit_log` table, and seeds the initial accounts (see "Roles").
 - `003_users_email_verified.sql` adds `users.email_verified` (default `false`). See the account-linking security note under "Google login" — this column exists specifically to stop a password registration being used to pre-hijack an account someone later proves ownership of via social login.
 - Tests: `cd ledens/backend && npm test` (needs the local DB; skipped if `DATABASE_URL` is unset).
-- **Accounting schema (`ledens.*`) is owned by the accounting import tooling, not this repo.** Production's `schema_migrations` also lists `004_ledens_business` … `009_revolut_daily_sync` from that tooling, so new files here must use names that can't collide (next free: `011_`). Never alter or replace the accounting tables; `010_finanzas_imputacion.sql` only adds `project_allocations`, `imputation_reviews`, `imputation_audit` around them. Real column names are in `ledens/backend/test/fixtures/ledens-accounting.sql` (copied from the production catalog) — business names like "FactMateriales" are not table names.
+- **Accounting schema (`ledens.*`) is owned by the accounting import tooling, not this repo.** Production's `schema_migrations` also lists `004_ledens_business` … `009_revolut_daily_sync` from that tooling, so new files here must use names that can't collide (next free: `011_`). Never alter or replace the accounting tables; `005_bank_bridge.sql` and `006_project_finance.sql` are the canonical finance model. `010_finanzas_imputacion.sql` only adds `finance_review_flags` with a foreign key to `financial_records`; never introduce a parallel allocation table. All UI project writes use FinanceService and project_financial_allocations, with finance_events as audit. Real column names are in `ledens/backend/test/fixtures/ledens-accounting.sql` (copied from the production catalog) — business names like "FactMateriales" are not table names.
 
 ### Authentication (email/password, issue #10)
 
