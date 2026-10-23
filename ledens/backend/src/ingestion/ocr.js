@@ -1,4 +1,5 @@
 import { invoiceQuarter } from './validation.js';
+import {taxId} from '../bridge/rules.js';
 
 export function trustedOperation(url, endpoint) {
   const value = new URL(url);
@@ -28,7 +29,7 @@ export class InvoiceOcr {
     return (await this.request(trustedOperation(url, this.endpoint))).json();
   }
 }
-export function extractInvoice(result) {
+export function extractInvoice(result, {businessTaxId=process.env.BRIDGE_BUSINESS_TAX_ID||'B19753805'}={}) {
   const docs = result.analyzeResult?.documents;
   if (!Array.isArray(docs) || docs.length !== 1) return { reason:'invoice_count_requires_review' };
   const f = docs[0].fields || {};
@@ -38,6 +39,17 @@ export function extractInvoice(result) {
   if (!quarter || confidence < 0.9) return {reason:'invoice_date_requires_review'};
   const text = name => typeof f[name]?.valueString === 'string' ? f[name].valueString.slice(0,1000) : null;
   const money = name => Number.isFinite(f[name]?.valueCurrency?.amount) ? f[name].valueCurrency.amount : null;
-  return { date, confidence, quarter, number:text('InvoiceId'), vendor:text('VendorName'),
-    taxId:text('VendorTaxId'), subtotal:money('SubTotal'), tax:money('TotalTax'), total:money('InvoiceTotal') };
+  const own=taxId(businessTaxId);
+  const sellerOwn=taxId(text('VendorTaxId'))===own;
+  const buyerOwn=taxId(text('CustomerTaxId'))===own;
+  const direction=sellerOwn===buyerOwn?null:sellerOwn?'Cobrar':'Pagar';
+  const party=direction==='Cobrar'?'Customer':'Vendor';
+  const multiplier=direction==='Pagar'?-1:1;
+  const signed=name=>money(name)==null?null:multiplier*money(name);
+  return { date, confidence, quarter, number:text('InvoiceId'), vendor:text(party+'Name'),
+    taxId:text(party+'TaxId'), subtotal:signed('SubTotal'), tax:signed('TotalTax'), total:signed('InvoiceTotal'),
+    direction,currency:f.InvoiceTotal?.valueCurrency?.currencyCode||null,
+    totalConfidence:f.InvoiceTotal?.confidence||0,numberConfidence:f.InvoiceId?.confidence||0,
+    partyConfidence:f[party+'Name']?.confidence||0,taxIdConfidence:f[party+'TaxId']?.confidence||0,
+    directionConfidence:direction&&money('InvoiceTotal')>0?(f[sellerOwn?'VendorTaxId':'CustomerTaxId']?.confidence||0):0 };
 }

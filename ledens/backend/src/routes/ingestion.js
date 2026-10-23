@@ -4,6 +4,7 @@ import { getPool, isDbConfigured } from '../db/pool.js';
 import { validateInvoice, IngestError } from '../ingestion/validation.js';
 import { InvoiceOcr } from '../ingestion/ocr.js';
 import { IngestionService } from '../ingestion/service.js';
+import {BridgeService} from '../bridge/service.js';
 
 export function createIngestionRouter({service,config,tokenHash}={}) {
   const router=express.Router();
@@ -31,12 +32,24 @@ export function createIngestionRouter({service,config,tokenHash}={}) {
     const result=await getService().receive(file);
     res.status(result.replay||result.duplicate?200:202).json(result);
   }));
+  router.post('/bridge/run',handle(async(req,res)=>{
+    if(process.env.BRIDGE_ENABLED!=='true')return res.status(503).json({error:'bridge_disabled'});
+    const result=await new BridgeService(getPool()).run(50);
+    res.status(result.errors?503:200).json(result);
+  }));
   router.param('id',(req,res,next,id)=>{
     if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return res.status(400).json({error:'invalid_id'});
     next();
   });
   router.post('/:id/process',handle(async(req,res)=>res.json(await getService().process(req.params.id))));
-  router.post('/:id/archive',handle(async(req,res)=>res.json(await getService().archived(req.params.id,req.body?.archive_url))));
+  router.post('/:id/archive',handle(async(req,res)=>{
+    const result=await getService().archived(req.params.id,req.body?.archive_url);
+    if(process.env.BRIDGE_ENABLED==='true'){
+      try{await new BridgeService(getPool()).evaluate(result.document_id,{force:true});}
+      catch(e){console.error('[bridge] deferred',e.code||e.name);}
+    }
+    res.json(result);
+  }));
   router.use((err,req,res,next)=>{
     if(err instanceof IngestError) return res.status(err.status).json({error:err.code});
     if(err.type==='entity.too.large') return res.status(413).json({error:'payload_too_large'});
