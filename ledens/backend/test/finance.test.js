@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import pg from 'pg';
 import express from 'express';
 import {FinanceService} from '../src/finance/service.js';
+import {cents} from '../src/bridge/rules.js';
 import {createFinanceRouter} from '../src/routes/finance.js';
 import {storeInvoiceLines,extractLines} from '../src/finance/ingestion.js';
 let db,pool,service,admin,p1,p2;
@@ -147,7 +148,7 @@ test('line extraction retains distinct tax rates and missing tax stays pending',
 test('missing line tax creates one pending document envelope and replay cannot duplicate it',async()=>{
  const d=await doc('-121');await storeInvoiceLines(pool,d,[{line_number:1,description:'Material pendiente',net_amount:100,vat_amount:null}],{direction:'Pagar',currency:'EUR'});
  await storeInvoiceLines(pool,d,[{line_number:1,description:'Material pendiente',net_amount:100,vat_amount:null}],{direction:'Pagar',currency:'EUR'});
- const records=(await db.query('SELECT * FROM ledens.financial_records WHERE document_id=$1',[d])).rows;assert.equal(records.length,1);assert.equal(records[0].gross_amount,'121');assert.equal(records[0].status,'pending');assert.equal(records[0].category,'unclassified');
+ const records=(await db.query('SELECT * FROM ledens.financial_records WHERE document_id=$1',[d])).rows;assert.equal(records.length,1);assert.equal(cents(records[0].gross_amount),12100n);assert.equal(records[0].status,'pending');assert.equal(records[0].category,'unclassified');
 });
 test('zeroed source cannot retain approved economics or receive assignments',async()=>{
  const d=await doc('-121');let r=await material('-121',d);r=(await replace(r,[share(p1,'121')])).records[0];await recognize(r,{net_amount:'100',vat_amount:'21'});
@@ -178,5 +179,10 @@ test('HTTP rejects missing authentication, customer, invalid ids and cross-origi
  assert.equal((await fetch(base+'/api/projects',{headers:{'x-test-user':'client'}})).status,403);
  assert.equal((await fetch(base+'/api/finance/records/bad',{headers:{'x-test-user':'admin'}})).status,400);
  assert.equal((await fetch(base+'/api/finance/allocations/bulk',{method:'POST',headers:{'x-test-user':'admin','content-type':'application/json'},body:'{}'})).status,403);
+ const user=(await db.query("INSERT INTO users(email,role) VALUES('grant@test','jefe') RETURNING id")).rows[0].id;
+ const headers={'x-test-user':'admin','content-type':'application/json',origin:'https://ledens.test'};
+ assert.equal((await fetch(base+'/api/finance/permissions',{method:'PUT',headers,body:JSON.stringify({user_id:user,project_id:p1,can_write:true,can_review_unassigned:false,reason:'Permiso de prueba'})})).status,200);
+ assert.equal((await fetch(base+'/api/finance/permissions',{method:'DELETE',headers,body:JSON.stringify({user_id:user,project_id:p1,reason:'Revocacion comprobada'})})).status,200);
+ assert.equal((await db.query('SELECT count(*)::int n FROM ledens.finance_project_permissions WHERE user_id=$1',[user])).rows[0].n,0);
  }finally{await new Promise(resolve=>server.close(resolve));}
 });
