@@ -1,0 +1,116 @@
+import { getPool, closePool } from '../db/pool.js';
+
+// Read-only schema report (Markdown) of the database DATABASE_URL points at:
+// tables and views, columns, keys and relations, indexes, view definitions
+// and triggers. It reads the catalog only — never row data — inside a
+// READ ONLY transaction, so it is safe to run against production:
+//   az containerapp exec -g rg-ledens -n ledens-backend --command "npm run -s schema"
+//   npm run -s schema -- ledens public      # only these schemas
+//
+// Exists because the accounting tables (documents, bank movements, cost and
+// payment facts, projects) are managed outside this repo; features built on
+// them must start from their real definition, not a guess.
+
+const SYSTEM = ['pg_catalog', 'information_schema', 'pg_toast'];
+
+async function report(db, only) {
+  const schemaFilter = only.length
+    ? { sql: 'n.nspname = ANY($1)', args: [only] }
+    : { sql: "NOT (n.nspname = ANY($1)) AND n.nspname NOT LIKE 'pg_temp%' AND n.nspname NOT LIKE 'pg_toast_temp%'", args: [SYSTEM] };
+
+  const { rows: rels } = await db.query(
+    `SELECT n.nspname AS schema, c.relname AS name, c.oid,
+            CASE c.relkind WHEN 'r' THEN 'table' WHEN 'p' THEN 'table (partitioned)' WHEN 'v' THEN 'view'
+                           WHEN 'm' THEN 'materialized view' WHEN 'f' THEN 'foreign table' END AS kind,
+            c.reltuples::bigint AS est_rows, obj_description(c.oid, 'pg_class') AS comment
+       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND ${schemaFilter.sql}
+      ORDER BY n.nspname, c.relname`,
+    schemaFilter.args,
+  );
+
+  const out = [`# Esquema de la base de datos (${new Date().toISOString()})`, ''];
+  const { rows: [ver] } = await db.query('SELECT version()');
+  out.push(`PostgreSQL: ${ver.version}`, '');
+  out.push('## Índice', '', '| Esquema | Objeto | Tipo | Filas (estimadas) |', '|---|---|---|---|');
+  rels.forEach((r) => out.push(`| ${r.schema} | ${r.name} | ${r.kind} | ${r.est_rows < 0 ? '—' : r.est_rows} |`));
+  out.push('');
+
+  for (const r of rels) {
+    out.push(`## ${r.schema}.${r.name} (${r.kind})`, '');
+    if (r.comment) out.push(`> ${r.comment}`, '');
+
+    const { rows: cols } = await db.query(
+      `SELECT a.attname AS name, format_type(a.atttypid, a.atttypmod) AS type, a.attnotnull AS not_null,
+              pg_get_expr(d.adbin, d.adrelid) AS default, col_description(a.attrelid, a.attnum) AS comment
+         FROM pg_attribute a LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+        WHERE a.attrelid = $1::oid AND a.attnum > 0 AND NOT a.attisdropped
+        ORDER BY a.attnum`,
+      [r.oid],
+    );
+    out.push('| Columna | Tipo | Nulo | Por defecto | Comentario |', '|---|---|---|---|---|');
+    cols.forEach((c) => out.push(`| ${c.name} | ${c.type} | ${c.not_null ? 'NOT NULL' : 'sí'} | ${c.default ?? ''} | ${c.comment ?? ''} |`));
+    out.push('');
+
+    const { rows: cons } = await db.query(
+      `SELECT conname, pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = $1::oid ORDER BY contype, conname`,
+      [r.oid],
+    );
+    if (cons.length) {
+      out.push('Restricciones:', '');
+      cons.forEach((c) => out.push(`- \`${c.conname}\`: ${c.def}`));
+      out.push('');
+    }
+
+    const { rows: refs } = await db.query(
+      `SELECT conrelid::regclass AS from_table, conname, pg_get_constraintdef(oid) AS def
+         FROM pg_constraint WHERE confrelid = $1::oid AND contype = 'f' ORDER BY 1, 2`,
+      [r.oid],
+    );
+    if (refs.length) {
+      out.push('Referenciada por:', '');
+      refs.forEach((c) => out.push(`- ${c.from_table} \`${c.conname}\`: ${c.def}`));
+      out.push('');
+    }
+
+    const { rows: idx } = await db.query(
+      `SELECT pg_get_indexdef(indexrelid) AS def FROM pg_index WHERE indrelid = $1::oid ORDER BY 1`,
+      [r.oid],
+    );
+    if (idx.length) {
+      out.push('Índices:', '');
+      idx.forEach((i) => out.push(`- \`${i.def}\``));
+      out.push('');
+    }
+
+    const { rows: trg } = await db.query(
+      `SELECT pg_get_triggerdef(oid) AS def FROM pg_trigger WHERE tgrelid = $1::oid AND NOT tgisinternal ORDER BY tgname`,
+      [r.oid],
+    );
+    if (trg.length) {
+      out.push('Triggers:', '');
+      trg.forEach((t) => out.push(`- \`${t.def}\``));
+      out.push('');
+    }
+
+    if (r.kind.includes('view')) {
+      const { rows: [v] } = await db.query('SELECT pg_get_viewdef($1::oid, true) AS def', [r.oid]);
+      out.push('Definición:', '', '```sql', v.def.trim(), '```', '');
+    }
+  }
+  return out.join('\n');
+}
+
+const only = process.argv.slice(2);
+const client = await getPool().connect();
+try {
+  await client.query('BEGIN READ ONLY');
+  console.log(await report(client, only));
+  await client.query('ROLLBACK');
+} catch (err) {
+  console.error(err.message);
+  process.exitCode = 1;
+} finally {
+  client.release();
+  await closePool();
+}
