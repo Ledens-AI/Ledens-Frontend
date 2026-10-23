@@ -6,6 +6,7 @@ import contactRouter from './routes/contact.js';
 import authRouter from './routes/auth.js';
 import oauthRouter from './routes/oauth.js';
 import adminRouter from './routes/admin.js';
+import { createIngestionRouter } from './routes/ingestion.js';
 
 // Builds the Express app without starting it listening — used both by
 // src/index.js (real server) and by the tests (ephemeral server on a random
@@ -15,6 +16,9 @@ export function createApp() {
   const ORIGIN = process.env.CORS_ORIGIN || '*';
 
   app.set('trust proxy', 1);
+  app.use('/api/v1/facturas/ingesta', rateLimit({
+    windowMs:60000,max:120,standardHeaders:true,legacyHeaders:false,
+  }), createIngestionRouter());
   app.use(express.json({ limit: '64kb' }));
   app.use(cookieParser());
   // credentials: true lets the session cookie travel on cross-origin calls
