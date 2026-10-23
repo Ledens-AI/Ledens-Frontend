@@ -22,7 +22,7 @@ export async function createSession(userId, { userAgent, ip } = {}) {
 export async function getSessionUser(token) {
   if (!token) return null;
   const { rows } = await getPool().query(
-    `SELECT u.id, u.email, u.name, u.created_at
+    `SELECT u.id, u.email, u.name, u.role, u.email_verified, u.created_at
        FROM sessions s
        JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = $1 AND s.expires_at > now()`,
@@ -60,4 +60,19 @@ export async function requireAuth(req, res, next) {
   } catch (err) {
     next(err);
   }
+}
+
+export const ROLES = ['admin', 'jefe', 'client'];
+export const ROLE_LABEL = { admin: 'Administrador', jefe: 'Jefe de obra', client: 'Cliente' };
+
+// requireAuth plus a role check: `app.use('/api/admin', requireRole('admin'))`.
+// Logged-out → 401, logged-in with the wrong role → 403.
+export function requireRole(...roles) {
+  return [
+    requireAuth,
+    (req, res, next) => {
+      if (!roles.includes(req.user.role)) return res.status(403).json({ error: 'No tienes permiso para esto' });
+      next();
+    },
+  ];
 }
