@@ -5,6 +5,7 @@ import rateLimit from 'express-rate-limit';
 import contactRouter from './routes/contact.js';
 import authRouter from './routes/auth.js';
 import oauthRouter from './routes/oauth.js';
+import adminRouter from './routes/admin.js';
 import { createIngestionRouter } from './routes/ingestion.js';
 
 // Builds the Express app without starting it listening — used both by
@@ -51,6 +52,7 @@ export function createApp() {
   // fall through to authRouter normally.
   app.use('/api/auth', oauthRouter);
   app.use('/api/auth', authRouter);
+  app.use('/api/admin', adminRouter);
 
   app.use((err, _req, res, _next) => {
     console.error('[error]', err);

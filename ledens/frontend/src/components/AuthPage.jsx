@@ -28,6 +28,8 @@ const AppleIcon = () => (
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
 function isValidEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()); }
+// Only same-site paths ("/plataforma"), never "//evil.com" or absolute URLs.
+function safeRedirect(v) { return v && v.startsWith('/') && !v.startsWith('//') ? v : '/'; }
 
 // The backend redirects a failed Google/Microsoft login back here with one
 // of these codes in ?error=... (see routes/oauth.js) — translate for the UI.
@@ -44,6 +46,7 @@ export default function AuthPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user, refresh } = useAuth();
+  const redirectTo = safeRedirect(searchParams.get('redirect'));
 
   const [mode, setMode]         = useState(searchParams.get('mode') === 'signup' ? 'signup' : 'login');
   const [name, setName]         = useState('');
@@ -57,8 +60,8 @@ export default function AuthPage() {
 
   // Already logged in (e.g. came back here by mistake) — nothing to do.
   useEffect(() => {
-    if (user) navigate('/');
-  }, [user, navigate]);
+    if (user) navigate(redirectTo);
+  }, [user, navigate, redirectTo]);
 
   // A failed Google/Microsoft redirect lands back on /auth with ?error=...
   // — surface it once, on arrival.
@@ -76,7 +79,10 @@ export default function AuthPage() {
 
   function switchMode(m) {
     setMode(m); setErrors({}); setAlert(null);
-    navigate(`/auth${m === 'signup' ? '?mode=signup' : ''}`, { replace: true });
+    const q = new URLSearchParams();
+    if (m === 'signup') q.set('mode', 'signup');
+    if (redirectTo !== '/') q.set('redirect', redirectTo);
+    navigate(`/auth${q.toString() ? `?${q}` : ''}`, { replace: true });
   }
 
   function validate() {
@@ -108,7 +114,7 @@ export default function AuthPage() {
         return;
       }
       await refresh();
-      navigate('/');
+      navigate(redirectTo);
     } catch {
       setAlert({ type: 'error', title: 'Error de conexión', msg: 'No se pudo contactar con el servidor. Inténtalo de nuevo.' });
     } finally {

@@ -1,0 +1,65 @@
+/* Demo data and formatting helpers for the client platform (/plataforma).
+ * Ported verbatim from the Claude Design file "Ledens Plataforma.dc.html".
+ * Everything here is sample content: there is no backend for obras or
+ * presupuestos yet. Users are real — see ./adminData.js. */
+import i1492 from '../../images/IMG_1492.webp';
+import t02 from '../../images/Tilos 57-02.webp';
+import t03 from '../../images/Tilos 57-03.webp';
+import t05 from '../../images/Tilos 57-05.webp';
+import t17 from '../../images/Tilos 57-17.webp';
+
+export const IMG = { i1492, t02, t03, t05, t17 };
+
+const ST={done:{label:'Completada',bg:'#DEF3F0',fg:'#2F6B63',dot:'#55A89D'},prog:{label:'En ejecución',bg:'#E3E7F3',fg:'#3E4D85',dot:'#5567AE'},val:{label:'Pendiente de validación',bg:'#FBF1DE',fg:'#7A4E0E',dot:'#E0A94A'},todo:{label:'No iniciada',bg:'#EDEDEA',fg:'#3A3A38',dot:'#9A9A96'},block:{label:'Bloqueada',bg:'#F8E1E1',fg:'#9E2F2F',dot:'#D14A4A'}};
+const BST={pending:{label:'Pendiente de decisión',bg:'#FBF1DE',fg:'#7A4E0E',dot:'#E0A94A'},accepted:{label:'Aceptado',bg:'#DEF3F0',fg:'#2F6B63',dot:'#55A89D'},expired:{label:'Caducado',bg:'#EDEDEA',fg:'#3A3A38',dot:'#9A9A96'},superseded:{label:'Sustituido por nueva versión',bg:'#EDEDEA',fg:'#3A3A38',dot:'#9A9A96'},rejected:{label:'Rechazado',bg:'#F8E1E1',fg:'#9E2F2F',dot:'#D14A4A'},study:{label:'En estudio',bg:'#E3E7F3',fg:'#3E4D85',dot:'#5567AE'},approved:{label:'Aprobada',bg:'#DEF3F0',fg:'#2F6B63',dot:'#55A89D'}};
+const grp=s=>s.replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+const eur=n=>{const [i,f]=n.toFixed(2).split('.');return grp(i)+','+f+' €';};
+const num=n=>{const s=String(Math.round(n*100)/100).split('.');return grp(s[0])+(s[1]?','+s[1]:'');};
+const P=(code,desc,unit,qty,val,price,status,ps,pe,rs,re,x)=>Object.assign({code,desc,unit,qty,val,price,status,ps,pe,rs,re},x||{});
+const TODAY=new Date(2026,9,21);
+const D=a=>new Date(a[0],a[1],a[2]);
+const days=(a,b)=>Math.round((b-a)/864e5);
+const MES=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+const PH=(phase,date,chapter,desc,img)=>({phase,date,chapter,desc,img:img||'',hasImg:!!img,noImg:!img});
+const OBRAS={
+o1:{id:'o1',name:'Reforma integral de vivienda',short:'Reforma integral',addr:'C/ Martínez de la Rosa, 41 · 3º B · Málaga',type:'Reforma integral · 92 m²',cover:IMG.i1492,start:[2026,8,1],end:[2026,11,18],startS:'1 sep 2026',endS:'18 dic 2026',manager:'Javier Moreno',initials:'JM',status:'En ejecución',upd:'Hoy, 09:40',cert:9120,
+ behind:'El avance físico va por detrás del plazo porque Carpintería y Equipamiento, que suman casi el 40% del importe, se instalan al final. La fecha de entrega se mantiene.',
+ chapters:[
+ {code:'01',name:'Demoliciones',s:0,e:9,items:[P('01.01','Demolición de tabiquería existente','m²',62,62,18,'done','02/09','05/09','02/09','04/09'),P('01.02','Levantado de solado y rodapié','m²',85,85,12,'done','03/09','08/09','03/09','09/09'),P('01.03','Retirada de escombros a vertedero autorizado','ud',4,4,220,'done','05/09','10/09','05/09','10/09')]},
+ {code:'02',name:'Albañilería',s:7,e:53,items:[P('02.01','Tabique de ladrillo hueco doble','m²',48,48,38,'done','08/09','19/09','09/09','18/09'),P('02.02','Recrecido de mortero autonivelante','m²',85,64,16,'prog','22/09','24/10','23/09',''),P('02.03','Ayudas de albañilería a instalaciones','ud',1,0,850,'prog','15/09','15/10','15/09','',{nomeas:true})]},
+ {code:'03',name:'Fontanería',s:21,e:54,items:[P('03.01','Red de agua fría y caliente multicapa','ml',46,30,22,'val','22/09','17/10','24/09','',{pend:46}),P('03.02','Red de desagües en PVC','ml',18,18,19,'done','22/09','03/10','22/09','02/10'),P('03.03','Instalación de plato de ducha','ud',1,0,420,'todo','20/10','25/10','','')]},
+ {code:'04',name:'Electricidad',s:28,e:60,delay:'Retraso estimado de 5 días: cuadro general pendiente de suministro',items:[P('04.01','Circuitos interiores bajo tubo corrugado','ml',210,150,7.5,'prog','29/09','24/10','30/09',''),P('04.02','Puntos de luz y mecanismos','ud',32,12,28,'prog','06/10','31/10','08/10',''),P('04.03','Cuadro general de protección','ud',1,0,540,'block','20/10','24/10','','')]},
+ {code:'05',name:'Revestimientos',s:52,e:80,dep:'Empieza cuando terminen Fontanería y Electricidad',items:[P('05.01','Alicatado porcelánico en baño','m²',26,0,32,'todo','23/10','05/11','',''),P('05.02','Solado porcelánico 60×60','m²',85,0,34,'todo','03/11','20/11','','')]},
+ {code:'06',name:'Carpintería',s:70,e:92,items:[P('06.01','Puerta de paso lacada en blanco','ud',6,0,310,'todo','10/11','25/11','',''),P('06.02','Armario empotrado a medida','ud',1,0,1450,'todo','17/11','02/12','','')]},
+ {code:'07',name:'Pintura',s:85,e:100,items:[P('07.01','Pintura plástica lisa en paredes y techos','m²',240,0,8.5,'todo','25/11','10/12','','')]},
+ {code:'08',name:'Equipamiento',s:92,e:108,items:[P('08.01','Mobiliario de cocina con encimera','ud',1,0,6800,'todo','02/12','16/12','',''),P('08.02','Sanitarios y grifería','ud',1,0,1200,'todo','10/12','18/12','','')]}],
+ milestones:[['Inicio de obra','1 sep','done'],['Demoliciones terminadas','10 sep','done'],['Instalaciones cerradas','31 oct','now'],['Revestimientos terminados','20 nov','next'],['Carpintería y pintura','10 dic','next'],['Entrega de llaves','18 dic','next']],
+ photos:[PH('Antes','28 ago','Estado inicial','Salón antes de la demolición'),PH('Antes','28 ago','Estado inicial','Cocina original'),PH('Durante','10 sep','Demoliciones','Demolición terminada, vivienda diáfana'),PH('Durante','18 sep','Albañilería','Nueva tabiquería del dormitorio'),PH('Durante','14 oct','Fontanería','Red multicapa en cocina'),PH('Durante','21 oct','Electricidad','Rozas y tubo corrugado en salón')],
+ docs:[['ri-file-list-3-line','PRE-2026-014 v3 · Presupuesto aceptado','Presupuesto','28 ago','ok'],['ri-file-shield-2-line','Contrato de ejecución de obra','Contrato','29 ago','ok'],['ri-draft-line','Planos de estado reformado','Planos','30 ago','ok'],['ri-file-text-line','Acta de replanteo · Revestimientos','Acta','20 oct','review'],['ri-file-chart-line','Certificación nº 1 · Septiembre','Certificación','2 oct','ok']],
+ mods:[{id:'MOD-01',title:'Punto de luz adicional en pasillo',amount:168,status:'approved',date:'Aprobada por ti el 3 oct',reason:'Solicitado por ti durante la visita del 1 oct.',impact:'Sin impacto en plazo'},{id:'MOD-02',title:'Plato de ducha extraplano 140×80 en lugar de 120×80',amount:385,status:'pending',date:'Propuesta el 14 oct · decide antes del 24 oct',reason:'Tras la demolición el hueco permite un plato mayor y mejora la accesibilidad del baño.',impact:'Sin impacto en plazo'},{id:'MOD-03',title:'Rozas adicionales en salón para televisión',amount:240,status:'rejected',date:'Rechazada por ti el 9 oct',reason:'Propuesta por el electricista para ocultar cableado.',impact:'+1 día'}],
+ activity:[['Hoy, 21 oct',[['09:40','ri-camera-line','Javier Moreno añadió 3 fotografías en Electricidad'],['09:12','ri-checkbox-circle-line','Avance validado en Recrecido de mortero: 64 de 85 m²']]],['20 oct',[['17:05','ri-error-warning-line','Incidencia: cuadro general bloqueado por retraso de suministro. Nueva fecha prevista: 29 oct'],['12:30','ri-file-add-line','Documento publicado: Acta de replanteo · Revestimientos']]],['14 oct',[['10:22','ri-edit-2-line','Ledens propone la modificación MOD-02 (+385,00 €)']]],['3 oct',[['18:10','ri-check-double-line','Aprobaste MOD-01: punto de luz adicional (+168,00 €)'],['13:00','ri-checkbox-circle-line','Partida completada: Red de desagües en PVC']]],['1 sep',[['08:00','ri-flag-line','Obra iniciada']]]]},
+o2:{id:'o2',name:'Baño principal',short:'Baño principal',addr:'Av. de la Paloma, 12 · 1º A · Málaga',type:'Baño · 7 m²',cover:IMG.t03,start:[2026,8,22],end:[2026,9,31],startS:'22 sep 2026',endS:'31 oct 2026',manager:'Javier Moreno',initials:'JM',status:'Fase final',upd:'Ayer, 18:20',cert:4100,behind:'',
+ chapters:[
+ {code:'01',name:'Demoliciones',s:0,e:4,items:[P('01.01','Demolición de alicatado y solado','m²',24,24,14,'done','22/09','25/09','22/09','25/09')]},
+ {code:'02',name:'Fontanería',s:4,e:10,items:[P('02.01','Redes de agua y desagüe del baño','ud',1,1,780,'done','26/09','02/10','26/09','01/10')]},
+ {code:'03',name:'Revestimientos',s:10,e:24,items:[P('03.01','Alicatado porcelánico','m²',21,21,32,'done','02/10','13/10','02/10','12/10'),P('03.02','Solado porcelánico antideslizante','m²',7,7,34,'done','13/10','16/10','13/10','16/10')]},
+ {code:'04',name:'Equipamiento',s:24,e:36,items:[P('04.01','Mueble de lavabo y espejo','ud',1,1,890,'done','16/10','20/10','16/10','19/10'),P('04.02','Plato de ducha y mampara','ud',1,0,1150,'prog','20/10','27/10','20/10',''),P('04.03','Grifería termostática','ud',3,2,140,'prog','22/10','28/10','20/10','')]},
+ {code:'05',name:'Pintura',s:34,e:39,items:[P('05.01','Pintura antihumedad en techo','m²',7,0,12,'todo','28/10','31/10','','')]}],
+ milestones:[['Inicio de obra','22 sep','done'],['Revestimientos terminados','16 oct','done'],['Equipamiento instalado','28 oct','now'],['Entrega','31 oct','next']],
+ photos:[PH('Antes','19 sep','Estado inicial','Baño original con bañera'),PH('Durante','12 oct','Revestimientos','Alicatado y plato instalados',IMG.t03),PH('Durante','19 oct','Equipamiento','Mueble de lavabo y espejo',IMG.t02),PH('Durante','20 oct','Equipamiento','Detalle de mueble suspendido',IMG.t05)],
+ compareAfter:IMG.t02,
+ docs:[['ri-file-list-3-line','PRE-2026-019 v1 · Presupuesto aceptado','Presupuesto','15 sep','ok'],['ri-file-shield-2-line','Contrato de ejecución de obra','Contrato','17 sep','ok']],
+ mods:[],
+ activity:[['Ayer, 20 oct',[['18:20','ri-camera-line','Javier Moreno añadió 2 fotografías en Equipamiento'],['11:00','ri-checkbox-circle-line','Partida completada: Mueble de lavabo y espejo']]],['16 oct',[['17:30','ri-checkbox-circle-line','Capítulo completado: Revestimientos']]],['22 sep',[['08:00','ri-flag-line','Obra iniciada']]]]}
+};
+const B031={ref:'PRE-2026-031',ver:'v1',name:'Terraza y cerramiento de aluminio',addr:'C/ Martínez de la Rosa, 41 · 3º B · Málaga',chapters:[['Demoliciones y preparación',[['Desmontaje de barandilla existente','ml',8,22],['Retirada de escombros','ud',1,180]]],['Carpintería de aluminio',[['Cerramiento corredera RPT de 3 hojas','ud',1,2650],['Vidrio bajo emisivo 4/16/4','m²',7.2,58]]],['Albañilería',[['Recrecido y solado de terraza','m²',9,62]]]],
+ conditions:['Validez de la oferta: 30 días, hasta el 9 nov 2026','Forma de pago: 40% al inicio y 60% a la finalización','Plazo estimado: 10 días laborables desde el inicio','Garantía de la carpintería: 3 años'],
+ exclusions:['Licencia municipal y tasas','Tratamiento de fachada exterior','Persianas motorizadas'],
+ annex:['Ficha técnica del perfil RPT','Plano de cotas de la terraza'],
+ versions:[['v1','Enviada el 10 oct 2026','Vigente']]};
+const PERMS=[['Usuarios',[['users.read','Ver usuarios y perfiles'],['users.edit','Editar datos de usuarios'],['business.users.manage','Gestión de altas y permisos de negocio','sens']]],['Clientes',[['clients.read.assigned','Ver clientes asignados'],['clients.read.all','Ver todos los clientes']]],['Presupuestos',[['budgets.read','Ver presupuestos'],['budgets.manage','Crear y editar presupuestos']]],['Obras',[['works.read.assigned','Ver obras asignadas'],['works.progress.submit','Registrar avance'],['works.progress.publish','Validar y publicar avance','sens'],['works.photos.upload','Subir fotografías']]],['Documentos',[['docs.read','Ver documentos'],['docs.publish','Publicar documentos']]],['Administración',[['audit.read','Consultar auditoría'],['roles.manage','Gestionar roles y administradores','admin']]]];
+const ALLP=PERMS.flatMap(g=>g[1].map(p=>p[0]));
+const BASE={admin:ALLP,jefe:['works.read.assigned','works.progress.submit','works.photos.upload','docs.read','clients.read.assigned'],comercial:['clients.read.assigned','budgets.read','budgets.manage'],client:[]};
+const ITYPE={'Automática':['#E3E7F3','#3E4D85'],'Revisión humana':['#FBF1DE','#7A4E0E'],'Documental':['#FBE0EA','#B84371'],'Perfil':['#EDEDEA','#3A3A38']};
+
+export { ST, BST, grp, eur, num, P, TODAY, D, days, MES, PH, OBRAS, B031, PERMS, ALLP, BASE, ITYPE };

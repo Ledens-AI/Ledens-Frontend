@@ -44,7 +44,7 @@ router.post('/register', async (req, res) => {
   try {
     const passwordHash = hashPassword(password);
     const { rows } = await getPool().query(
-      'INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3) RETURNING id, email, name, created_at',
+      'INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3) RETURNING id, email, name, role, created_at',
       [email.trim(), name.trim(), passwordHash],
     );
     const user = rows[0];
@@ -65,7 +65,7 @@ router.post('/login', loginLimiter, async (req, res) => {
   }
   try {
     const { rows } = await getPool().query(
-      'SELECT id, email, name, password_hash FROM users WHERE lower(email) = lower($1)',
+      'SELECT id, email, name, role, password_hash, created_at FROM users WHERE lower(email) = lower($1)',
       [email.trim()],
     );
     const user = rows[0];
@@ -77,7 +77,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     }
     const { token } = await createSession(user.id, { userAgent: req.get('user-agent'), ip: req.ip });
     res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
-    res.json({ user: { id: user.id, email: user.email, name: user.name, created_at: user.created_at } });
+    res.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role, created_at: user.created_at } });
   } catch (err) {
     console.error('[auth] login failed', err);
     res.status(500).json({ error: 'No se pudo iniciar sesión' });
