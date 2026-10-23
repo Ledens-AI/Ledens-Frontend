@@ -144,6 +144,16 @@ test('line extraction retains distinct tax rates and missing tax stays pending',
  const lines=extractLines({analyzeResult:{documents:[{fields:{Items:{valueArray:[{valueObject:{Amount:{valueCurrency:{amount:100},confidence:.99},Tax:{valueCurrency:{amount:21}}}},{valueObject:{Amount:{valueCurrency:{amount:100}},Tax:{valueCurrency:{amount:10}}}},{valueObject:{Amount:{valueCurrency:{amount:100}}}}]}}}]}});
  assert.deepEqual(lines.map(l=>l.vat_amount),[21,10,null]);
 });
+test('missing line tax creates one pending document envelope and replay cannot duplicate it',async()=>{
+ const d=await doc('-121');await storeInvoiceLines(pool,d,[{line_number:1,description:'Material pendiente',net_amount:100,vat_amount:null}],{direction:'Pagar',currency:'EUR'});
+ await storeInvoiceLines(pool,d,[{line_number:1,description:'Material pendiente',net_amount:100,vat_amount:null}],{direction:'Pagar',currency:'EUR'});
+ const records=(await db.query('SELECT * FROM ledens.financial_records WHERE document_id=$1',[d])).rows;assert.equal(records.length,1);assert.equal(records[0].gross_amount,'121');assert.equal(records[0].status,'pending');assert.equal(records[0].category,'unclassified');
+});
+test('zeroed source cannot retain approved economics or receive assignments',async()=>{
+ const d=await doc('-121');let r=await material('-121',d);r=(await replace(r,[share(p1,'121')])).records[0];await recognize(r,{net_amount:'100',vat_amount:'21'});
+ await db.query('UPDATE ledens.material_expenses SET total=0 WHERE id=$1',[r.material_id]);r=await service.record(pool,r.id,admin);assert.equal(r.source_valid,false);assert.equal(r.status,'pending');assert.equal(r.allocations.length,0);
+ await assert.rejects(replace(r,[share(p1,'121')]),{message:'source_requires_correction'});
+});
 test('PostgreSQL concurrent assignments serialize and reject the stale writer',{skip:!process.env.FINANCE_TEST_DATABASE_URL},async()=>{
  const r=await material();const results=await Promise.allSettled([replace(r,[share(p1,'1210')]),replace(r,[share(p2,'1210')])]);
  assert.equal(results.filter(x=>x.status==='fulfilled').length,1);assert.equal(results.find(x=>x.status==='rejected').reason.message,'stale_record');

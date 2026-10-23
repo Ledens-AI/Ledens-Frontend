@@ -34,7 +34,19 @@ export class FinanceService {
    const allocations=(await c.query('SELECT a.*,p.name project_name FROM ledens.project_financial_allocations a JOIN ledens.projects p ON p.id=a.project_id WHERE record_id=$1 ORDER BY project_id',[id])).rows;
    if(allocations.length)for(const a of allocations)await this.permission(c,user,a.project_id,{write});
    else await this.permission(c,user,null,{write,unassigned:true});
-   return {...r,allocations,suggestions:await projectSuggestions(c,r,user)};
+   let document=null;
+   if(r.document_id){
+     const d=(await c.query('SELECT id,numerodocumento,document_on,tercero,total,base_amount,vat_amount,enlacearchivo FROM ledens.documents WHERE id=$1',[r.document_id])).rows[0];
+     document={id:d.id,numerodocumento:d.numerodocumento,document_on:d.document_on};
+     try{await this.documentPermission(c,user,r.document_id);document=d;}catch(e){if(!(e instanceof FinanceError&&e.status===403))throw e;}
+   }
+   return {...r,document,allocations,suggestions:await projectSuggestions(c,r,user)};
+ }
+ async documentPermission(c,user,documentId,write=false){
+   const projects=(await c.query(`SELECT DISTINCT a.project_id FROM ledens.financial_records r
+     LEFT JOIN ledens.project_financial_allocations a ON a.record_id=r.id WHERE r.document_id=$1`,[documentId])).rows;
+   if(!projects.length)await this.permission(c,user,null,{write,unassigned:true});
+   for(const p of projects)await this.permission(c,user,p.project_id,{write,unassigned:p.project_id===null});
  }
  async list(user,filters){
    const {limit=50,offset=0,type,status,project_id,unassigned,search,from,to,min,max,sort='date_desc'}=filters;
@@ -48,7 +60,11 @@ export class FinanceService {
     coalesce((SELECT sum(a.allocated_amount) FROM ledens.project_financial_allocations a WHERE a.record_id=r.id),0) allocated_amount,
     r.gross_amount-coalesce((SELECT sum(a.allocated_amount) FROM ledens.project_financial_allocations a WHERE a.record_id=r.id),0) unassigned_amount,
     d.numerodocumento document_number,
-    EXISTS(SELECT 1 FROM ledens.bank_document_allocations b WHERE b.document_id=r.document_id AND b.state='Confirmado') reconciled
+    EXISTS(SELECT 1 FROM ledens.bank_document_allocations b WHERE b.document_id=r.document_id AND b.state='Confirmado') reconciled,
+    CASE WHEN EXISTS(SELECT 1 FROM ledens.bank_document_allocations b WHERE b.document_id=r.document_id AND b.state IS DISTINCT FROM 'Confirmado') THEN 'review'
+      WHEN abs(d.total)=coalesce((SELECT sum(abs(b.allocated_amount)) FROM ledens.bank_document_allocations b WHERE b.document_id=r.document_id AND b.state='Confirmado'),0) AND d.total<>0 THEN 'matched'
+      WHEN EXISTS(SELECT 1 FROM ledens.bank_document_allocations b WHERE b.document_id=r.document_id AND b.state='Confirmado') THEN 'partial'
+      WHEN r.bank_movement_id IS NOT NULL THEN 'bank_recorded' ELSE 'unmatched' END reconciliation_status
     FROM ledens.financial_records r LEFT JOIN ledens.documents d ON d.id=r.document_id
     WHERE ($1 OR (
       NOT EXISTS(SELECT 1 FROM ledens.project_financial_allocations a WHERE a.record_id=r.id AND NOT EXISTS
@@ -161,7 +177,7 @@ export class FinanceService {
    return (await this.pool.query('SELECT * FROM ledens.finance_events WHERE record_id=$1 ORDER BY id DESC LIMIT $2 OFFSET $3',[id,limit,offset])).rows;
  }
  async lines(user,documentId,{limit=50,offset=0}={}){
-   await this.permission(this.pool,user,null,{unassigned:true});
+   await this.documentPermission(this.pool,user,documentId);
    return (await this.pool.query(`SELECT l.*,r.id record_id,r.status FROM ledens.invoice_lines l
     LEFT JOIN ledens.financial_records r ON r.invoice_line_id=l.id WHERE l.document_id=$1 ORDER BY l.line_number LIMIT $2 OFFSET $3`,[documentId,limit,offset])).rows;
  }
@@ -170,6 +186,7 @@ export class FinanceService {
     typeof body.description!=='string'||!body.description.trim()||body.description.length>1000||typeof body.reason!=='string'||body.reason.trim().length<5)fail(400,'invalid_line');
    return this.transaction(async c=>{
      await this.permission(c,user,null,{write:true,unassigned:true});
+     await this.documentPermission(c,user,documentId,true);
      const d=(await c.query('SELECT * FROM ledens.documents WHERE id=$1 FOR UPDATE',[documentId])).rows[0];
      if(!d)fail(404,'document_not_found');
      if(absolute(cents(body.gross_amount))>absolute(cents(d.total)||0n))fail(409,'document_amount_exceeded');
@@ -237,7 +254,8 @@ export class FinanceService {
     SELECT v.*,b.project_id FROM ledens.budgets b JOIN ledens.budget_versions v ON v.budget_id=b.id
     WHERE b.project_id=$1 AND v.state='accepted'
       AND (SELECT decision FROM ledens.budget_approvals a WHERE a.version_id=v.id ORDER BY decided_at DESC,id DESC LIMIT 1)='approved'
-   ), current_versions AS (SELECT DISTINCT ON(budget_id) budget_id,id FROM approved ORDER BY budget_id,version_number DESC), valid AS (
+   ), current_versions AS (SELECT DISTINCT ON(budget_id) budget_id,id FROM approved ORDER BY budget_id,version_number DESC),
+    initial_versions AS (SELECT DISTINCT ON(budget_id) budget_id,id FROM approved ORDER BY budget_id,version_number), valid AS (
     SELECT b.id budget_id,v.version_number,v.id,
       (SELECT sum(l.total) FROM ledens.budget_lines l WHERE l.version_id=v.id) amount
     FROM ledens.budgets b JOIN ledens.budget_versions v ON v.budget_id=b.id
@@ -246,12 +264,12 @@ export class FinanceService {
       AND (SELECT decision FROM ledens.budget_approvals a WHERE a.version_id=v.id ORDER BY decided_at DESC,id DESC LIMIT 1)='approved'
       AND f.lines_hash=(SELECT md5(coalesce(jsonb_agg(jsonb_build_array(l.id,l.quantity,l.unit_price,l.total) ORDER BY l.id)::text,'[]')) FROM ledens.budget_lines l WHERE l.version_id=v.id)
    ), latest AS (SELECT v.budget_id,v.amount FROM valid v JOIN current_versions c ON c.id=v.id),
-    initial AS (SELECT DISTINCT ON(budget_id) budget_id,amount FROM valid ORDER BY budget_id,version_number)
+    initial AS (SELECT v.budget_id,v.amount FROM valid v JOIN initial_versions i ON i.id=v.id)
    SELECT CASE WHEN count(*)=(SELECT count(*) FROM current_versions) THEN sum(latest.amount)::text END budget,
-    CASE WHEN count(*)=(SELECT count(*) FROM current_versions) THEN sum(initial.amount)::text END budget_base,
-    CASE WHEN count(*)=(SELECT count(*) FROM current_versions) THEN (sum(latest.amount)-sum(initial.amount))::text END budget_approved_revisions,
+    CASE WHEN count(*)=(SELECT count(*) FROM current_versions) AND count(initial.amount)=count(*) THEN sum(initial.amount)::text END budget_base,
+    CASE WHEN count(*)=(SELECT count(*) FROM current_versions) AND count(initial.amount)=count(*) THEN (sum(latest.amount)-sum(initial.amount))::text END budget_approved_revisions,
     CASE WHEN count(*)=0 THEN 'no_verified_approved_net_budget' WHEN count(*)<(SELECT count(*) FROM current_versions) THEN 'incomplete_budget_verification' ELSE 'verified_approved_net' END budget_status
-    FROM latest JOIN initial USING(budget_id)`,[projectId])).rows[0];
+    FROM latest LEFT JOIN initial USING(budget_id)`,[projectId])).rows[0];
  }
  async verifyBudget(user,versionId,body){
    if(body.amount_basis!=='net'||typeof body.reason!=='string'||body.reason.trim().length<5||body.reason.length>1000)fail(400,'invalid_budget_basis');

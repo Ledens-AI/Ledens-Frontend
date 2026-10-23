@@ -32,7 +32,11 @@ const schemas={
 schemas.Record.properties.allocations={type:'array',items:{oneOf:[ref('Allocation'),object({project_id:id,project_name:nullable(text),amount:money},['project_id','project_name','amount'])]}};
 const page=name=>{const schemaName=name+'Page';schemas[schemaName]=object({items:arr(ref(name)),limit:integer,offset:integer,next_offset:nullable(integer)},['items','limit','offset','next_offset']);return schemaName;};
 schemas.Record.properties.source_valid={type:"boolean"};
+schemas.Document=object({id,numerodocumento:nullable(text),document_on:nullable(date),tercero:nullable(text),total:nullable(money),base_amount:nullable(money),vat_amount:nullable(money),enlacearchivo:nullable(text)},['id']);
+schemas.Record.properties.document={...schemas.Document,nullable:true};
+schemas.Record.properties.reconciliation_status={type:"string",enum:["unmatched","partial","matched","review","bank_recorded"]};
 Object.assign(schemas.Summary.properties,{pending_collections:money,pending_payments:money,budget_base:nullable(money),budget_approved_revisions:nullable(money)});
+schemas.PermissionRevocation=object({user_id:id,project_id:nullable(id),reason:{type:'string',minLength:5}},['user_id','project_id','reason']);
 schemas.BudgetBasis=object({amount_basis:{type:'string',enum:['net']},reason:{type:'string',minLength:5,maxLength:1000}},['amount_basis','reason']);
 for(const name of ['Project','Record','Event','Line','Evolution'])page(name);
 schemas.AllocationList=object({items:arr(ref('Allocation'))},['items']);
@@ -64,6 +68,7 @@ endpoint('/api/finance/documents/{id}/lines','post','Register a reviewed line in
 for(const route of ['financial-summary','profitability'])endpoint('/api/projects/{projectId}/'+route,'get','Project direct result and treasury, calculated separately','Summary');
 endpoint('/api/projects/{projectId}/financial-transactions','get','Project financial records','RecordPage',null,{paged:true});
 endpoint('/api/projects/{projectId}/financial-evolution','get','Monthly recognized revenue and direct costs','EvolutionPage',null,{paged:true});
+endpoint('/api/finance/permissions','delete','Admin revokes financial permission without deleting audit history','Updated','PermissionRevocation');
 endpoint('/api/finance/permissions','put','Admin grants financial access without changing authentication roles','Updated','Permission');
 endpoint('/api/finance/budget-versions/{id}/basis','put','Confirm approved budget lines are net of VAT; source changes invalidate this confirmation','Updated','BudgetBasis');
 const api={openapi:'3.0.3',info:{title:'Ledens Project Finance API',version:'1.0.0',description:'Uses existing ledens_session cookie. All writes require Origin equal to CORS_ORIGIN. Financial write grants are explicit; client role is always forbidden. Every bulk amount uses the source record gross basis, including sign. Only approved EUR records affect metrics. No automatic project assignment from ambiguous OCR.'},servers:[{url:'https://ambitious-island-05d1d8a03.2.azurestaticapps.net'}],security:[{session:[]}],paths,components:{securitySchemes:{session:{type:'apiKey',in:'cookie',name:'ledens_session'}},schemas}};

@@ -67,6 +67,16 @@ export function createFinanceRouter({service,authorize=requireAuth,origin=proces
      return {updated:true};
    });res.json(result);
  }));
+ router.delete('/finance/permissions',handle(async(req,res)=>{
+   if(req.user.role!=='admin')throw new FinanceError(403,'finance_forbidden');
+   const b=req.body||{};
+   if(!uuid(b.user_id)||(b.project_id!==null&&!uuid(b.project_id))||typeof b.reason!=='string'||b.reason.trim().length<5)throw new FinanceError(400,'invalid_permission');
+   res.json(await get().transaction(async c=>{
+     const before=(await c.query('DELETE FROM ledens.finance_project_permissions WHERE user_id=$1 AND project_id IS NOT DISTINCT FROM $2::uuid RETURNING *',[b.user_id,b.project_id])).rows;
+     await c.query(`INSERT INTO public.audit_log(actor_id,actor_label,action,target_id,detail) VALUES($1,$2,'finance_permission_revoked',$3,$4)`,[req.user.id,req.user.email||req.user.id,b.user_id,JSON.stringify({before,reason:b.reason})]);
+     return {updated:true};
+   }));
+ }));
  router.use((e,req,res,next)=>{
    if(e instanceof FinanceError)return res.status(e.status).json({error:e.message});
    if(['23503','23505','23514','40001','40P01'].includes(e.code))return res.status(409).json({error:'financial_conflict'});

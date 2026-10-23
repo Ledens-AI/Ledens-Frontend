@@ -41,7 +41,7 @@ Approval refuses mixed legacy/invoice-line representations of a document and tot
 
 ## Ingestion and classification
 
-The existing Logic App polls SharePoint Landing facturas every five minutes. Originals archive to the quarter of the invoice date. API bearer authentication, content hashing, duplicate-source protection, OCR limits and archive safeguards remain intact. OCR now retains individual concepts and confidence evidence. Known net+VAT lines create pending financial records; incomplete lines are exposed separately for human completion. `POST /finance/documents/{id}/lines` can register a reviewed gross amount for an incomplete line. It is idempotent by (document_id,line_number).
+The existing Logic App polls SharePoint Landing facturas every five minutes. Originals archive to the quarter of the invoice date. API bearer authentication, content hashing, duplicate-source protection, OCR limits and archive safeguards remain intact. OCR now retains individual concepts and confidence evidence. Known net+VAT lines create pending financial records; incomplete lines are exposed separately for human completion. If no line has a reliable gross amount, one reserved document-review envelope (line 10000) keeps the invoice visible in the pending queue without approving or duplicating cost. `POST /finance/documents/{id}/lines` can register a reviewed gross amount for an incomplete line. It is idempotent by (document_id,line_number).
 
 No invoice is classified as materials solely because it was received. Existing typed source tables provide their category, issued invoices can be recognized as revenue, and new invoice concepts remain unclassified until reviewed. Exact project-code references produce suggestions with evidence and no invented confidence percentage. OCR suggestions never write a project automatically in this initial policy. Multiple candidates remain pending.
 
@@ -55,7 +55,7 @@ Contract: [project-finance.openapi.json](project-finance.openapi.json). Regenera
 
 1. GET /api/projects for selectors (UUID id; display code/name).
 2. GET /api/finance/unassigned or /records?status=pending for review. Filter by type, project_id, search, from/to, min/max, sort; limit <=100, offset <=100000. Specialized materials/worker-payments/customer-payments routes use the same shape.
-3. GET /api/finance/records/{id} gives current version, shares and authorized suggestions. IDs here are financial record IDs, with explicit material_id/worker_payment_id/customer_payment_id/invoice_line_id identifying original rows.
+3. GET /api/finance/records/{id} gives current version, source document header/link, shares and authorized suggestions. Full document amounts and link require access to all its financial records; otherwise only the identifier/date/number are shown. IDs here are financial record IDs, with explicit material_id/worker_payment_id/customer_payment_id/invoice_line_id identifying original rows.
 4. PATCH /api/finance/records/{id}/project for full single-project assignment or NULL removal. Always send version, request_id and reason.
 5. POST /api/finance/allocations/bulk replaces each listed record's entire distribution. Empty list clears it; incomplete sums remain unassigned. Do not send incremental deltas. Reuse the same request_id/body on network retry; obtain a fresh version after 409.
 6. PATCH /recognition for reviewed accounting/tax treatment. Project assignment alone does not approve economics.
@@ -72,7 +72,7 @@ A 1,210 gross / 1,000 net invoice split 605/605 gives each project 500 net cost.
 
 ## Authorization and deployment
 
-Admin has full financial access. Client is always denied. Jefes/other existing authenticated non-client roles need explicit per-project finance_project_permissions; can_write controls changes. Global NULL-project grants with can_review_unassigned enable the central pending queue. Shared records require access to every current project. Grant/revoke write/queue access using admin-only PUT /api/finance/permissions; set booleans false to remove write/queue rights. Existing general project_access does not by itself disclose finance. No auth replacement or automatic elevation.
+Admin has full financial access. Client is always denied. Jefes/other existing authenticated non-client roles need explicit per-project finance_project_permissions; can_write controls changes. Global NULL-project grants with can_review_unassigned enable the central pending queue. Shared records require access to every current project. Grant/update access using admin-only PUT /api/finance/permissions; DELETE on the same path revokes the grant. Both actions are audited. Existing general project_access does not by itself disclose finance. No auth replacement or automatic elevation.
 
 Environment: existing DATABASE_URL and TLS configuration; existing CORS_ORIGIN must be the exact frontend origin for writes. Existing OCR/ingestion variables remain. Optional BRIDGE_ENABLED=true activates automation; BRIDGE_BUSINESS_TAX_ID defaults to verified company B19753805. No new financial service secrets.
 

@@ -26,6 +26,17 @@ export async function storeInvoiceLines(c,documentId,lines,{currency,direction}=
     SELECT $1,d.id,d.document_on,$3,$4,$5 FROM ledens.documents d WHERE d.id=$2`,
     [row.id,documentId,line.description,decimal(gross),line.currency||currency]);
  }
+ // Keep documents with incomplete line tax in the review queue. A reserved
+ // envelope is a review source, not an additional approved cost.
+ const d=(await c.query('SELECT * FROM ledens.documents WHERE id=$1',[documentId])).rows[0];
+ if(d&&cents(d.total)!==null&&cents(d.total)!==0n&&!(await c.query('SELECT 1 FROM ledens.financial_records WHERE document_id=$1 LIMIT 1',[documentId])).rows[0]){
+   const gross=d.tipo==='Pagar'?-cents(d.total):cents(d.total);
+   const l=(await c.query(`INSERT INTO ledens.invoice_lines(document_id,line_number,description,evidence)
+    VALUES($1,10000,'Documento pendiente de desglose','{"kind":"document_review_envelope"}')
+    ON CONFLICT(document_id,line_number) DO NOTHING RETURNING id`,[documentId])).rows[0];
+   if(l)await c.query(`INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,counterparty,gross_amount,currency)
+    VALUES($1,$2,$3,'Documento pendiente de desglose',$4,$5,$6)`,[l.id,documentId,d.document_on,d.tercero,decimal(gross),currency||null]);
+ }
 }
 export async function projectSuggestions(c,record,user){
  const projects=(await c.query(`SELECT id,project_id code,name FROM ledens.projects

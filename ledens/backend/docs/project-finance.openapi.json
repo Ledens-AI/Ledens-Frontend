@@ -2457,8 +2457,108 @@
       }
     },
     "/api/finance/permissions": {
-      "put": {
+      "delete": {
         "operationId": "finance19",
+        "summary": "Admin revokes financial permission without deleting audit history",
+        "tags": [
+          "Finance"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Updated"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameter or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or Origin denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Record/project not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale version, allocation capacity, duplicate representation or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database/service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermissionRevocation"
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "finance20",
         "summary": "Admin grants financial access without changing authentication roles",
         "tags": [
           "Finance"
@@ -2560,7 +2660,7 @@
     },
     "/api/finance/budget-versions/{id}/basis": {
       "put": {
-        "operationId": "finance20",
+        "operationId": "finance21",
         "summary": "Confirm approved budget lines are net of VAT; source changes invalidate this confirmation",
         "tags": [
           "Finance"
@@ -3014,6 +3114,65 @@
           },
           "source_valid": {
             "type": "boolean"
+          },
+          "document": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "numerodocumento": {
+                "type": "string",
+                "nullable": true
+              },
+              "document_on": {
+                "type": "string",
+                "format": "date",
+                "nullable": true
+              },
+              "tercero": {
+                "type": "string",
+                "nullable": true
+              },
+              "total": {
+                "type": "string",
+                "pattern": "^-?\\d+(\\.\\d+)?$",
+                "description": "Exact decimal; never coerce to a binary float for persistence.",
+                "nullable": true
+              },
+              "base_amount": {
+                "type": "string",
+                "pattern": "^-?\\d+(\\.\\d+)?$",
+                "description": "Exact decimal; never coerce to a binary float for persistence.",
+                "nullable": true
+              },
+              "vat_amount": {
+                "type": "string",
+                "pattern": "^-?\\d+(\\.\\d+)?$",
+                "description": "Exact decimal; never coerce to a binary float for persistence.",
+                "nullable": true
+              },
+              "enlacearchivo": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false,
+            "nullable": true
+          },
+          "reconciliation_status": {
+            "type": "string",
+            "enum": [
+              "unmatched",
+              "partial",
+              "matched",
+              "review",
+              "bank_recorded"
+            ]
           }
         },
         "required": [
@@ -3545,6 +3704,78 @@
         },
         "required": [
           "updated"
+        ],
+        "additionalProperties": false
+      },
+      "Document": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "numerodocumento": {
+            "type": "string",
+            "nullable": true
+          },
+          "document_on": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "tercero": {
+            "type": "string",
+            "nullable": true
+          },
+          "total": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal; never coerce to a binary float for persistence.",
+            "nullable": true
+          },
+          "base_amount": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal; never coerce to a binary float for persistence.",
+            "nullable": true
+          },
+          "vat_amount": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal; never coerce to a binary float for persistence.",
+            "nullable": true
+          },
+          "enlacearchivo": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "PermissionRevocation": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 5
+          }
+        },
+        "required": [
+          "user_id",
+          "project_id",
+          "reason"
         ],
         "additionalProperties": false
       },

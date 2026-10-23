@@ -1,0 +1,50 @@
+name: Backend finance and authentication tests
+on:
+  pull_request:
+    paths: ['ledens/backend/**', '.github/workflows/backend-finance-tests.yml']
+  push:
+    branches: [main]
+    paths: ['ledens/backend/**', '.github/workflows/backend-finance-tests.yml']
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ledens_test
+          POSTGRES_PASSWORD: test_database_only
+          POSTGRES_DB: ledens_auth_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ledens_test -d ledens_auth_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: ledens/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ledens/backend/package-lock.json
+      - run: npm ci
+      - name: Isolated ingestion, Bridge and finance tests
+        run: npm test
+      - name: Prepare empty accounting test schema
+        env:
+          DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_auth_test
+          ALLOW_TEST_DATABASE_SETUP: 'yes'
+        run: node src/scripts/prepare-accounting-test.js
+      - name: Existing authentication, OAuth, roles and migration regression
+        env:
+          DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_auth_test
+        run: node --test test/auth.test.js test/admin.test.js test/db.test.js test/oauth-google.test.js test/oauth-microsoft.test.js
+      - name: Financial transactions and concurrency on PostgreSQL 16
+        env:
+          DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_finance_test
+          FINANCE_TEST_DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_finance_test
+        run: node --test test/finance.test.js
