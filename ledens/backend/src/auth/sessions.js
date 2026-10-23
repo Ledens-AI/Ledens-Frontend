@@ -68,11 +68,14 @@ export const ROLE_LABEL = { admin: 'Administrador', jefe: 'Jefe de obra', client
 // requireAuth plus a role check: `app.use('/api/admin', requireRole('admin'))`.
 // Logged-out → 401, logged-in with the wrong role → 403.
 export function requireRole(...roles) {
-  return [
-    requireAuth,
-    (req, res, next) => {
-      if (!roles.includes(req.user.role)) return res.status(403).json({ error: 'No tienes permiso para esto' });
-      next();
-    },
-  ];
+  return [requireAuth, checkRole(...roles)];
+}
+
+// The role half of requireRole, for routers whose tests supply req.user
+// without a database session.
+export function checkRole(...roles) {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) return res.status(403).json({ error: 'No tienes permiso para esto' });
+    next();
+  };
 }

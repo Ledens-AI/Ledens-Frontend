@@ -16,6 +16,9 @@
 .plat a:hover { color: #3E4D85; text-decoration: underline; }
 .plat h1, .plat h2, .plat h3, .plat p { margin: 0; }
 
+/* Sidebar group label (Gestión financiera, for admins and jefes de obra). */
+.plat-nav-group { padding: 14px 12px 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #9A9A96; }
+
 /* The design is laid out for desktop. Below 900px the sidebar stacks on top
    and the top bar wraps (inline styles need !important to be overridden). */
 @media (max-width: 900px) {

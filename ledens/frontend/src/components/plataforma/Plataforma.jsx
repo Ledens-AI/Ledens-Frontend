@@ -12,17 +12,20 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import logo from '../../assets/logo-ledens-isotype.png';
 import { IMG, ST, BST, eur, num, TODAY, D, days, MES, OBRAS, B031, PERMS, BASE, ITYPE } from './data.js';
 import { ROLE_VIEW, ROLE_LABEL, initials, firstName, fmtDate, userRow, signupBars, adminKpis, auditRow } from './adminData.js';
+import { FIN_TABS } from './finanzas/tabs.js';
+const GestionFinanciera = React.lazy(() => import('./finanzas/GestionFinanciera.jsx'));
 import '../../styles/plataforma.css';
 
 const HOME = { client: 'c_home', worker: 'w_home', admin: 'a_home' };
 const PREFIX = { client: 'c_', worker: 'w_', admin: 'a_' };
 
 class PlataformaView extends React.Component {
-  state={role:ROLE_VIEW[this.props.user.role]||'client',screen:HOME[ROLE_VIEW[this.props.user.role]||'client'],obraId:'o1',tab:'resumen',userId:null,adminUsers:null,adminAudit:[],roleEdit:null,saving:false,partFilter:'all',photoFilter:'Todas',cmp:50,notifOpen:false,mods:{},modal:null,accStep:1,accA:false,accB:false,accepted031:false,overrides:{},progCode:null,progQty:'',progNote:'',progErr:'',toast:'',phone:'',personType:'fisica',profErr:'',reason:'',audit:[],resolved:{},extraAct:[],userFilter:'all',q:'',reviewed:{},readN:{},docOpen:null,budgetId:'031'};
+  state={role:ROLE_VIEW[this.props.user.role]||'client',screen:HOME[ROLE_VIEW[this.props.user.role]||'client'],obraId:'o1',tab:'resumen',userId:null,adminUsers:null,adminAudit:[],roleEdit:null,saving:false,partFilter:'all',photoFilter:'Todas',cmp:50,notifOpen:false,mods:{},modal:null,accStep:1,accA:false,accB:false,accepted031:false,overrides:{},progCode:null,progQty:'',progNote:'',progErr:'',toast:'',phone:'',personType:'fisica',profErr:'',reason:'',audit:[],resolved:{},extraAct:[],userFilter:'all',q:'',reviewed:{},readN:{},docOpen:null,budgetId:'031',finTab:'resumen',finPending:0};
   // Screens belong to one role each (c_ client, w_ jefe de obra, a_ admin);
   // anything else is ignored. The backend enforces the same split for data.
+  // Gestión financiera is w_fin / a_fin (jefe de obra and admin), never c_.
   go=(screen,x)=>{if(!screen.startsWith(PREFIX[this.state.role]))return;this.setState(Object.assign({screen,notifOpen:false},x||{}));window.scrollTo(0,0);};
-  componentDidMount(){if(this.state.role==='admin'){this.loadUsers();this.loadAudit();}}
+  componentDidMount(){if(this.state.role==='admin'){this.loadUsers();this.loadAudit();}if(this.state.role!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.pendientes}),()=>{});}
   getJSON=async(url)=>{const r=await fetch(url);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'No se pudieron cargar los datos.');return d;};
   loadUsers=()=>this.getJSON('/api/admin/users').then(d=>this.setState({adminUsers:d.users}),e=>{this.setState({adminUsers:[]});this.flash(e.message);});
   loadAudit=()=>this.getJSON('/api/admin/audit').then(d=>this.setState({adminAudit:d.entries}),e=>this.flash(e.message));
@@ -69,11 +72,15 @@ class PlataformaView extends React.Component {
     const nav=role==='client'?[mk('Inicio','ri-home-5-line','c_home'),mk('Mis obras','ri-building-2-line','c_obras',modPend||0,['c_obras','c_obra']),mk('Presupuestos','ri-file-list-3-line','c_presupuestos',pend031?1:0,['c_presupuestos','c_presupuesto']),mk('Mi perfil','ri-user-3-line','c_perfil')]
       :role==='worker'?[mk('Hoy','ri-sun-line','w_home'),mk('Obras asignadas','ri-building-2-line','w_obras',0,['w_obras','w_obra'])]
       :[mk('Panel','ri-dashboard-3-line','a_home'),mk('Usuarios','ri-group-line','a_users',rowsAll.filter(u=>u.issues.length).length,['a_users','a_user']),mk('Auditoría','ri-history-line','a_audit')];
+    const finScreen=PREFIX[role]+'fin',isFin=s.screen===finScreen;
+    if(role!=='client')nav.push({header:'Gestión financiera'},...FIN_TABS.map(([k,label,icon])=>{const on=isFin&&s.finTab===k;
+      return {label,icon,badge:k==='pendientes'?s.finPending:0,go:()=>this.go(finScreen,{finTab:k}),bg:on?'#F2F4FA':'transparent',fg:on?'#3E4D85':'#3A3A38',fw:on?700:500};}));
     const U=this.props.user,meName=U.name||U.email;
     const me={name:meName,initials:initials(meName),role:ROLE_LABEL[U.role]||'Cliente',avBg:role==='client'?'#EC6090':role==='worker'?'#68C0B5':'#0C062B'};
     const titles={c_home:['Inicio'],c_obras:['Mis obras'],c_obra:['Mis obras',obra.name],c_presupuestos:['Presupuestos'],c_presupuesto:['Presupuestos','PRE-2026-031 v1'],c_perfil:['Mi perfil'],w_home:['Hoy'],w_obras:['Obras asignadas'],w_obra:['Obras asignadas',obra.name],a_home:['Panel de administración'],a_users:['Usuarios'],a_user:['Usuarios',user.name],a_audit:['Auditoría']};
+    titles[finScreen]=['Gestión financiera',(FIN_TABS.find(t=>t[0]===s.finTab)||FIN_TABS[0])[1]];
     const parent={c_obra:'c_obras',c_presupuesto:'c_presupuestos',w_obra:'w_obras',a_user:'a_users'};
-    const tt=titles[s.screen];const crumbs=tt.map((l,i)=>({label:l,sep:i>0,fg:i===tt.length-1?'#1D1D1B':'#6B6B68',fw:i===tt.length-1?700:500,go:()=>i<tt.length-1&&this.go(parent[s.screen])}));
+    const tt=titles[s.screen];const crumbs=tt.map((l,i)=>({label:l,sep:i>0,fg:i===tt.length-1?'#1D1D1B':'#6B6B68',fw:i===tt.length-1?700:500,go:()=>i<tt.length-1&&(isFin?this.go(finScreen,{finTab:'resumen'}):this.go(parent[s.screen]))}));
     const NT=[['n1','ri-edit-2-line','MOD-02 espera tu decisión','Reforma integral · +385,00 € · antes del 24 oct',()=>this.go('c_obra',{obraId:'o1',tab:'mods'})],['n2','ri-camera-line','Nuevo avance publicado','Reforma integral · 3 fotos en Electricidad',()=>this.go('c_obra',{obraId:'o1',tab:'fotos'})],['n3','ri-file-text-line','Documento para revisar','Acta de replanteo · Revestimientos',()=>this.go('c_obra',{obraId:'o1',tab:'docs'})],['n4','ri-file-list-3-line','Presupuesto disponible','PRE-2026-031 · Terraza y cerramiento',()=>this.go('c_presupuesto')],['n5','ri-user-3-line','Completa tus datos fiscales','Necesarios para la certificación nº 2',()=>this.go('c_perfil')]];
     const readInit={n3:1,n4:1,n5:1};
     const notifs=NT.map(n=>{const read=s.readN[n[0]]||readInit[n[0]];return {icon:n[1],title:n[2],sub:n[3],bg:read?'#fff':'#F8F9FC',fw:read?500:700,dot:read?'transparent':'#EC6090',go:()=>{this.setState(st=>({readN:Object.assign({},st.readN,{[n[0]]:1})}));n[4]();}};});
@@ -118,7 +125,7 @@ class PlataformaView extends React.Component {
     const wObras=[obras[0],obras[1],Object.assign({},obras[0],{id:'o3',name:'Cocina abierta al salón',addr:'C/ Granada, 8 · Málaga',type:'Cocina · 18 m²',cover:IMG.t17,physS:'0%',physW:'0%',status:'Inicio 3 nov',upd:'—',openC:()=>this.flash('Obra pendiente de inicio: las partidas se publican el 3 nov.')})];
     const myIssues=user.issues.map(i=>({...i,done:false,open:false,tBg:ITYPE[i.type][0],tFg:ITYPE[i.type][1]}));
     return Object.assign({},is,it,{
-      showDemo:role!=='admin',isClient:role==='client',isWorker:role==='worker',isAdmin:role==='admin',isInternal:view==='internal',
+      showDemo:role!=='admin'&&!isFin,isFin,finTab:s.finTab,finGo:k=>this.go(finScreen,{finTab:k}),finPending:n=>n!==s.finPending&&this.setState({finPending:n}),flash:this.flash,isClient:role==='client',isWorker:role==='worker',isAdmin:role==='admin',isInternal:view==='internal',
       areaLabel:role==='client'?'Área de cliente':role==='worker'?'Workspace':'Administración',nav,me,crumbs,notifs,unread,notifOpen:s.notifOpen,
       firstName:firstName(U),meFirst:(U.name||'').trim().split(/\s+/)[0]||'',meLast:(U.name||'').trim().split(/\s+/).slice(1).join(' '),meEmail:U.email,meSince:fmtDate(U.created_at).replace(/^\d+ /,''),
       logout:()=>this.props.onLogout(),barsFrom:sb.from,barsTo:sb.to,roleOpts,
@@ -188,7 +195,9 @@ class PlataformaView extends React.Component {
           {v.areaLabel}
         </div>
         <nav style={{ display: "flex", flexDirection: "column", gap: "2px", marginTop: "-12px" }}>
-          {(v.nav || []).map((n, n_i) => (
+          {(v.nav || []).map((n, n_i) => n.header ? (
+            <div key={n_i} className="plat-nav-group">{n.header}</div>
+          ) : (
             <React.Fragment key={n_i}>
               <button onClick={n.go} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 12px", borderRadius: "8px", border: "0", background: n.bg, color: n.fg, fontSize: "15px", fontWeight: n.fw, cursor: "pointer", textAlign: "left", minHeight: "44px" }}>
                 <i className={n.icon} style={{ fontSize: "20px" }}></i>
@@ -311,6 +320,11 @@ class PlataformaView extends React.Component {
           </div>
         </header>
         <main style={{ padding: "32px", maxWidth: "1240px", width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: "28px" }}>
+          {v.isFin ? (
+            <React.Suspense fallback={<div style={{ padding: "32px", color: "#6B6B68" }}>{"Cargando Gestión financiera…"}</div>}>
+              <GestionFinanciera tab={v.finTab} go={v.finGo} toast={v.flash} onPending={v.finPending} />
+            </React.Suspense>
+          ) : null}
           {v.is_c_home ? (
             <>
               <div style={{ display: "flex", flexDirection: "column", gap: "28px" }}>

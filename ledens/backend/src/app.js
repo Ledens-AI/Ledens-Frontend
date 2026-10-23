@@ -7,6 +7,7 @@ import authRouter from './routes/auth.js';
 import oauthRouter from './routes/oauth.js';
 import adminRouter from './routes/admin.js';
 import { createIngestionRouter } from './routes/ingestion.js';
+import { createFinanzasRouter } from './routes/finanzas.js';
 
 // Builds the Express app without starting it listening — used both by
 // src/index.js (real server) and by the tests (ephemeral server on a random
@@ -28,6 +29,9 @@ export function createApp() {
   // cookie-bearing request, so only turn credentials on once an actual
   // origin is configured — never silently combine it with the wildcard.
   app.use(cors({ origin: ORIGIN, credentials: ORIGIN !== '*' }));
+
+  // Mounted before the shared /api limiter: it has its own (see the router).
+  app.use('/api/finanzas', createFinanzasRouter());
 
   const apiLimiter = rateLimit({
     windowMs: 60 * 1000,
