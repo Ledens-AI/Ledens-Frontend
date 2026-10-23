@@ -1,5 +1,7 @@
 // Produces a secret-free template; deployment substitutes the token in memory.
 import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 export function buildInvoiceFlow(current, apiBase) {
   const definition=structuredClone(current.properties.definition);
   const trigger=Object.values(definition.triggers)[0];
@@ -44,7 +46,7 @@ export function buildInvoiceFlow(current, apiBase) {
   };
   return {properties:{displayName:current.properties.displayName,definition,connectionReferences:current.properties.connectionReferences}};
 }
-if(process.argv[2]){
+if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const current=JSON.parse(await fs.readFile(process.argv[2],'utf8'));
   const output=buildInvoiceFlow(current,process.argv[4]);
   await fs.writeFile(process.argv[3],JSON.stringify(output,null,2));

@@ -62,6 +62,26 @@ site, root, quarter and original filename. Archive acknowledgment is idempotent.
 
 ## Power Automate
 
+The active production automation is **Azure Logic Apps Consumption**, named
+`ledens-invoice-ingestion` in `rg-ledens` (West Europe), polling every five minutes.
+Power Automate was suspended because HTTP requires Premium, and remains a reference.
+No Power Automate Premium subscription was purchased.
+
+`ledens/infra/deploy-invoice-logicapp.ps1` reproduces the Logic App using the live
+SharePoint connector schema. Its default is Disabled; after authorizing the new
+SharePoint connection, pass `-Enable`. Existing authenticated connections are
+preserved. The Logic App's system identity can read only the `invoice-ingest-token`
+secret in Key Vault. It fetches that secret during the run: no ingestion credential
+is embedded in the workflow definition. Secure outputs also cover the trigger
+(SharePoint may return invoice thumbnails), and run history retention is seven days.
+
+Live verification: a synthetic PDF uploaded through the OneDrive sync folder was
+received, extracted as 30 September 2025, moved to the existing `3T-2025` folder and
+acknowledged in PostgreSQL. An identical copy produced no second document and
+remained in Landing. A synthetic document without a date stayed pending review.
+
+### Legacy Power Automate template
+
 Generate a secret-free update using `ledens/infra/build-invoice-flow.mjs` with the
 current flow JSON, output path and API URL. Preserve its existing SharePoint
 connection. Replace `__LEDENS_INGEST_TOKEN__` only in memory during deployment,
