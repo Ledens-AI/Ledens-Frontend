@@ -1,16 +1,31 @@
 /* Client platform (/plataforma): client area, site-manager workspace and admin
- * panel, switchable from the "Ver como" control in the top bar.
+ * panel. Which one you get is decided by your role (users.role on the backend,
+ * see CLAUDE.md "Roles"); there is no way to switch from the UI.
  * Logic and markup ported from the Claude Design file "Ledens Plataforma.dc.html";
  * the JSX was converted mechanically from the design's markup, so it keeps the
- * design's inline styles. Data comes from ./data.js (demo content). */
+ * design's inline styles. Admin screens show real data from /api/admin
+ * (./adminData.js); obras, presupuestos and notifications are still the demo
+ * content in ./data.js. */
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext.jsx';
 import logo from '../../assets/logo-ledens-isotype.png';
-import { IMG, ST, BST, eur, num, TODAY, D, days, MES, OBRAS, B031, PERMS, ALLP, BASE, USERS, SPEC0, ITYPE } from './data.js';
+import { IMG, ST, BST, eur, num, TODAY, D, days, MES, OBRAS, B031, PERMS, BASE, ITYPE } from './data.js';
+import { ROLE_VIEW, ROLE_LABEL, initials, firstName, fmtDate, userRow, signupBars, adminKpis, auditRow } from './adminData.js';
 import '../../styles/plataforma.css';
 
-export default class Plataforma extends React.Component {
-  state={role:this.props.initialRole??'client',screen:({client:'c_home',worker:'w_home',admin:'a_home'})[this.props.initialRole??'client'],obraId:'o1',tab:'resumen',userId:'u4',partFilter:'all',photoFilter:'Todas',cmp:50,notifOpen:false,mods:{},modal:null,accStep:1,accA:false,accB:false,accepted031:false,overrides:{},progCode:null,progQty:'',progNote:'',progErr:'',toast:'',phone:'655 638 219',personType:'fisica',profErr:'',spec:SPEC0,edits:{},reason:'',audit:[],resolved:{},extraAct:[],userFilter:'all',q:'',reviewed:{},readN:{},docOpen:null,budgetId:'031'};
-  go=(screen,x)=>{this.setState(Object.assign({screen,notifOpen:false},x||{}));window.scrollTo(0,0);};
+const HOME = { client: 'c_home', worker: 'w_home', admin: 'a_home' };
+const PREFIX = { client: 'c_', worker: 'w_', admin: 'a_' };
+
+class PlataformaView extends React.Component {
+  state={role:ROLE_VIEW[this.props.user.role]||'client',screen:HOME[ROLE_VIEW[this.props.user.role]||'client'],obraId:'o1',tab:'resumen',userId:null,adminUsers:null,adminAudit:[],roleEdit:null,saving:false,partFilter:'all',photoFilter:'Todas',cmp:50,notifOpen:false,mods:{},modal:null,accStep:1,accA:false,accB:false,accepted031:false,overrides:{},progCode:null,progQty:'',progNote:'',progErr:'',toast:'',phone:'',personType:'fisica',profErr:'',reason:'',audit:[],resolved:{},extraAct:[],userFilter:'all',q:'',reviewed:{},readN:{},docOpen:null,budgetId:'031'};
+  // Screens belong to one role each (c_ client, w_ jefe de obra, a_ admin);
+  // anything else is ignored. The backend enforces the same split for data.
+  go=(screen,x)=>{if(!screen.startsWith(PREFIX[this.state.role]))return;this.setState(Object.assign({screen,notifOpen:false},x||{}));window.scrollTo(0,0);};
+  componentDidMount(){if(this.state.role==='admin'){this.loadUsers();this.loadAudit();}}
+  getJSON=async(url)=>{const r=await fetch(url);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'No se pudieron cargar los datos.');return d;};
+  loadUsers=()=>this.getJSON('/api/admin/users').then(d=>this.setState({adminUsers:d.users}),e=>{this.setState({adminUsers:[]});this.flash(e.message);});
+  loadAudit=()=>this.getJSON('/api/admin/audit').then(d=>this.setState({adminAudit:d.entries}),e=>this.flash(e.message));
   componentWillUnmount(){clearTimeout(this._t);}
   flash=t=>{this.setState({toast:t});clearTimeout(this._t);this._t=setTimeout(()=>this.setState({toast:''}),3600);};
   log=(actor,action,target,detail)=>this.setState(s=>({audit:[['21 oct · ahora',actor,action,target,detail]].concat(s.audit)}));
@@ -48,12 +63,14 @@ export default class Plataforma extends React.Component {
     const mk=(label,icon,screen,badge,match)=>({label,icon,badge,go:()=>this.go(screen),bg:(match||[screen]).includes(s.screen)?'#F2F4FA':'transparent',fg:(match||[screen]).includes(s.screen)?'#3E4D85':'#3A3A38',fw:(match||[screen]).includes(s.screen)?700:500});
     const pend031=!s.accepted031;
     const modPend=obras[0].mods.filter(m=>m.isPending).length;
+    // admin: real users from /api/admin/users
+    const now=new Date(),allU=s.adminUsers||[],rowsAll=allU.map(u=>userRow(u,allU,now));
+    const user=rowsAll.find(u=>u.id===s.userId)||{id:null,name:s.adminUsers?'Usuario no encontrado':'Cargando…',email:'',role:'client',roleL:'',since:'',prov:'',ver:'',verBg:'#EDEDEA',verFg:'#3A3A38',profS:'',works:'—',last:'',phone:'—',city:'—',issues:[],initials:''};
     const nav=role==='client'?[mk('Inicio','ri-home-5-line','c_home'),mk('Mis obras','ri-building-2-line','c_obras',modPend||0,['c_obras','c_obra']),mk('Presupuestos','ri-file-list-3-line','c_presupuestos',pend031?1:0,['c_presupuestos','c_presupuesto']),mk('Mi perfil','ri-user-3-line','c_perfil')]
       :role==='worker'?[mk('Hoy','ri-sun-line','w_home'),mk('Obras asignadas','ri-building-2-line','w_obras',0,['w_obras','w_obra'])]
-      :[mk('Panel','ri-dashboard-3-line','a_home'),mk('Usuarios','ri-group-line','a_users',USERS.filter(u=>u.issues.some(i=>!s.resolved[i.id])&&u.role==='client').length,['a_users','a_user']),mk('Auditoría','ri-history-line','a_audit')];
-    const me=role==='client'?{name:'Lucía Fernández',initials:'LF',role:'Cliente · 2 obras',avBg:'#EC6090'}:role==='worker'?{name:'Javier Moreno',initials:'JM',role:'Jefe de obra',avBg:'#68C0B5'}:{name:'Administrador principal',initials:'AP',role:'Admin',avBg:'#0C062B'};
-    const roles=[['client','Cliente'],['worker','Jefe obra'],['admin','Admin']].map(([k,l])=>({label:l,go:()=>this.setState({role:k,screen:({client:'c_home',worker:'w_home',admin:'a_home'})[k],notifOpen:false,obraId:'o1',tab:'resumen'}),bg:k===role?'#fff':'transparent',fg:k===role?'#0C062B':'#6B6B68',sh:k===role?'0 1px 2px rgba(12,6,43,0.08)':'none'}));
-    const user=USERS.find(u=>u.id===s.userId);
+      :[mk('Panel','ri-dashboard-3-line','a_home'),mk('Usuarios','ri-group-line','a_users',rowsAll.filter(u=>u.issues.length).length,['a_users','a_user']),mk('Auditoría','ri-history-line','a_audit')];
+    const U=this.props.user,meName=U.name||U.email;
+    const me={name:meName,initials:initials(meName),role:ROLE_LABEL[U.role]||'Cliente',avBg:role==='client'?'#EC6090':role==='worker'?'#68C0B5':'#0C062B'};
     const titles={c_home:['Inicio'],c_obras:['Mis obras'],c_obra:['Mis obras',obra.name],c_presupuestos:['Presupuestos'],c_presupuesto:['Presupuestos','PRE-2026-031 v1'],c_perfil:['Mi perfil'],w_home:['Hoy'],w_obras:['Obras asignadas'],w_obra:['Obras asignadas',obra.name],a_home:['Panel de administración'],a_users:['Usuarios'],a_user:['Usuarios',user.name],a_audit:['Auditoría']};
     const parent={c_obra:'c_obras',c_presupuesto:'c_presupuestos',w_obra:'w_obras',a_user:'a_users'};
     const tt=titles[s.screen];const crumbs=tt.map((l,i)=>({label:l,sep:i>0,fg:i===tt.length-1?'#1D1D1B':'#6B6B68',fw:i===tt.length-1?700:500,go:()=>i<tt.length-1&&this.go(parent[s.screen])}));
@@ -80,31 +97,31 @@ export default class Plataforma extends React.Component {
     // profile
     const phoneOk=/^(\+34\s?)?[6789]\d{2}\s?\d{3}\s?\d{3}$/.test(s.phone.trim());
     // admin
-    const issuesOpen=u=>u.issues.filter(i=>!s.resolved[i.id]);
-    const uf=[['all','Todos'],['client','Clientes'],['internal','Internos'],['review','Pendientes de revisión'],['incomplete','Perfil incompleto']].map(([k,l])=>({label:l,go:()=>this.setState({userFilter:k}),bg:s.userFilter===k?'#0C062B':'#fff',fg:s.userFilter===k?'#fff':'#3A3A38',bd:s.userFilter===k?'#0C062B':'#D9D9D9'}));
-    const urows=USERS.filter(u=>(s.userFilter==='all'||(s.userFilter==='client'&&u.role==='client')||(s.userFilter==='internal'&&u.role!=='client')||(s.userFilter==='review'&&issuesOpen(u).length)||(s.userFilter==='incomplete'&&u.prof<100))&&(!s.q||(u.name+u.email).toLowerCase().includes(s.q.toLowerCase()))).map(u=>({...u,initials:u.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),verBg:u.verOk?'#DEF3F0':'#FBF1DE',verFg:u.verOk?'#2F6B63':'#7A4E0E',profS:u.prof===100?'Completo':'Incompleto · '+u.prof+'%',profFg:u.prof===100?'#2F6B63':'#7A4E0E',nIss:issuesOpen(u).length,hasIss:issuesOpen(u).length>0,open:()=>this.go('a_user',{userId:u.id,edits:{},reason:''})}));
-    const queue=USERS.flatMap(u=>issuesOpen(u).filter(i=>i.type!=='Perfil').map(i=>({user:u.name,title:i.title,type:i.type,tBg:ITYPE[i.type][0],tFg:ITYPE[i.type][1],open:()=>this.go('a_user',{userId:u.id,edits:{},reason:''})})));
-    const isSelf=user.id==='u0';const base=BASE[user.role];const spec0=s.spec[user.id]||[];
-    const effSpec=k=>s.edits[k]!=null?s.edits[k]:spec0.includes(k);
-    const permGroups=PERMS.map(g=>({name:g[0],items:g[1].map(([k,l,f])=>{const byRole=base.includes(k),on=byRole||effSpec(k),adminOnly=f==='admin',locked=byRole||adminOnly||isSelf,changed=s.edits[k]!=null&&s.edits[k]!==spec0.includes(k);
-      return {key:k,label:l,on,byRole,tag:byRole?'Por rol':on?'Específico':'',tagBg:byRole?'#EDEDEA':'#E3E7F3',tagFg:byRole?'#3A3A38':'#3E4D85',hasTag:byRole||on,sens:f==='sens',adminOnly,tBg:on?(locked?'#9A9A96':'#5567AE'):'#D9D9D9',tX:on?'18px':'0px',cur:locked?'not-allowed':'pointer',op:locked&&!on?0.5:1,rowBg:changed?'#F2F4FA':'transparent',
-        toggle:()=>{if(locked){this.flash(isSelf?'No puedes modificar tus propios permisos.':adminOnly?'Solo el administrador principal tiene este permiso. No se puede conceder.':'Este permiso viene del rol. Para retirarlo, cambia el rol.');return;}this.setState(st=>({edits:Object.assign({},st.edits,{[k]:!on})}));}};})}));
-    const diff=Object.keys(s.edits).filter(k=>s.edits[k]!==spec0.includes(k)).map(k=>({key:k,txt:(s.edits[k]?'Conceder ':'Retirar ')+k,fg:s.edits[k]?'#2F6B63':'#9E2F2F',icon:s.edits[k]?'ri-add-circle-line':'ri-indeterminate-circle-line'}));
-    const effList=ALLP.filter(k=>base.includes(k)||effSpec(k));
-    const AUD0=[['21 oct · 09:12','Laura Sanz (dirección de obra)','Avance validado','Reforma integral · 02.02','64 de 85 m²'],['18 oct · 17:40','Administrador principal','Permiso concedido','Marta Ruiz','business.users.manage'],['16 oct · 11:05','Marta Ruiz','Revisión completada','Carmen López Díaz','Dirección revisada (revisión humana)'],['14 oct · 10:22','Javier Moreno','Modificación propuesta','Reforma integral','MOD-02 · +385,00 €'],['12 oct · 08:55','Sistema','Incidencia automática','Antonio Gil','Teléfono con formato no válido'],['12 oct · 08:54','Sistema','Alta de cuenta','Antonio Gil','Email y contraseña']];
-    const audit=s.audit.concat(AUD0).map(a=>({when:a[0],actor:a[1],action:a[2],target:a[3],detail:a[4]}));
-    const bars=[2,1,0,3,1,2,0,1,4,2,1,0,1,3,2,1,0,2,1,1,3,2,0,1,2,1,0,2,1,3].map((v,i)=>({h:(v*22+4)+'px',bg:i>=23?'#5567AE':'#BFC7E4'}));
-    const KPI=[['Usuarios registrados','148','+12 en 7 días · +41 en 30 días'],['Pendientes de revisión',String(queue.length),'Incidencias abiertas en la cola'],['Perfiles incompletos','23','Sin datos fiscales o dirección'],['Posibles duplicados','2','Mismo nombre y localidad'],['Clientes con obra','31','38 obras activas o terminadas'],['Clientes sin obra','106','14 con presupuesto pendiente'],['Internos activos','11','4 jefes de obra · 3 comerciales'],['Cambios de permisos','5','Últimos 30 días']].map(k=>({label:k[0],value:k[1],sub:k[2]}));
+    const uf=[['all','Todos'],['client','Clientes'],['internal','Internos'],['review','Pendientes de revisión'],['incomplete','Sin acceso']].map(([k,l])=>({label:l,go:()=>this.setState({userFilter:k}),bg:s.userFilter===k?'#0C062B':'#fff',fg:s.userFilter===k?'#fff':'#3A3A38',bd:s.userFilter===k?'#0C062B':'#D9D9D9'}));
+    const openUser=id=>()=>this.go('a_user',{userId:id,roleEdit:null,reason:''});
+    const urows=rowsAll.filter(u=>(s.userFilter==='all'||(s.userFilter==='client'&&u.role==='client')||(s.userFilter==='internal'&&u.role!=='client')||(s.userFilter==='review'&&u.issues.length)||(s.userFilter==='incomplete'&&!u.has_password&&!u.providers.length))&&(!s.q||(u.name+u.email).toLowerCase().includes(s.q.toLowerCase()))).map(u=>({...u,nIss:u.issues.length,hasIss:u.issues.length>0,open:openUser(u.id)}));
+    const queue=rowsAll.flatMap(u=>u.issues.map(i=>({user:u.name,title:i.title,type:i.type,tBg:ITYPE[i.type][0],tFg:ITYPE[i.type][1],open:openUser(u.id)})));
+    // Permissions follow the role; the admin edits the role, and the list
+    // previews what the new role would allow.
+    const isSelf=user.id===U.id,roleEdit=s.roleEdit||user.role,cur=BASE[user.role]||[],nxt=BASE[roleEdit]||[];
+    const permGroups=PERMS.map(g=>({name:g[0],items:g[1].map(([k,l,f])=>{const on=nxt.includes(k);
+      return {key:k,label:l,on,byRole:on,tag:on?'Por rol':'',tagBg:'#EDEDEA',tagFg:'#3A3A38',hasTag:on,sens:f==='sens',adminOnly:f==='admin',tBg:on?'#9A9A96':'#D9D9D9',tX:on?'18px':'0px',cur:'not-allowed',op:on?1:0.5,rowBg:cur.includes(k)!==on?'#F2F4FA':'transparent',
+        toggle:()=>this.flash(isSelf?'Es tu propia cuenta: otro administrador tendría que cambiar tu rol.':'Los permisos dependen del rol. Para cambiarlos, cambia el rol del usuario.')};})}));
+    const diff=roleEdit!==user.role?[{key:'role',txt:'Rol: '+ROLE_LABEL[user.role]+' → '+ROLE_LABEL[roleEdit],fg:'#3E4D85',icon:'ri-user-settings-line'}]:[];
+    const roleOpts=['client','jefe','admin'].map(k=>({label:ROLE_LABEL[k],on:k===roleEdit,go:()=>this.setState({roleEdit:k}),bg:k===roleEdit?'#fff':'transparent',fg:k===roleEdit?'#0C062B':'#6B6B68',sh:k===roleEdit?'0 1px 2px rgba(12,6,43,0.08)':'none'}));
+    const effList=nxt;
+    const audit=(s.adminAudit||[]).map(auditRow);
+    const sb=signupBars(allU,now),bars=sb.bars;
+    const KPI=adminKpis(allU,rowsAll,s.adminAudit||[],now);
     const prog=s.progCode?(()=>{for(const c of obra.chapters)for(const i of c.items)if(i.key===s.progCode)return Object.assign({},i,{chap:c.code+' '+c.name});})():null;
     const mod=s.modal==='mod'?obra.mods.find(m=>m.id===s.modId):null;
     const wObras=[obras[0],obras[1],Object.assign({},obras[0],{id:'o3',name:'Cocina abierta al salón',addr:'C/ Granada, 8 · Málaga',type:'Cocina · 18 m²',cover:IMG.t17,physS:'0%',physW:'0%',status:'Inicio 3 nov',upd:'—',openC:()=>this.flash('Obra pendiente de inicio: las partidas se publican el 3 nov.')})];
-    const myIssues=user.issues.map(i=>({...i,done:!!s.resolved[i.id],open:!s.resolved[i.id],tBg:ITYPE[i.type][0],tFg:ITYPE[i.type][1],
-      fix:()=>{this.setState(st=>({resolved:Object.assign({},st.resolved,{[i.id]:'Corregido'})}));this.log('Administrador principal','Dato corregido',user.name,i.field);this.flash('Campo corregido. El cambio queda en el historial.');},
-      ask:()=>{this.log('Administrador principal','Información solicitada',user.name,i.field);this.flash('Solicitud enviada: '+user.name+' verá un aviso para completar '+i.field+'.');},
-      close:()=>{this.setState(st=>({resolved:Object.assign({},st.resolved,{[i.id]:'Revisada'})}));this.log('Administrador principal','Revisión completada',user.name,i.title);this.flash('Revisión marcada como completada.');}}));
+    const myIssues=user.issues.map(i=>({...i,done:false,open:false,tBg:ITYPE[i.type][0],tFg:ITYPE[i.type][1]}));
     return Object.assign({},is,it,{
-      showDemo:this.props.showDemoBadge??true,isClient:role==='client',isWorker:role==='worker',isAdmin:role==='admin',isInternal:view==='internal',
-      areaLabel:role==='client'?'Área de cliente':role==='worker'?'Workspace':'Administración',nav,me,roles,crumbs,notifs,unread,notifOpen:s.notifOpen,
+      showDemo:role!=='admin',isClient:role==='client',isWorker:role==='worker',isAdmin:role==='admin',isInternal:view==='internal',
+      areaLabel:role==='client'?'Área de cliente':role==='worker'?'Workspace':'Administración',nav,me,crumbs,notifs,unread,notifOpen:s.notifOpen,
+      firstName:firstName(U),meFirst:(U.name||'').trim().split(/\s+/)[0]||'',meLast:(U.name||'').trim().split(/\s+/).slice(1).join(' '),meEmail:U.email,meSince:fmtDate(U.created_at).replace(/^\d+ /,''),
+      logout:()=>this.props.onLogout(),barsFrom:sb.from,barsTo:sb.to,roleOpts,
       toggleNotif:()=>this.setState({notifOpen:!s.notifOpen}),readAll:()=>this.setState({readN:{n1:1,n2:1,n3:1,n4:1,n5:1}}),
       askBudget:()=>this.props.onOpenLead?this.props.onOpenLead():this.flash('Abriría el formulario de solicitud.'),
       obras,obra,tabs,fChap,pfilters,phFilters,toast:s.toast,hasToast:!!s.toast,
@@ -135,14 +152,18 @@ export default class Plataforma extends React.Component {
       isFisica:s.personType==='fisica',isEmpresa:s.personType==='empresa',
       ptypes:[['fisica','Persona física'],['empresa','Empresa']].map(([k,l])=>({label:l,go:()=>this.setState({personType:k}),bg:s.personType===k?'#fff':'transparent',fg:s.personType===k?'#0C062B':'#6B6B68',sh:s.personType===k?'0 1px 2px rgba(12,6,43,0.08)':'none'})),
       kpis:KPI,bars,queue,uf,urows,q:s.q,onQ:e=>this.setState({q:e.target.value}),noRows:urows.length===0,
-      user:Object.assign({},user,{initials:user.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),verBg:user.verOk?'#DEF3F0':'#FBF1DE',verFg:user.verOk?'#2F6B63':'#7A4E0E',profS:user.prof+'%',profW:user.prof+'%'}),
+      user,
       userIsClient:user.role==='client',userIsInternal:user.role!=='client',isSelf,notSelf:!isSelf,myIssues,hasIssues:myIssues.length>0,noIssues:myIssues.length===0,
-      permGroups,diff,hasDiff:diff.length>0,noDiff:diff.length===0,effCount:effList.length+' permisos efectivos',
+      permGroups,diff,hasDiff:diff.length>0,noDiff:diff.length===0,effCount:effList.length+' permisos por rol',
       saveBg:diff.length?'#5567AE':'#D9D9D9',saveFg:diff.length?'#fff':'#6B6B68',
       openPerm:()=>diff.length&&this.setState({modal:'perm',reason:''}),reason:s.reason,onReason:e=>this.setState({reason:e.target.value}),
-      permOk:!!s.reason.trim(),permBtnBg:s.reason.trim()?'#5567AE':'#D9D9D9',permBtnFg:s.reason.trim()?'#fff':'#6B6B68',
-      permConfirm:()=>{if(!s.reason.trim())return;const nextSpec=ALLP.filter(k=>!base.includes(k)&&effSpec(k));diff.forEach(d=>this.log('Administrador principal',d.txt.startsWith('Conceder')?'Permiso concedido':'Permiso retirado',user.name,d.key+' · '+s.reason.trim()));this.setState(st=>({modal:null,edits:{},spec:Object.assign({},st.spec,{[user.id]:nextSpec})}));this.flash('Permisos actualizados y registrados en auditoría.');},
-      discard:()=>this.setState({edits:{}}),
+      permOk:!!s.reason.trim()&&!s.saving,permBtnBg:s.reason.trim()&&!s.saving?'#5567AE':'#D9D9D9',permBtnFg:s.reason.trim()&&!s.saving?'#fff':'#6B6B68',
+      permConfirm:async()=>{if(!s.reason.trim()||!diff.length||s.saving)return;this.setState({saving:true});
+        try{const r=await fetch(`/api/admin/users/${user.id}/role`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:roleEdit,reason:s.reason.trim()})});const d=await r.json().catch(()=>({}));
+          if(!r.ok){this.setState({saving:false});this.flash(d.error||'No se pudo cambiar el rol.');return;}
+          this.setState(st=>({saving:false,modal:null,roleEdit:null,reason:'',adminUsers:st.adminUsers.map(u=>u.id===d.user.id?d.user:u)}));this.flash('Rol actualizado y registrado en auditoría.');this.loadAudit();}
+        catch{this.setState({saving:false});this.flash('Error de conexión. Inténtalo de nuevo.');}},
+      discard:()=>this.setState({roleEdit:null}),
       audit,wObras,
       wSubmitted:Object.keys(s.overrides).length+1,
       wIncident:()=>this.flash('Abriría el formulario de incidencia: descripción, partida afectada, fotos y si bloquea trabajos.'),
@@ -213,7 +234,9 @@ export default class Plataforma extends React.Component {
               {v.me.role}
             </div>
           </div>
-          <i className="ri-logout-box-r-line" title="Cerrar sesi\u00f3n" style={{ fontSize: "18px", color: "#6B6B68" }}></i>
+          <button type="button" onClick={v.logout} aria-label="Cerrar sesi\u00f3n" title="Cerrar sesi\u00f3n" style={{ border: "0", background: "none", cursor: "pointer", width: "36px", height: "36px", borderRadius: "8px", display: "grid", placeItems: "center" }}>
+            <i className="ri-logout-box-r-line" style={{ fontSize: "18px", color: "#6B6B68" }}></i>
+          </button>
         </div>
       </aside>
       <div style={{ display: "flex", flexDirection: "column", minWidth: "0" }}>
@@ -241,18 +264,6 @@ export default class Plataforma extends React.Component {
               </span>
             </>
           ) : null}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px", background: "#F7F7F5", border: "1px solid #EDEDEA", borderRadius: "10px", padding: "3px", flexShrink: "0" }}>
-            <span style={{ fontSize: "12px", color: "#6B6B68", padding: "0 6px", whiteSpace: "nowrap" }}>
-              {"Ver como"}
-            </span>
-            {(v.roles || []).map((r, r_i) => (
-              <React.Fragment key={r_i}>
-                <button onClick={r.go} style={{ border: "0", borderRadius: "7px", padding: "7px 12px", fontSize: "13px", fontWeight: "600", cursor: "pointer", background: r.bg, color: r.fg, boxShadow: r.sh, whiteSpace: "nowrap" }}>
-                  {r.label}
-                </button>
-              </React.Fragment>
-            ))}
-          </div>
           <div style={{ position: "relative" }}>
             <button onClick={v.toggleNotif} aria-label="Notificaciones" style={{ width: "44px", height: "44px", borderRadius: "10px", border: "1px solid #EDEDEA", background: "#fff", cursor: "pointer", position: "relative", display: "grid", placeItems: "center" }}>
               <i className="ri-notification-3-line" style={{ fontSize: "20px", color: "#3A3A38" }}></i>
@@ -308,7 +319,7 @@ export default class Plataforma extends React.Component {
                     {"Martes, 21 de octubre"}
                   </div>
                   <h1 style={{ fontSize: "36px", fontWeight: "700", letterSpacing: "-0.02em", lineHeight: "1.1" }}>
-                    {"Hola, Lucía"}
+                    {"Hola, "}{v.firstName}
                   </h1>
                   <p style={{ fontSize: "17px", color: "#3A3A38" }}>
                     {v.homeSummary}
@@ -1573,14 +1584,14 @@ export default class Plataforma extends React.Component {
                   <div style={{ background: "#fff", border: "1px solid #EDEDEA", borderRadius: "16px", padding: "22px", display: "flex", flexDirection: "column", gap: "14px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                       <div style={{ width: "56px", height: "56px", borderRadius: "99px", background: "#EC6090", color: "#fff", display: "grid", placeItems: "center", fontWeight: "700", fontSize: "18px" }}>
-                        {"LF"}
+                        {v.me.initials}
                       </div>
                       <div style={{ display: "flex", flexDirection: "column" }}>
                         <span style={{ fontSize: "17px", fontWeight: "700" }}>
-                          {"Lucía Fernández"}
+                          {v.me.name}
                         </span>
                         <span style={{ fontSize: "13px", color: "#6B6B68" }}>
-                          {"Cliente desde ago 2026"}
+                          {"Cliente desde "}{v.meSince}
                         </span>
                       </div>
                     </div>
@@ -1627,11 +1638,11 @@ export default class Plataforma extends React.Component {
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "16px" }}>
                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
                         {"Nombre"}
-                        <input defaultValue="Luc\u00eda" readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px", background: "#fff" }} />
+                        <input value={v.meFirst} readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px", background: "#fff" }} />
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
                         {"Apellidos"}
-                        <input defaultValue="Fern\u00e1ndez Ortiz" readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
+                        <input value={v.meLast} readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
                         {"Teléfono "}
@@ -1647,7 +1658,7 @@ export default class Plataforma extends React.Component {
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
                         {"Email"}
-                        <input defaultValue="lucia.fernandez@demo.ledens.es" readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px", background: "#F7F7F5", color: "#3A3A38" }} />
+                        <input value={v.meEmail} readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px", background: "#F7F7F5", color: "#3A3A38" }} />
                         <span style={{ fontSize: "12px", color: "#6B6B68", fontWeight: "500" }}>
                           {"Cambiarlo requiere confirmar el nuevo email. Se cambia en Cuenta y seguridad."}
                         </span>
@@ -1758,7 +1769,7 @@ export default class Plataforma extends React.Component {
                       <i className="ri-mail-line" style={{ fontSize: "20px", color: "#3A3A38" }}></i>
                       <span style={{ flex: "1", fontSize: "14px" }}>
                         <strong>
-                          {"lucia.fernandez@demo.ledens.es"}
+                          {v.meEmail}
                         </strong>
                       </span>
                       <span style={{ background: "#DEF3F0", color: "#2F6B63", fontSize: "12px", fontWeight: "700", padding: "4px 10px", borderRadius: "99px" }}>
@@ -1855,7 +1866,7 @@ export default class Plataforma extends React.Component {
                     {"Martes, 21 de octubre"}
                   </div>
                   <h1 style={{ fontSize: "34px", fontWeight: "700", letterSpacing: "-0.02em" }}>
-                    {"Buenos días, Javier"}
+                    {"Buenos días, "}{v.firstName}
                   </h1>
                   <p style={{ fontSize: "16px", color: "#3A3A38" }}>
                     {"3 obras asignadas · "}{v.wSubmitted}{" avance pendiente de validación · 1 incidencia abierta"}
@@ -2161,10 +2172,10 @@ export default class Plataforma extends React.Component {
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#6B6B68" }}>
                       <span>
-                        {"22 sep"}
+                        {v.barsFrom}
                       </span>
                       <span>
-                        {"21 oct"}
+                        {v.barsTo}
                       </span>
                     </div>
                   </div>
@@ -2208,7 +2219,7 @@ export default class Plataforma extends React.Component {
                     <code>
                       {"auth_identities"}
                     </code>
-                    {". Revisiones, duplicados, roles y obras requieren tablas nuevas (Fase 1). La última actividad se deriva de "}
+                    {". Roles y auditoría salen de users.role y audit_log; obras y presupuestos todavía son datos de ejemplo. La última actividad se deriva de "}
                     <code>
                       {"sessions.created_at"}
                     </code>
@@ -2255,7 +2266,7 @@ export default class Plataforma extends React.Component {
                         {"Email"}
                       </span>
                       <span>
-                        {"Perfil"}
+                        {"Acceso"}
                       </span>
                       <span>
                         {"Obras"}
@@ -2432,10 +2443,10 @@ export default class Plataforma extends React.Component {
                           {v.user.city}
                         </span>
                         <span style={{ color: "#6B6B68" }}>
-                          {"Perfil"}
+                          {"Acceso"}
                         </span>
                         <span>
-                          {v.user.profS}{" completado"}
+                          {v.user.profS}
                         </span>
                         <span style={{ color: "#6B6B68" }}>
                           {"Obras"}
@@ -2453,6 +2464,34 @@ export default class Plataforma extends React.Component {
                     </div>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+                    {v.notSelf ? (
+                      <>
+                        <div style={{ background: "#fff", border: "1px solid #EDEDEA", borderRadius: "16px", padding: "22px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                          <h2 style={{ fontSize: "17px", fontWeight: "700" }}>
+                            {"Rol"}
+                          </h2>
+                          <p style={{ fontSize: "13px", color: "#3A3A38", lineHeight: "1.5" }}>
+                            {"Decide qué ve en la plataforma. El cambio pide un motivo y queda en auditoría."}
+                          </p>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", background: "#F7F7F5", border: "1px solid #EDEDEA", borderRadius: "10px", padding: "3px", alignSelf: "flex-start" }}>
+                            {(v.roleOpts || []).map((r, r_i) => (
+                              <React.Fragment key={r_i}>
+                                <button type="button" onClick={r.go} aria-pressed={r.on} style={{ border: "0", borderRadius: "7px", padding: "8px 14px", fontSize: "13px", fontWeight: "600", cursor: "pointer", background: r.bg, color: r.fg, boxShadow: r.sh }}>
+                                  {r.label}
+                                </button>
+                              </React.Fragment>
+                            ))}
+                          </div>
+                          {v.hasDiff ? (
+                            <>
+                              <button type="button" onClick={v.openPerm} style={{ alignSelf: "flex-start", background: "#5567AE", color: "#fff", border: "0", borderRadius: "8px", padding: "11px 16px", fontWeight: "700", fontSize: "14px", cursor: "pointer" }}>
+                                {"Revisar y guardar"}
+                              </button>
+                            </>
+                          ) : null}
+                        </div>
+                      </>
+                    ) : null}
                     {v.userIsClient ? (
                       <>
                         <div style={{ background: "#fff", border: "1px solid #EDEDEA", borderRadius: "16px", padding: "22px", display: "flex", flexDirection: "column", gap: "10px" }}>
@@ -2929,4 +2968,18 @@ export default class Plataforma extends React.Component {
       </div>
     );
   }
+}
+
+export default function Plataforma(props) {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  // RequireAuth guarantees a user here; key remounts the view if it changes.
+  return (
+    <PlataformaView
+      {...props}
+      key={user.id}
+      user={user}
+      onLogout={async () => { await logout(); navigate('/'); }}
+    />
+  );
 }

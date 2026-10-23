@@ -103,6 +103,9 @@ Browser
 | GET | `/api/auth/google/callback` | Google's redirect target. Finds, creates or reclaims the user, sets the session cookie, redirects to `/`. Any failure redirects to `/auth?error=...` instead of showing a raw error. |
 | GET | `/api/auth/microsoft` | Starts Microsoft login (personal + work/school accounts). Same shape as `/google`. |
 | GET | `/api/auth/microsoft/callback` | Same shape as `/google/callback`. |
+| GET | `/api/admin/users` | **Admin only.** Every user with role, email verification, sign-in methods and last login. |
+| PATCH | `/api/admin/users/:id/role` | **Admin only.** `{ role, reason }` — changes a role (never your own) and writes an `audit_log` row. |
+| GET | `/api/admin/audit` | **Admin only.** Last 200 `audit_log` entries. |
 
 All `/api/auth/*` routes return `503` if `DATABASE_URL` isn't set (production, until the DB is provisioned). The OAuth routes also return `503` until their own `*_CLIENT_ID`/`*_CLIENT_SECRET`/`*_REDIRECT_URI` are set (no app is registered with either provider yet — see the build log's open questions for who should own them).
 
@@ -136,6 +139,7 @@ All `/api/auth/*` routes return `503` if `DATABASE_URL` isn't set (production, u
 - Schema (`001_users_and_identities.sql`):
   - `users` — `id` (uuid), `email` (unique, case-insensitive), `name`, `password_hash` (NULL for social-only users), timestamps.
   - `auth_identities` — links a user to Google / Microsoft / Apple (`provider`, `provider_user_id`, unique together). One user can have several, so one person never ends up as two accounts.
+- `004_roles_and_audit.sql` adds `users.role` (`admin` / `jefe` / `client`, default `client`) and the `audit_log` table, and seeds the initial accounts (see "Roles").
 - `003_users_email_verified.sql` adds `users.email_verified` (default `false`). See the account-linking security note under "Google login" — this column exists specifically to stop a password registration being used to pre-hijack an account someone later proves ownership of via social login.
 - Tests: `cd ledens/backend && npm test` (needs the local DB; skipped if `DATABASE_URL` is unset).
 
@@ -148,6 +152,28 @@ Sessions, not JWT: a `sessions` row per login (`002_sessions.sql`), the cookie o
 - `src/routes/auth.js` — the four routes above. Login and registration return the same generic error either way, so the API can't be used to check which emails are registered.
 - Session cookie: `ledens_session`, `httpOnly`, `sameSite=lax`, 30 days, `secure` follows `req.secure` (works in both plain-HTTP local dev and HTTPS production without an env var, because `trust proxy` is set).
 - `src/app.js` builds the Express app (routes, middleware) without starting it; `src/index.js` runs migrations then calls `app.listen`. This split lets tests start the real app on a random port instead of importing a file that auto-binds `:4000`.
+
+### Roles
+
+Every user has one role in `users.role`; it decides what they get in `/plataforma`:
+
+| Role | Platform view | Can reach |
+|---|---|---|
+| `admin` | Administración (panel, usuarios, auditoría) | `/api/admin/*` |
+| `jefe` | Workspace de jefe de obra | — (works API not built yet) |
+| `client` | Área de cliente | — (works/budgets API not built yet) |
+
+- **Enforced on the backend**: `requireRole('admin')` from `src/auth/sessions.js` guards `/api/admin` (401 logged out, 403 wrong role). The frontend only mirrors the role to pick the view; there is no role switcher.
+- New registrations are always `client`. Admins change roles from the user's page in `/plataforma` (needs a reason, logged in `audit_log`); an admin can't change their own role, so there is always at least one admin.
+- **Seeded accounts** (migration 004): `ajnavarrosilva@gmail.com` and `alvaro.navarro@ledens.es` → admin, `ana.anzola@ledens.es` → jefe, `alvaronavarrosilva@outlook.es` → client. Missing ones were created **without a password** — so nobody can register those emails themselves (409) — and existing ones only had their role changed. A passwordless account gets in via Google/Microsoft on that email (claims it, see the security note below) or with a temporary password from the CLI.
+- **CLI** (`src/scripts/users.js`), run where `DATABASE_URL` points at the right DB — in production inside the Container App:
+  ```bash
+  az containerapp exec -g rg-ledens -n ledens-backend --command "npm run users -- set-password ana.anzola@ledens.es"
+  npm run users -- set-password <email>           # random temporary password, printed once
+  npm run users -- set-role <email> <admin|jefe|client>
+  npm run users -- create <email> <role> <nombre completo>
+  ```
+  Every CLI change is also written to `audit_log` (actor "Sistema (consola)").
 
 ### Google &amp; Microsoft login (issues #11–12)
 
@@ -183,7 +209,7 @@ Sessions, not JWT: a `sessions` row per login (`002_sessions.sql`), the cookie o
 | `/` | `LandingPage` | Full landing (Hero, Proceso, Galeria, etc.) |
 | `/auth` | `AuthPage` | Email/password + Google/Microsoft login, built and owned by this project (issue #14) — no third-party auth SDK |
 | `/registro` | `RegistroPage` | Account creation (design from Claude Design); posts to `/api/auth/register`; no site header |
-| `/plataforma` | `plataforma/Plataforma` | Client area / site-manager workspace / admin panel (demo data, role switcher); logged-in users only (`RequireAuth` → `/auth?redirect=`); no site header |
+| `/plataforma` | `plataforma/Plataforma` | Client area / jefe de obra workspace / admin panel, chosen by the user's role (see Backend → "Roles"); logged-in users only (`RequireAuth` → `/auth?redirect=`); no site header. Admin screens use real data from `/api/admin`; obras, presupuestos and notifications are still demo data (`plataforma/data.js`) |
 | `/servicios/:slug` | `ServicioPage` | Individual service detail page |
 | `/privacidad` | `PrivacidadPage` | Privacy policy |
 | `/terminos` | `TerminosPage` | Terms of service |

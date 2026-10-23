@@ -1,7 +1,7 @@
 /* Demo data and formatting helpers for the client platform (/plataforma).
  * Ported verbatim from the Claude Design file "Ledens Plataforma.dc.html".
- * Everything here is sample content: there is no backend for obras,
- * presupuestos or users yet. */
+ * Everything here is sample content: there is no backend for obras or
+ * presupuestos yet. Users are real — see ./adminData.js. */
 import i1492 from '../../images/IMG_1492.webp';
 import t02 from '../../images/Tilos 57-02.webp';
 import t03 from '../../images/Tilos 57-03.webp';
@@ -60,17 +60,6 @@ const B031={ref:'PRE-2026-031',ver:'v1',name:'Terraza y cerramiento de aluminio'
 const PERMS=[['Usuarios',[['users.read','Ver usuarios y perfiles'],['users.edit','Editar datos de usuarios'],['business.users.manage','Gestión de altas y permisos de negocio','sens']]],['Clientes',[['clients.read.assigned','Ver clientes asignados'],['clients.read.all','Ver todos los clientes']]],['Presupuestos',[['budgets.read','Ver presupuestos'],['budgets.manage','Crear y editar presupuestos']]],['Obras',[['works.read.assigned','Ver obras asignadas'],['works.progress.submit','Registrar avance'],['works.progress.publish','Validar y publicar avance','sens'],['works.photos.upload','Subir fotografías']]],['Documentos',[['docs.read','Ver documentos'],['docs.publish','Publicar documentos']]],['Administración',[['audit.read','Consultar auditoría'],['roles.manage','Gestionar roles y administradores','admin']]]];
 const ALLP=PERMS.flatMap(g=>g[1].map(p=>p[0]));
 const BASE={admin:ALLP,jefe:['works.read.assigned','works.progress.submit','works.photos.upload','docs.read','clients.read.assigned'],comercial:['clients.read.assigned','budgets.read','budgets.manage'],client:[]};
-const USERS=[
- {id:'u0',name:'Administrador principal',email:'admin@ledens.es',since:'4 oct 2026',kind:'Interno',role:'admin',roleL:'Administrador principal',ver:'Verificado',verOk:true,prov:'Microsoft',prof:100,works:'—',last:'Hoy, 08:02',issues:[]},
- {id:'u1',name:'Lucía Fernández',email:'lucia.fernandez@demo.ledens.es',since:'12 ago 2026',kind:'Cliente con obra',role:'client',roleL:'Cliente',ver:'Verificado',verOk:true,prov:'Google',prof:80,works:'2',last:'Hoy, 09:55',phone:'+34 655 638 219',city:'Málaga',issues:[{id:'i1',type:'Perfil',title:'Faltan datos fiscales',detail:'Necesarios para emitir la factura de la certificación nº 2.',field:'DNI/NIE, dirección fiscal'}]},
- {id:'u2',name:'Javier Moreno',email:'j.moreno@ledens.es',since:'6 oct 2026',kind:'Interno',role:'jefe',roleL:'Jefe de obra',ver:'Verificado',verOk:true,prov:'Microsoft',prof:100,works:'3',last:'Hoy, 09:40',issues:[]},
- {id:'u3',name:'Marta Ruiz',email:'m.ruiz@ledens.es',since:'6 oct 2026',kind:'Interno',role:'comercial',roleL:'Comercial',ver:'Verificado',verOk:true,prov:'Microsoft',prof:100,works:'—',last:'Ayer, 19:12',issues:[]},
- {id:'u4',name:'Antonio Gil',email:'antonio.gil@demo.ledens.es',since:'12 oct 2026',kind:'Cliente sin obra',role:'client',roleL:'Cliente',ver:'Sin verificar',verOk:false,prov:'Email y contraseña',prof:40,works:'0',last:'12 oct',phone:'6555-123',city:'Torremolinos',issues:[{id:'i2',type:'Automática',title:'Teléfono con formato no válido',detail:'"6555-123" no corresponde a un número español de 9 cifras.',field:'Teléfono'},{id:'i3',type:'Automática',title:'Posible duplicado',detail:'Coincide nombre y localidad con agil.torremolinos@demo.ledens.es (alta 14 oct).',field:'Cuenta'}]},
- {id:'u5',name:'antonio gil',email:'agil.torremolinos@demo.ledens.es',since:'14 oct 2026',kind:'Cliente sin obra',role:'client',roleL:'Cliente',ver:'Verificado',verOk:true,prov:'Google',prof:30,works:'0',last:'14 oct',phone:'',city:'Torremolinos',issues:[{id:'i4',type:'Automática',title:'Posible duplicado',detail:'Coincide con antonio.gil@demo.ledens.es (alta 12 oct).',field:'Cuenta'}]},
- {id:'u6',name:'Carmen López Díaz',email:'carmen.lopez@demo.ledens.es',since:'2 oct 2026',kind:'Cliente sin obra',role:'client',roleL:'Cliente',ver:'Verificado',verOk:true,prov:'Email y contraseña',prof:100,works:'0',last:'19 oct',phone:'+34 611 204 877',city:'Málaga',issues:[]},
- {id:'u7',name:'Inmobiliaria Costa Sol S.L.',email:'pablo.vera@demo.ledens.es',since:'28 sep 2026',kind:'Cliente con obra',role:'client',roleL:'Cliente · empresa',ver:'Verificado',verOk:true,prov:'Microsoft',prof:90,works:'1',last:'20 oct',phone:'+34 952 118 430',city:'Marbella',issues:[{id:'i5',type:'Revisión humana',title:'NIF y razón social no coinciden',detail:'El NIF B-29XXXXXX figura asociado a otra denominación en el presupuesto aceptado.',field:'NIF/CIF'},{id:'i6',type:'Documental',title:'Pendiente de verificación documental',detail:'Se solicitó la escritura o certificado censal. No marcar como verificada hasta recibirlo.',field:'Identidad fiscal'}]},
- {id:'u8',name:'Rosa',email:'rosa.m@demo.ledens.es',since:'17 oct 2026',kind:'Cliente sin obra',role:'client',roleL:'Cliente',ver:'Sin verificar',verOk:false,prov:'Email y contraseña',prof:20,works:'0',last:'17 oct',phone:'',city:'',issues:[{id:'i7',type:'Automática',title:'Nombre incompleto',detail:'Solo se ha indicado el nombre de pila.',field:'Nombre y apellidos'}]}];
-const SPEC0={u3:['business.users.manage','users.read']};
 const ITYPE={'Automática':['#E3E7F3','#3E4D85'],'Revisión humana':['#FBF1DE','#7A4E0E'],'Documental':['#FBE0EA','#B84371'],'Perfil':['#EDEDEA','#3A3A38']};
 
-export { ST, BST, grp, eur, num, P, TODAY, D, days, MES, PH, OBRAS, B031, PERMS, ALLP, BASE, USERS, SPEC0, ITYPE };
+export { ST, BST, grp, eur, num, P, TODAY, D, days, MES, PH, OBRAS, B031, PERMS, ALLP, BASE, ITYPE };
