@@ -102,8 +102,8 @@
 .nm-t { font-size: 14px; font-weight: 600; line-height: 1.2; }
 .nm-s { font-size: 12px; font-weight: 400; color: var(--fg3); margin-top: 1px; }
 .hdr-ctas { display: flex; gap: 10px; align-items: center; flex: 0 0 auto; }
-/* Match Clerk's UserButton avatar size to the sibling auth buttons (40px) */
-.hdr-ctas .cl-userButtonAvatarBox { width: 40px; height: 40px; }
+.hdr-user { display: flex; align-items: center; gap: 10px; }
+.hdr-user-name { font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -644,8 +644,8 @@ footer { background: var(--ledens-navy); color: rgba(255,255,255,0.8); padding: 
 }
 .auth-tabs button.active { background: var(--ledens-blue); color: #fff; }
 
-.auth-title { font-size: 30px; font-weight: 700; letter-spacing: -0.025em; color: var(--ledens-navy); margin: 0 0 6px; }
-.auth-subtitle { font-size: 15px; color: var(--fg2); margin: 0 0 28px; }
+.auth-title { font-size: 30px; font-weight: 700; letter-spacing: -0.025em; color: var(--ledens-navy); margin: 0 0 6px; text-align: center; }
+.auth-subtitle { font-size: 15px; color: var(--fg2); margin: 0 0 28px; text-align: center; }
 
 /* Alert banner */
 .auth-alert {
@@ -672,6 +672,13 @@ footer { background: var(--ledens-navy); color: rgba(255,255,255,0.8); padding: 
   transition: border-color 160ms var(--ease), background 160ms var(--ease);
 }
 .auth-btn-social:hover { border-color: var(--ledens-blue); background: #FBFAF7; }
+.auth-btn-social:disabled { opacity: 0.55; cursor: not-allowed; }
+.auth-btn-social:disabled:hover { border-color: rgba(12,6,43,0.1); background: #fff; }
+.auth-soon {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  background: var(--ledens-blue-050); color: var(--ledens-blue); border-radius: 999px;
+  padding: 2px 8px; margin-left: 2px;
+}
 
 /* Divider */
 .auth-divider {

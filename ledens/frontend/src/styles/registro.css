@@ -67,7 +67,7 @@
   font-weight: 600; font-size: 14px; color: var(--ledens-navy);
   transition: border-color 160ms, background 160ms;
 }
-.reg .reg-btn-social:hover { border-color: var(--ledens-blue); background: #FBFAF7; }
+.reg .reg-btn-social:hover { border-color: var(--ledens-blue); background: #FBFAF7; color: var(--ledens-navy); text-decoration: none; }
 .reg-btn-social svg { width: 18px; height: 18px; }
 .reg-divider { display: flex; align-items: center; gap: 14px; margin: 24px 0; color: var(--fg3); font-size: 12px; font-weight: 500; }
 .reg-divider::before, .reg-divider::after { content: ""; flex: 1; height: 1px; background: rgba(12,6,43,.1); }
@@ -191,28 +191,6 @@
 }
 .reg-alert i { color: var(--danger); font-size: 18px; flex-shrink: 0; }
 .reg-alert b { display: block; color: #6E1F1F; }
-
-/* Verification (after submit) */
-.reg-done { text-align: center; padding: 24px 0; }
-.reg-badge {
-  width: 72px; height: 72px; border-radius: 20px; background: var(--ledens-teal-050); color: var(--ledens-teal-700);
-  display: inline-flex; align-items: center; justify-content: center; font-size: 34px; margin-bottom: 20px;
-  border: 1px solid rgba(104,192,181,.3);
-}
-.reg-done p { font-size: 15px; color: var(--fg2); line-height: 1.55; max-width: 420px; margin: 0 auto 24px; }
-.reg-done p b { color: var(--ledens-navy); }
-.reg-done form { max-width: 320px; margin: 0 auto 20px; text-align: left; }
-.reg-done .reg-inp input { text-align: center; letter-spacing: .4em; font-size: 18px; font-weight: 600; }
-.reg-acts { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-.reg .reg-btn {
-  height: 46px; padding: 0 20px; border-radius: 10px; font-weight: 600; font-size: 14px;
-  display: inline-flex; align-items: center; gap: 8px;
-}
-.reg .reg-btn-blue { background: var(--ledens-blue); color: #fff; }
-.reg .reg-btn-blue:hover { background: var(--ledens-blue-600); color: #fff; text-decoration: none; }
-.reg .reg-btn-out { background: #fff; color: var(--ledens-blue); box-shadow: inset 0 0 0 1.5px rgba(85,103,174,.3); }
-.reg .reg-btn-out:hover { box-shadow: inset 0 0 0 1.5px var(--ledens-blue); }
-.reg .reg-btn-out:disabled { opacity: .7; cursor: default; }
 
 @media (max-width: 980px) {
   .reg { grid-template-columns: 1fr; }

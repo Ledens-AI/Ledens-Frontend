@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { useSignIn, useSignUp, useAuth } from '@clerk/clerk-react';
+import { useAuth } from '../context/AuthContext.jsx';
 import logo from '../assets/logo-ledens-isotype.png';
-
-const CLERK_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 
 /* ─── Icons ─────────────────────────────────────────────────────────────── */
 const GoogleIcon = () => (
@@ -22,21 +20,32 @@ const MicrosoftIcon = () => (
     <path fill="#FFB900" d="M12 12h10v10H12z"/>
   </svg>
 );
+const AppleIcon = () => (
+  <svg viewBox="0 0 24 24" width="18" height="18" style={{ flexShrink: 0 }} fill="currentColor">
+    <path d="M16.365 1.43c0 1.14-.46 2.1-1.17 2.84-.78.83-2.05 1.46-3.07 1.38-.13-1.1.47-2.22 1.15-2.95.78-.84 2.14-1.46 3.09-1.27zM20.6 17.1c-.56 1.3-.83 1.88-1.56 3.03-1.02 1.6-2.46 3.6-4.24 3.62-1.58.02-1.99-1.03-4.13-1.02-2.14.01-2.6 1.04-4.18 1.02-1.78-.02-3.15-1.82-4.17-3.42C-.15 16.8-.56 11.8 1.49 9.2c1.14-1.44 2.86-2.33 4.5-2.33 1.72 0 2.8 1.02 4.22 1.02 1.38 0 2.22-1.02 4.22-1.02 1.45 0 3 .84 4.1 2.28-3.6 2-3.01 7.2 2.07 7.95z"/>
+  </svg>
+);
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
 function isValidEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()); }
 // Only same-site paths ("/plataforma"), never "//evil.com" or absolute URLs.
 function safeRedirect(v) { return v && v.startsWith('/') && !v.startsWith('//') ? v : '/'; }
 
-/* ─────────────────────────────────────────────────────────────────────────
- * AuthForm — uses Clerk hooks; only rendered when ClerkProvider is present
- * ───────────────────────────────────────────────────────────────────────── */
-function AuthForm() {
+// The backend redirects a failed Google/Microsoft login back here with one
+// of these codes in ?error=... (see routes/oauth.js) — translate for the UI.
+const OAUTH_ERRORS = {
+  google_cancelled: 'Has cancelado el inicio de sesión con Google.',
+  google_failed: 'No se pudo iniciar sesión con Google. Inténtalo de nuevo.',
+  google_email_in_use: 'Ese email ya tiene una cuenta con otro método de acceso. Inicia sesión con tu contraseña, o con el método que usaste la primera vez.',
+  microsoft_cancelled: 'Has cancelado el inicio de sesión con Microsoft.',
+  microsoft_failed: 'No se pudo iniciar sesión con Microsoft. Inténtalo de nuevo.',
+  microsoft_email_in_use: 'Ese email ya tiene una cuenta con otro método de acceso. Inicia sesión con tu contraseña, o con el método que usaste la primera vez.',
+};
+
+export default function AuthPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { isSignedIn } = useAuth();
-  const { signIn, setActive: setSignInActive, isLoaded: siLoaded } = useSignIn();
-  const { signUp, setActive: setSignUpActive, isLoaded: suLoaded } = useSignUp();
+  const { user, refresh } = useAuth();
   const redirectTo = safeRedirect(searchParams.get('redirect'));
 
   const [mode, setMode]         = useState(searchParams.get('mode') === 'signup' ? 'signup' : 'login');
@@ -45,17 +54,31 @@ function AuthForm() {
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd]   = useState(false);
   const [remember, setRemember] = useState(true);
-  const [verifying, setVerifying] = useState(false);
-  const [code, setCode]           = useState('');
   const [loading, setLoading]   = useState(false);
   const [errors, setErrors]     = useState({});
   const [alert, setAlert]       = useState(null);
 
-  useEffect(() => { if (isSignedIn) navigate(redirectTo); }, [isSignedIn]);
+  // Already logged in (e.g. came back here by mistake) — nothing to do.
+  useEffect(() => {
+    if (user) navigate(redirectTo);
+  }, [user, navigate, redirectTo]);
+
+  // A failed Google/Microsoft redirect lands back on /auth with ?error=...
+  // — surface it once, on arrival.
+  useEffect(() => {
+    const code = searchParams.get('error');
+    if (code) {
+      setAlert({
+        type: 'error',
+        title: 'No se pudo iniciar sesión',
+        msg: OAUTH_ERRORS[code] || 'Ha ocurrido un error. Inténtalo de nuevo.',
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function switchMode(m) {
     setMode(m); setErrors({}); setAlert(null);
-    setVerifying(false); setCode('');
     const q = new URLSearchParams();
     if (m === 'signup') q.set('mode', 'signup');
     if (redirectTo !== '/') q.set('redirect', redirectTo);
@@ -73,133 +96,44 @@ function AuthForm() {
     return Object.keys(e).length === 0;
   }
 
-  async function handleOAuth(provider) {
+  async function submitAuth(path, body, duplicateTitle) {
+    setLoading(true);
     try {
-      await signIn.authenticateWithRedirect({
-        strategy: `oauth_${provider}`,
-        redirectUrl: `${window.location.origin}/sso-callback`,
-        redirectUrlComplete: redirectTo,
+      const res = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       });
-    } catch (err) {
-      setAlert({ type: 'error', title: 'Error OAuth', msg: err.errors?.[0]?.message ?? err.message });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const title =
+          res.status === 409 ? duplicateTitle :
+          res.status === 503 ? 'No disponible' :
+                                'Credenciales incorrectas';
+        setAlert({ type: 'error', title, msg: data.error || 'Inténtalo de nuevo.' });
+        return;
+      }
+      await refresh();
+      navigate(redirectTo);
+    } catch {
+      setAlert({ type: 'error', title: 'Error de conexión', msg: 'No se pudo contactar con el servidor. Inténtalo de nuevo.' });
+    } finally {
+      setLoading(false);
     }
   }
 
-  async function handleLogin(e) {
+  function handleLogin(e) {
     e.preventDefault(); setAlert(null);
     if (!validate()) return;
-    setLoading(true);
-    try {
-      const res = await signIn.create({ identifier: email, password });
-      if (res.status === 'complete') {
-        await setSignInActive({ session: res.createdSessionId });
-        navigate(redirectTo);
-      }
-    } catch (err) {
-      const c = err.errors?.[0]?.code;
-      if (c === 'form_password_incorrect' || c === 'form_identifier_not_found') {
-        setAlert({ type: 'error', title: 'Credenciales incorrectas', msg: 'El email o la contraseña no coinciden.' });
-      } else {
-        setAlert({ type: 'error', title: 'Error', msg: err.errors?.[0]?.message ?? err.message });
-      }
-    } finally { setLoading(false); }
+    submitAuth('/api/auth/login', { email: email.trim(), password }, 'Credenciales incorrectas');
   }
 
-  async function handleSignup(e) {
+  function handleSignup(e) {
     e.preventDefault(); setAlert(null);
     if (!validate()) return;
-    setLoading(true);
-    try {
-      const [firstName, ...rest] = name.trim().split(' ');
-      await signUp.create({ emailAddress: email, password, firstName, lastName: rest.join(' ') || undefined });
-      await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
-      setVerifying(true);
-      setAlert({ type: 'success', title: 'Correo enviado', msg: `Hemos enviado un código a ${email}.` });
-    } catch (err) {
-      const c = err.errors?.[0]?.code;
-      if (c === 'form_identifier_exists') {
-        setAlert({ type: 'error', title: 'Email ya registrado', msg: 'Prueba a iniciar sesión.' });
-      } else {
-        setAlert({ type: 'error', title: 'Error', msg: err.errors?.[0]?.message ?? err.message });
-      }
-    } finally { setLoading(false); }
+    submitAuth('/api/auth/register', { name: name.trim(), email: email.trim(), password }, 'Email ya registrado');
   }
 
-  async function handleVerify(e) {
-    e.preventDefault(); setAlert(null);
-    if (!code.trim()) { setErrors({ code: 'Introduce el código.' }); return; }
-    setLoading(true);
-    try {
-      const res = await signUp.attemptEmailAddressVerification({ code });
-      if (res.status === 'complete') {
-        await setSignUpActive({ session: res.createdSessionId });
-        navigate(redirectTo);
-      }
-    } catch (err) {
-      setAlert({ type: 'error', title: 'Código incorrecto', msg: err.errors?.[0]?.message ?? 'Código no válido.' });
-    } finally { setLoading(false); }
-  }
-
-  return (
-    <AuthUI
-      mode={mode} switchMode={switchMode}
-      name={name} setName={setName}
-      email={email} setEmail={setEmail}
-      password={password} setPassword={setPassword}
-      showPwd={showPwd} setShowPwd={setShowPwd}
-      remember={remember} setRemember={setRemember}
-      verifying={verifying} code={code} setCode={setCode}
-      loading={loading} errors={errors} alert={alert}
-      isReady={siLoaded && suLoaded}
-      onLogin={handleLogin} onSignup={handleSignup}
-      onVerify={handleVerify} onOAuth={handleOAuth}
-    />
-  );
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
- * AuthFallback — shown when CLERK_ENABLED is false; no Clerk hooks
- * ───────────────────────────────────────────────────────────────────────── */
-function AuthFallback() {
-  const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-  const [mode, setMode] = useState(searchParams.get('mode') === 'signup' ? 'signup' : 'login');
-
-  function switchMode(m) {
-    setMode(m);
-    navigate(`/auth${m === 'signup' ? '?mode=signup' : ''}`, { replace: true });
-  }
-
-  return (
-    <AuthUI
-      mode={mode} switchMode={switchMode}
-      name="" setName={() => {}} email="" setEmail={() => {}
-      } password="" setPassword={() => {}}
-      showPwd={false} setShowPwd={() => {}}
-      remember={true} setRemember={() => {}}
-      verifying={false} code="" setCode={() => {}}
-      loading={false} errors={{}}
-      alert={{ type: 'info', title: 'Auth no configurada', msg: 'Clerk no está activo en este entorno de despliegue.' }}
-      isReady={false}
-      onLogin={e => e.preventDefault()}
-      onSignup={e => e.preventDefault()}
-      onVerify={e => e.preventDefault()}
-      onOAuth={() => {}}
-    />
-  );
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
- * AuthUI — pure presentational; shared by both variants
- * ───────────────────────────────────────────────────────────────────────── */
-function AuthUI({
-  mode, switchMode,
-  name, setName, email, setEmail, password, setPassword,
-  showPwd, setShowPwd, remember, setRemember,
-  verifying, code, setCode,
-  loading, errors, alert, isReady,
-  onLogin, onSignup, onVerify, onOAuth,
-}) {
   return (
     <div className="auth-wrap">
       {/* Art panel */}
@@ -236,15 +170,11 @@ function AuthUI({
             </button>
           </div>
 
-          <h1 className="auth-title">
-            {verifying ? 'Verifica tu email' : mode === 'login' ? 'Bienvenido de vuelta' : 'Crea tu cuenta Ledens'}
-          </h1>
+          <h1 className="auth-title">{mode === 'login' ? 'Bienvenido de vuelta' : 'Crea tu cuenta Ledens'}</h1>
           <p className="auth-subtitle">
-            {verifying
-              ? `Introduce el código de 6 dígitos que enviamos a ${email}.`
-              : mode === 'login'
-                ? 'Accede para ver el estado de tu reforma y hablar con tu equipo.'
-                : 'En 30 segundos tienes acceso al panel de tu reforma.'}
+            {mode === 'login'
+              ? 'Accede para ver el estado de tu reforma y hablar con tu equipo.'
+              : 'En 30 segundos tienes acceso al panel de tu reforma.'}
           </p>
 
           {alert && (
@@ -260,114 +190,94 @@ function AuthUI({
             </div>
           )}
 
-          {verifying ? (
-            <form onSubmit={onVerify} noValidate>
-              <div className={`auth-field${errors.code ? ' invalid' : ''}`}>
-                <label htmlFor="verify-code">Código de verificación</label>
+          {/* Google/Microsoft are plain links, not JS handlers — the backend
+              does the whole redirect + token exchange itself (see
+              routes/oauth.js), so there's nothing for the frontend to do but
+              navigate there. Apple (#13) has no backend route yet. */}
+          <div className="auth-social">
+            <a className="auth-btn-social" href="/api/auth/google">
+              <GoogleIcon /> Continuar con Google
+            </a>
+            <a className="auth-btn-social" href="/api/auth/microsoft">
+              <MicrosoftIcon /> Continuar con Microsoft
+            </a>
+            <button className="auth-btn-social" type="button" disabled>
+              <AppleIcon /> Continuar con Apple <span className="auth-soon">Próximamente</span>
+            </button>
+          </div>
+          <div className="auth-divider"><span>o</span></div>
+
+          <form onSubmit={mode === 'login' ? handleLogin : handleSignup} noValidate>
+            {mode === 'signup' && (
+              <div className={`auth-field${errors.name ? ' invalid' : ''}`}>
+                <label htmlFor="auth-name">Nombre completo</label>
                 <div className="auth-field-input">
-                  <input id="verify-code" type="text" inputMode="numeric" maxLength={6}
-                    placeholder="000000" autoComplete="one-time-code"
-                    value={code} onChange={e => setCode(e.target.value)} />
+                  <input id="auth-name" type="text" placeholder="Tu nombre"
+                    autoComplete="name" value={name}
+                    onChange={e => setName(e.target.value)} />
                 </div>
-                {errors.code && <div className="auth-field-error"><i className="ri-error-warning-line"></i> {errors.code}</div>}
+                {errors.name && <div className="auth-field-error"><i className="ri-error-warning-line"></i> {errors.name}</div>}
               </div>
-              <button type="submit" className="auth-submit" disabled={loading || !isReady}>
-                {loading ? <span className="auth-spinner"></span> : <span>Verificar email</span>}
-              </button>
-            </form>
-          ) : (
-            <>
-              <div className="auth-social">
-                <button className="auth-btn-social" type="button" onClick={() => onOAuth('google')}>
-                  <GoogleIcon /> Continuar con Google
-                </button>
-                <button className="auth-btn-social" type="button" onClick={() => onOAuth('microsoft')}>
-                  <MicrosoftIcon /> Continuar con Microsoft
+            )}
+
+            <div className={`auth-field${errors.email ? ' invalid' : ''}`}>
+              <label htmlFor="auth-email">Email</label>
+              <div className="auth-field-input">
+                <input id="auth-email" type="email" placeholder="tu@correo.es"
+                  autoComplete="email" value={email}
+                  onChange={e => setEmail(e.target.value)} />
+              </div>
+              {errors.email && <div className="auth-field-error"><i className="ri-error-warning-line"></i> {errors.email}</div>}
+            </div>
+
+            <div className={`auth-field${errors.password ? ' invalid' : ''}`}>
+              <label htmlFor="auth-password">Contraseña</label>
+              <div className="auth-field-input auth-field-input--icon">
+                <input id="auth-password"
+                  type={showPwd ? 'text' : 'password'}
+                  placeholder={mode === 'signup' ? 'Mínimo 8 caracteres' : '••••••••'}
+                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                  value={password} onChange={e => setPassword(e.target.value)} />
+                <button type="button" className="auth-toggle-pwd"
+                  aria-label="Mostrar contraseña"
+                  onClick={() => setShowPwd(v => !v)}>
+                  <i className={showPwd ? 'ri-eye-off-line' : 'ri-eye-line'}></i>
                 </button>
               </div>
-              <div className="auth-divider"><span>o</span></div>
+              {errors.password && <div className="auth-field-error"><i className="ri-error-warning-line"></i> {errors.password}</div>}
+            </div>
 
-              <form onSubmit={mode === 'login' ? onLogin : onSignup} noValidate>
-                {mode === 'signup' && (
-                  <div className={`auth-field${errors.name ? ' invalid' : ''}`}>
-                    <label htmlFor="auth-name">Nombre completo</label>
-                    <div className="auth-field-input">
-                      <input id="auth-name" type="text" placeholder="Tu nombre"
-                        autoComplete="name" value={name}
-                        onChange={e => setName(e.target.value)} />
-                    </div>
-                    {errors.name && <div className="auth-field-error"><i className="ri-error-warning-line"></i> {errors.name}</div>}
-                  </div>
-                )}
+            {mode === 'login' && (
+              <div className="auth-row-between">
+                <label className="auth-check">
+                  <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
+                  Recuérdame
+                </label>
+                <a href="#" className="auth-forgot">¿Olvidaste tu contraseña?</a>
+              </div>
+            )}
 
-                <div className={`auth-field${errors.email ? ' invalid' : ''}`}>
-                  <label htmlFor="auth-email">Email</label>
-                  <div className="auth-field-input">
-                    <input id="auth-email" type="email" placeholder="tu@correo.es"
-                      autoComplete="email" value={email}
-                      onChange={e => setEmail(e.target.value)} />
-                  </div>
-                  {errors.email && <div className="auth-field-error"><i className="ri-error-warning-line"></i> {errors.email}</div>}
-                </div>
+            <button type="submit" className="auth-submit" disabled={loading}>
+              {loading
+                ? <span className="auth-spinner"></span>
+                : <span>{mode === 'login' ? 'Iniciar sesión' : 'Crear cuenta'}</span>}
+            </button>
 
-                <div className={`auth-field${errors.password ? ' invalid' : ''}`}>
-                  <label htmlFor="auth-password">Contraseña</label>
-                  <div className="auth-field-input auth-field-input--icon">
-                    <input id="auth-password"
-                      type={showPwd ? 'text' : 'password'}
-                      placeholder={mode === 'signup' ? 'Mínimo 8 caracteres' : '••••••••'}
-                      autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                      value={password} onChange={e => setPassword(e.target.value)} />
-                    <button type="button" className="auth-toggle-pwd"
-                      aria-label="Mostrar contraseña"
-                      onClick={() => setShowPwd(v => !v)}>
-                      <i className={showPwd ? 'ri-eye-off-line' : 'ri-eye-line'}></i>
-                    </button>
-                  </div>
-                  {errors.password && <div className="auth-field-error"><i className="ri-error-warning-line"></i> {errors.password}</div>}
-                </div>
+            <p className="auth-alt-link">
+              {mode === 'login'
+                ? <>¿Aún no tienes cuenta?{' '}<button type="button" onClick={() => switchMode('signup')}>Regístrate gratis</button></>
+                : <>¿Ya tienes cuenta?{' '}<button type="button" onClick={() => switchMode('login')}>Inicia sesión</button></>}
+            </p>
 
-                {mode === 'login' && (
-                  <div className="auth-row-between">
-                    <label className="auth-check">
-                      <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
-                      Recuérdame
-                    </label>
-                    <a href="#" className="auth-forgot">¿Olvidaste tu contraseña?</a>
-                  </div>
-                )}
-
-                <button type="submit" className="auth-submit" disabled={loading || !isReady}>
-                  {loading
-                    ? <span className="auth-spinner"></span>
-                    : <span>{mode === 'login' ? 'Iniciar sesión' : 'Crear cuenta'}</span>}
-                </button>
-
-                <p className="auth-alt-link">
-                  {mode === 'login'
-                    ? <>¿Aún no tienes cuenta?{' '}<button type="button" onClick={() => switchMode('signup')}>Regístrate gratis</button></>
-                    : <>¿Ya tienes cuenta?{' '}<button type="button" onClick={() => switchMode('login')}>Inicia sesión</button></>}
-                </p>
-
-                {mode === 'signup' && (
-                  <p className="auth-terms">
-                    Al crear cuenta aceptas los <a href="#">Términos</a> y la{' '}
-                    <a href="#">Política de privacidad</a> de Ledens.
-                  </p>
-                )}
-              </form>
-            </>
-          )}
+            {mode === 'signup' && (
+              <p className="auth-terms">
+                Al crear cuenta aceptas los <a href="#">Términos</a> y la{' '}
+                <a href="#">Política de privacidad</a> de Ledens.
+              </p>
+            )}
+          </form>
         </div>
       </main>
     </div>
   );
-}
-
-/* ─── Export ─────────────────────────────────────────────────────────────── */
-export default function AuthPage() {
-  // AuthForm calls useSignIn / useSignUp which require ClerkProvider.
-  // AuthFallback is a pure React component with no Clerk dependency.
-  // We decide which to render at module level (build-time constant).
-  return CLERK_ENABLED ? <AuthForm /> : <AuthFallback />;
 }

@@ -21,11 +21,9 @@ on:
   workflow_dispatch:       # allow manual trigger from GitHub UI
 
 env:
-  REGISTRY:            cregledensmvp1-f0b3hcbabag9d3dp.azurecr.io
   IMAGE_NAME:          ledens-backend
-  RESOURCE_GROUP:      rg-ledens-mvp
+  RESOURCE_GROUP:      rg-ledens
   CONTAINER_APP_NAME:  ledens-backend
-  ACR_NAME:            cregledensmvp1
 
 jobs:
   build-and-deploy:
@@ -42,11 +40,13 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # ── 3. Authenticate Docker against ACR ────────────────────────────────
+      # ── 3. Resolve the registry in the resource group & log Docker in ─────
       - name: Login to ACR
-        # Use the full login-server URL — bypasses the alphanumeric-name-only
-        # validation in az acr login that rejects hyphens.
-        run: az acr login --name ${{ env.REGISTRY }}
+        run: |
+          ACR_NAME=$(az acr list -g "${{ env.RESOURCE_GROUP }}" --query "[0].name" -o tsv)
+          REGISTRY=$(az acr show -n "$ACR_NAME" --query loginServer -o tsv)
+          echo "REGISTRY=$REGISTRY" >> "$GITHUB_ENV"
+          az acr login --name "$ACR_NAME"
 
       # ── 4. Build & push — sha tag + latest ────────────────────────────────
       - name: Build and push image
@@ -74,21 +74,22 @@ jobs:
             --resource-group "${{ env.RESOURCE_GROUP }}" \
             --image     "${{ env.IMAGE_TAG }}"
 
-      # ── 6. Smoke-test the health endpoint ─────────────────────────────────
+      # ── 6. Smoke-test the health endpoint through SWA ─────────────────────
+      # The Container App is a SWA linked backend, so direct calls to its FQDN
+      # are rejected with 401; /api/* is only reachable via the SWA hostname.
       - name: Health check
         run: |
-          FQDN=$(az containerapp show \
-            --name "${{ env.CONTAINER_APP_NAME }}" \
+          SWA_HOST=$(az staticwebapp list \
             --resource-group "${{ env.RESOURCE_GROUP }}" \
-            --query "properties.configuration.ingress.fqdn" \
+            --query "[0].defaultHostname" \
             --output tsv)
 
-          echo "Backend FQDN: $FQDN"
+          echo "Health URL: https://${SWA_HOST}/api/health"
 
           # Retry up to 10 times — new revision may take a few seconds
           for i in $(seq 1 10); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              "https://${FQDN}/api/health" || echo "000")
+              "https://${SWA_HOST}/api/health" || echo "000")
             echo "Attempt $i: HTTP $STATUS"
             [ "$STATUS" = "200" ] && exit 0
             sleep 6

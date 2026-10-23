@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useSignUp, useAuth } from '@clerk/clerk-react';
+import { useAuth } from '../context/AuthContext.jsx';
 import logo from '../assets/logo-ledens-isotype.png';
 import '../styles/registro.css';
-
-const CLERK_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 
 /* ─── Icons ─────────────────────────────────────────────────────────────── */
 const GoogleIcon = () => (
@@ -55,87 +53,14 @@ function formatPhone(raw) {
   return d.replace(/(\d{3})(\d{0,3})(\d{0,3})/, (m, a, b, c) => [a, b, c].filter(Boolean).join(' '));
 }
 
-function clerkMessage(err) {
-  return err?.errors?.[0]?.longMessage ?? err?.errors?.[0]?.message ?? err?.message ?? 'Inténtalo de nuevo.';
-}
-
 /* ─────────────────────────────────────────────────────────────────────────
- * RegistroClerk — wires the form to Clerk sign-up (needs ClerkProvider)
+ * RegistroPage — creates the account through our own backend
+ * (POST /api/auth/register, see CLAUDE.md "Authentication"). The backend
+ * logs the new user straight in, so success goes to /plataforma.
  * ───────────────────────────────────────────────────────────────────────── */
-function RegistroClerk() {
+export default function RegistroPage() {
   const navigate = useNavigate();
-  const { isSignedIn } = useAuth();
-  const { signUp, setActive, isLoaded } = useSignUp();
-
-  useEffect(() => { if (isSignedIn) navigate('/'); }, [isSignedIn]);
-
-  const api = {
-    ready: isLoaded,
-    async signup(d) {
-      try {
-        await signUp.create({
-          emailAddress: d.email,
-          password: d.password,
-          firstName: d.firstName,
-          lastName: d.lastName,
-          unsafeMetadata: {
-            accountType: d.type,
-            phone: d.phone,
-            company: d.company,
-            cif: d.cif,
-            marketingOptIn: d.news,
-          },
-        });
-        await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
-      } catch (err) {
-        if (err?.errors?.[0]?.code === 'form_identifier_exists') {
-          throw new Error('Este email ya está registrado. Prueba a iniciar sesión.');
-        }
-        throw new Error(clerkMessage(err));
-      }
-    },
-    async verify(code) {
-      try {
-        const res = await signUp.attemptEmailAddressVerification({ code });
-        if (res.status === 'complete') {
-          await setActive({ session: res.createdSessionId });
-          navigate('/plataforma');
-        }
-      } catch (err) {
-        throw new Error(clerkMessage(err));
-      }
-    },
-    async resend() {
-      await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
-    },
-    async oauth(provider) {
-      await signUp.authenticateWithRedirect({
-        strategy: `oauth_${provider}`,
-        redirectUrl: `${window.location.origin}/sso-callback`,
-        redirectUrlComplete: '/',
-      });
-    },
-  };
-
-  return <RegistroUI api={api} />;
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
- * RegistroFallback — no ClerkProvider in this build; form validates only
- * ───────────────────────────────────────────────────────────────────────── */
-const UNAVAILABLE = 'El registro no está disponible en este entorno.';
-const fallbackApi = {
-  ready: true,
-  async signup()  { throw new Error(UNAVAILABLE); },
-  async verify()  { throw new Error(UNAVAILABLE); },
-  async resend()  {},
-  async oauth()   { throw new Error(UNAVAILABLE); },
-};
-
-/* ─────────────────────────────────────────────────────────────────────────
- * RegistroUI — the page itself
- * ───────────────────────────────────────────────────────────────────────── */
-function RegistroUI({ api }) {
+  const { user, refresh } = useAuth();
   const [type, setType]       = useState('particular');
   const [values, setValues]   = useState({ name: '', last: '', company: '', cif: '', email: '', phone: '', pwd: '', pwd2: '' });
   const [touched, setTouched] = useState(() => new Set());
@@ -145,11 +70,10 @@ function RegistroUI({ api }) {
   const [news, setNews]       = useState(false);
   const [alert, setAlert]     = useState(null);
   const [loading, setLoading] = useState(false);
-  const [sent, setSent]       = useState(false);
-  const [code, setCode]       = useState('');
-  const [codeErr, setCodeErr] = useState('');
-  const [resent, setResent]   = useState(false);
   const refs = useRef({});
+
+  // Already logged in (e.g. back here by mistake) — nothing to register.
+  useEffect(() => { if (user) navigate('/plataforma'); }, [user, navigate]);
 
   const touch = (...names) => setTouched(prev => {
     const next = new Set(prev);
@@ -203,48 +127,41 @@ function RegistroUI({ api }) {
     setAlert(null);
     setLoading(true);
     try {
-      await api.signup({
-        type,
-        firstName: values.name.trim(),
-        lastName: values.last.trim(),
-        email: values.email.trim(),
-        phone: `+34${values.phone.replace(/\s/g, '')}`,
-        company: type === 'empresa' ? values.company.trim() : undefined,
-        cif: type === 'empresa' ? values.cif.trim().toUpperCase() : undefined,
-        password: values.pwd,
-        news,
+      // The backend stores name, email and password; the other fields are
+      // sent along for when the users table grows columns for them.
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: `${values.name.trim()} ${values.last.trim()}`,
+          email: values.email.trim(),
+          password: values.pwd,
+          accountType: type,
+          phone: `+34${values.phone.replace(/\s/g, '')}`,
+          company: type === 'empresa' ? values.company.trim() : undefined,
+          cif: type === 'empresa' ? values.cif.trim().toUpperCase() : undefined,
+          marketingOptIn: news,
+        }),
       });
-      setSent(true);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch (err) {
-      setAlert({ title: 'No hemos podido crear tu cuenta', msg: err.message });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAlert({
+          title: res.status === 409 ? 'Este email ya está registrado'
+            : res.status === 503 ? 'Registro no disponible'
+            : 'No hemos podido crear tu cuenta',
+          msg: res.status === 409
+            ? 'Inicia sesión con tu contraseña, o con Google o Microsoft si te registraste así.'
+            : data.error || 'Inténtalo de nuevo.',
+        });
+        return;
+      }
+      await refresh();
+      navigate('/plataforma');
+    } catch {
+      setAlert({ title: 'Error de conexión', msg: 'No se pudo contactar con el servidor. Inténtalo de nuevo.' });
     } finally {
       setLoading(false);
     }
-  }
-
-  async function onVerify(e) {
-    e.preventDefault();
-    if (!/^\d{6}$/.test(code.trim())) { setCodeErr('Introduce el código de 6 dígitos.'); return; }
-    setCodeErr('');
-    setLoading(true);
-    try {
-      await api.verify(code.trim());
-    } catch (err) {
-      setCodeErr(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function onResend() {
-    setResent(true);
-    try { await api.resend(); } catch (err) { setCodeErr(clerkMessage(err)); }
-    setTimeout(() => setResent(false), 4000);
-  }
-
-  async function onOAuth(provider) {
-    try { await api.oauth(provider); } catch (err) { setAlert({ title: 'Error de acceso', msg: err.message }); }
   }
 
   /* Text input with label, error and optional prefix / trailing button */
@@ -302,41 +219,13 @@ function RegistroUI({ api }) {
             <span>¿Ya tienes cuenta? <Link to="/auth" className="reg-strong">Inicia sesión</Link></span>
           </div>
 
-          {sent ? (
-            <div className="reg-done">
-              <div className="reg-badge"><i className="ri-mail-check-line"></i></div>
-              <h1>Revisa tu correo</h1>
-              <p>Hemos enviado un código de verificación a <b>{values.email.trim()}</b>. Introdúcelo para activar tu cuenta.</p>
-              <form onSubmit={onVerify} noValidate>
-                <div className={`reg-field${codeErr ? ' invalid' : ''}`}>
-                  <label className="reg-l" htmlFor="reg-code">Código de verificación</label>
-                  <div className="reg-inp">
-                    <input id="reg-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6}
-                      placeholder="000000" value={code} autoFocus
-                      onChange={e => setCode(e.target.value.replace(/\D/g, ''))} />
-                  </div>
-                  <div className="reg-err"><i className="ri-error-warning-line"></i> {codeErr}</div>
-                </div>
-                <button type="submit" className="reg-submit" disabled={loading}>
-                  {loading ? <span className="reg-spinner"></span> : <span>Verificar y entrar</span>}
-                </button>
-              </form>
-              <div className="reg-acts">
-                <button className="reg-btn reg-btn-out" type="button" onClick={onResend} disabled={resent}>
-                  {resent
-                    ? <><i className="ri-check-line"></i> Enviado</>
-                    : <><i className="ri-refresh-line"></i> Reenviar email</>}
-                </button>
-                <Link className="reg-btn reg-btn-blue" to="/auth">Ir a iniciar sesión</Link>
-              </div>
-            </div>
-          ) : (
             <>
               <h1>Crea tu cuenta</h1>
               <p className="reg-sub">Solo te pediremos lo necesario para preparar tu presupuesto y darte acceso al panel.</p>
               <div className="reg-social">
-                <button className="reg-btn-social" type="button" onClick={() => onOAuth('google')}><GoogleIcon />Google</button>
-                <button className="reg-btn-social" type="button" onClick={() => onOAuth('microsoft')}><MicrosoftIcon />Microsoft</button>
+                {/* Plain links: the backend runs the whole OAuth redirect (routes/oauth.js). */}
+                <a className="reg-btn-social" href="/api/auth/google"><GoogleIcon />Google</a>
+                <a className="reg-btn-social" href="/api/auth/microsoft"><MicrosoftIcon />Microsoft</a>
               </div>
               <div className="reg-divider">o regístrate con tu email</div>
 
@@ -418,21 +307,15 @@ function RegistroUI({ api }) {
                   </label>
                 </div>
 
-                <button type="submit" className="reg-submit" disabled={loading || !api.ready}>
+                <button type="submit" className="reg-submit" disabled={loading}>
                   {loading ? <span className="reg-spinner"></span> : <span>Crear cuenta</span>}
                 </button>
                 <div className="reg-secure"><i className="ri-lock-2-line"></i> Conexión cifrada · Nunca compartimos tus datos</div>
               </form>
             </>
-          )}
         </div>
       </main>
     </div>
   );
 }
 
-/* ─── Export ─────────────────────────────────────────────────────────────── */
-export default function RegistroPage() {
-  // useSignUp requires ClerkProvider, which main.jsx only mounts when the key is set.
-  return CLERK_ENABLED ? <RegistroClerk /> : <RegistroUI api={fallbackApi} />;
-}

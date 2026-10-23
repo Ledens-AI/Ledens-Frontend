@@ -1,16 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import {
-  SignedIn,
-  SignedOut,
-  UserButton,
-} from '@clerk/clerk-react';
+import { useAuth } from '../context/AuthContext.jsx';
 import logo from '../assets/logo-ledens-isotype.png';
-
-// Clerk components must only be rendered inside <ClerkProvider>.
-// When the publishable key is missing (build without env var), we fall back to
-// plain static buttons so the site stays fully visible.
-const CLERK_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 
 const SERVICES = [
   { icon: 'ri-hammer-line',     slug: 'albanileria',   label: 'Albañilería',   desc: 'Obra, alicatado y solados' },
@@ -30,6 +21,8 @@ const SUCCESS_CASES = [
 ];
 
 export default function Header() {
+  const { user, loading, logout } = useAuth();
+
   return (
     <header className="hdr">
       <div className="hdr-inner">
@@ -82,17 +75,14 @@ export default function Header() {
         </nav>
 
         <div className="hdr-ctas">
-          {CLERK_ENABLED ? (
-            <>
-              <SignedOut>
-                <Link to="/auth" className="btn btn-sm btn-outline">INICIA SESIÓN</Link>
-                <Link to="/registro" className="btn btn-sm btn-blue">REGÍSTRATE</Link>
-              </SignedOut>
-              <SignedIn>
-                <Link to="/plataforma" className="btn btn-sm btn-blue">MI ÁREA</Link>
-                <UserButton afterSignOutUrl="/" />
-              </SignedIn>
-            </>
+          {!loading && user ? (
+            <div className="hdr-user">
+              <span className="hdr-user-name">{(user.name || user.email).split(' ')[0]}</span>
+              <Link to="/plataforma" className="btn btn-sm btn-blue">MI ÁREA</Link>
+              <button type="button" className="btn btn-sm btn-outline" onClick={logout}>
+                CERRAR SESIÓN
+              </button>
+            </div>
           ) : (
             <>
               <Link to="/auth" className="btn btn-sm btn-outline">INICIA SESIÓN</Link>

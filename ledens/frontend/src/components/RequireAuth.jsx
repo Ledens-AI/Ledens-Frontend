@@ -1,19 +1,16 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from '@clerk/clerk-react';
+import { useAuth } from '../context/AuthContext.jsx';
 
-const CLERK_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
-
-/* Where to send someone who isn't signed in: /auth, remembering the page so
- * AuthPage can bring them back after login. */
-function LoginRedirect() {
+/**
+ * Renders its children only for logged-in users; everyone else goes to /auth,
+ * which brings them back here (?redirect=) after an email/password login.
+ */
+export default function RequireAuth({ children }) {
+  const { user, loading } = useAuth();
   const { pathname, search } = useLocation();
-  return <Navigate to={`/auth?redirect=${encodeURIComponent(pathname + search)}`} replace />;
-}
 
-function ClerkGuard({ children }) {
-  const { isLoaded, isSignedIn } = useAuth();
-  if (!isLoaded) {
+  if (loading) {
     return (
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -24,13 +21,8 @@ function ClerkGuard({ children }) {
       </div>
     );
   }
-  return isSignedIn ? children : <LoginRedirect />;
-}
-
-/**
- * Renders its children only for signed-in users.
- * Without a Clerk key nobody can sign in, so the route always redirects.
- */
-export default function RequireAuth({ children }) {
-  return CLERK_ENABLED ? <ClerkGuard>{children}</ClerkGuard> : <LoginRedirect />;
+  if (!user) {
+    return <Navigate to={`/auth?redirect=${encodeURIComponent(pathname + search)}`} replace />;
+  }
+  return children;
 }

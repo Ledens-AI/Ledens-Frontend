@@ -39,27 +39,19 @@ ledens/
             └── contact.js  # POST /api/contact → leads.jsonl
 ```
 
-## Authentication (Clerk)
+## Authentication
 
-The header `INICIA SESIÓN` / `REGÍSTRATE` buttons are wired to Clerk's hosted
-auth via the React SDK (`@clerk/clerk-react`). When a user is signed in the
-two buttons are replaced with Clerk's `<UserButton />` (avatar + menu).
+The `INICIA SESIÓN` / `REGÍSTRATE` buttons go to `/auth`, a page built and
+owned by this project — email/password, Google and Microsoft login, all
+handled by the backend itself (no third-party auth SDK). Full detail —
+sessions, password hashing, the `/api/auth/*` routes, the OAuth flow — is in
+`CLAUDE.md`, not duplicated here. The frontend needs no auth-related
+environment variable at all; it just calls those endpoints.
 
-1. Create a project at <https://dashboard.clerk.com> → copy the **Publishable
-   key** (starts with `pk_test_...` or `pk_live_...`).
-2. Put it in `.env` (repo root — picked up by `docker-compose.yml` as a build
-   arg) **and/or** `frontend/.env.local` for non-Docker dev:
-   ```env
-   VITE_CLERK_PUBLISHABLE_KEY=pk_test_********
-   ```
-3. Rebuild the frontend image — Vite inlines the key at build time, so a
-   plain restart is not enough:
-   ```bash
-   docker compose up -d --build frontend
-   ```
-
-Missing key? The app still boots but logs a console error and the auth
-buttons won't open any modal.
+Google and Microsoft login need `GOOGLE_*`/`MICROSOFT_*` variables on the
+**backend** (see `.env.example`) — until those exist, their buttons on
+`/auth` respond "not configured" rather than breaking anything. Apple login
+isn't built yet (see CLAUDE.md, issue #13).
 
 ## Deploy on your PC (local)
 
@@ -67,7 +59,7 @@ Prerequisites: Docker Desktop running.
 
 ```bash
 cd ledens
-cp .env.example .env          # paste your VITE_CLERK_PUBLISHABLE_KEY
+cp .env.example .env
 docker compose up -d --build
 ```
 
