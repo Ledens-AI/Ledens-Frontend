@@ -2,6 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { getPool, isDbConfigured } from '../db/pool.js';
 import { requireRole, checkRole } from '../auth/sessions.js';
+import {FinanceError} from '../finance/service.js';
 import { FinanzasService, FinError, TYPES, isUuid } from '../finanzas/service.js';
 
 // Gestión financiera (/api/finanzas). Internal accounting data: admins and
@@ -12,7 +13,7 @@ export const FINANZAS_ROLES = ['admin', 'jefe'];
 
 // `authenticate` replaces only the session lookup (tests); the role check is
 // always the real one.
-export function createFinanzasRouter({ service, authenticate } = {}) {
+export function createFinanzasRouter({ service, authenticate, origin=process.env.CORS_ORIGIN } = {}) {
   const router = Router();
   router.use((_req, res, next) => {
     if (!service && !isDbConfigured()) return res.status(503).json({ error: 'Gestión financiera no disponible todavía' });
@@ -23,7 +24,8 @@ export function createFinanzasRouter({ service, authenticate } = {}) {
   // through an inbox; this module gets its own, per IP, after auth.
   router.use(rateLimit({ windowMs: 60 * 1000, max: 240, standardHeaders: true, legacyHeaders: false }));
 
-  const svc = () => service || new FinanzasService(getPool());
+  router.use((req,res,next)=>{if(req.method!=='GET'&&(!origin||req.get('origin')!==origin))return res.status(403).json({error:'Origen no permitido'});next();});
+  const svc = (req) => service || new FinanzasService(getPool(),req.user);
   const handle = (fn) => async (req, res, next) => { try { await fn(req, res); } catch (e) { next(e); } };
   const actor = (req) => ({ id: req.user.id, name: req.user.name, email: req.user.email });
   const typeParam = (req) => { if (!TYPES[req.params.type]) throw new FinError(400, 'Tipo no válido'); return req.params.type; };
@@ -38,18 +40,18 @@ export function createFinanzasRouter({ service, authenticate } = {}) {
   };
 
   router.get('/proyectos', handle(async (req, res) => {
-    res.json({ projects: await svc().listProjects({ q: String(req.query.q || '').slice(0, 100), limit: req.query.limit }) });
+    res.json({ projects: await svc(req).listProjects({ q: String(req.query.q || '').slice(0, 100), limit: req.query.limit }) });
   }));
 
-  router.get('/resumen', handle(async (_req, res) => {
-    const s = svc();
+  router.get('/resumen', handle(async (req, res) => {
+    const s = svc(req);
     const [summary, activity] = await Promise.all([s.pendingSummary(), s.recentActivity(15)]);
     res.json({ ...summary, actividad: activity });
   }));
 
   router.get('/registros', handle(async (req, res) => {
     const q = req.query;
-    res.json(await svc().listRecords({
+    res.json(await svc(req).listRecords({
       type: q.tipo || undefined, pending: q.pendientes === '1', estado: q.estado || undefined, project: q.proyecto || undefined,
       q: String(q.q || '').slice(0, 100), from: q.desde || undefined, to: q.hasta || undefined, min: q.min, max: q.max,
       sort: q.orden, dir: q.dir, page: q.pagina, pageSize: q.tam,
@@ -57,24 +59,24 @@ export function createFinanzasRouter({ service, authenticate } = {}) {
   }));
 
   router.get('/registros/:type/:id', handle(async (req, res) => {
-    res.json({ record: await svc().getRecord(typeParam(req), req.params.id) });
+    res.json({ record: await svc(req).getRecord(typeParam(req), req.params.id) });
   }));
 
   // { projectId: uuid | null, expectedProjectId?: uuid | null, reason? }
   router.put('/registros/:type/:id/proyecto', handle(async (req, res) => {
     const b = req.body || {};
-    const s = svc();
+    const s = svc(req);
     const result = await s.assign({ type: typeParam(req), id: req.params.id, projectId: projectOf(b.projectId, { nullable: true }),
       expectedProjectId: b.expectedProjectId === undefined ? undefined : (b.expectedProjectId || null),
-      reason: reasonOf(b), actor: actor(req) });
+      version:b.version,requestId:b.request_id,reason: reasonOf(b), actor: actor(req) });
     res.json({ ...result, record: await s.getRecord(req.params.type, req.params.id) });
   }));
 
   // { parts: [{ projectId, amount }], reason? }
   router.put('/registros/:type/:id/distribucion', handle(async (req, res) => {
     const b = req.body || {};
-    const s = svc();
-    const result = await s.distribute({ type: typeParam(req), id: req.params.id, parts: b.parts, reason: reasonOf(b), actor: actor(req) });
+    const s = svc(req);
+    const result = await s.distribute({ type: typeParam(req), id: req.params.id, parts: b.parts,version:b.version,requestId:b.request_id, reason: reasonOf(b), actor: actor(req) });
     res.json({ ...result, record: await s.getRecord(req.params.type, req.params.id) });
   }));
 
@@ -82,30 +84,30 @@ export function createFinanzasRouter({ service, authenticate } = {}) {
   router.put('/registros/:type/:id/revision', handle(async (req, res) => {
     const b = req.body || {};
     if (b.note !== undefined && (typeof b.note !== 'string' || b.note.length > 500)) throw new FinError(400, 'Nota no válida');
-    const s = svc();
-    const result = await s.setReview({ type: typeParam(req), id: req.params.id, needsReview: b.needsReview, note: b.note, actor: actor(req) });
+    const s = svc(req);
+    const result = await s.setReview({ type: typeParam(req), id: req.params.id, needsReview: b.needsReview, note: b.note,version:b.version, actor: actor(req) });
     res.json({ ...result, record: await s.getRecord(req.params.type, req.params.id) });
   }));
 
   // { action: 'assign' | 'review', items: [{ type, id }], projectId?, reason?, note? }
   router.post('/registros/lote', handle(async (req, res) => {
     const b = req.body || {};
-    const items = Array.isArray(b.items) ? b.items.map((i) => ({ type: i?.type, id: i?.id })) : b.items;
-    res.json(await svc().bulk({ items, action: b.action, projectId: b.action === 'assign' ? projectOf(b.projectId, { nullable: false }) : undefined,
+    const items = Array.isArray(b.items) ? b.items.map((i) => ({ type: i?.type, id: i?.id,version:i?.version })) : b.items;
+    res.json(await svc(req).bulk({ items,requestId:b.request_id, action: b.action, projectId: b.action === 'assign' ? projectOf(b.projectId, { nullable: false }) : undefined,
       reason: reasonOf(b), note: typeof b.note === 'string' ? b.note.slice(0, 500) : undefined, actor: actor(req) }));
   }));
 
   router.get('/proyectos/:id/rentabilidad', handle(async (req, res) => {
-    res.json(await svc().profitability(req.params.id));
+    res.json(await svc(req).profitability(req.params.id));
   }));
 
   router.get('/conciliacion', handle(async (req, res) => {
     const view = req.query.vista === 'documentos' ? 'documentos' : 'movimientos';
-    res.json(await svc().reconciliation({ view, page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100) }));
+    res.json(await svc(req).reconciliation({ view, page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100) }));
   }));
 
   router.use((err, _req, res, next) => {
-    if (err instanceof FinError) return res.status(err.status).json({ error: err.message, ...(err.extra || {}) });
+    if (err instanceof FinanceError) return res.status(err.status).json({ error: err.message, ...(err.extra || {}) });
     next(err);
   });
   return router;

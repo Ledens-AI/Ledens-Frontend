@@ -5,6 +5,7 @@ export class ApiError extends Error {
 }
 
 async function request(method, url, body) {
+  if(body&&method!=='GET')body={...body,request_id:body.request_id||crypto.randomUUID()};
   let r;
   try {
     r = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });

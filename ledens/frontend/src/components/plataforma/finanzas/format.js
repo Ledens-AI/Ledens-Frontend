@@ -23,6 +23,7 @@ export function fechaHora(v) {
 export const mesCorto = (ym) => { const [y, m] = ym.split('-'); return `${MES[Number(m) - 1]} ${y.slice(2)}`; };
 
 export const TIPO = {
+  concepto:{label:'Concepto de factura',plural:'Conceptos de facturas',icon:'ri-file-list-line',tercero:'Emisor / receptor',bg:'#E3E7F3',fg:'#3E4D85'},
   material: { label: 'Material', plural: 'Materiales', icon: 'ri-hammer-line', tercero: 'Proveedor', bg: '#E3E7F3', fg: '#3E4D85' },
   trabajador: { label: 'Trabajador', plural: 'Pagos a trabajadores', icon: 'ri-user-settings-line', tercero: 'Trabajador', bg: '#DEF3F0', fg: '#2F6B63' },
   cliente: { label: 'Cliente', plural: 'Pagos de clientes', icon: 'ri-hand-coin-line', tercero: 'Cliente', bg: '#FDF0F4', fg: '#B84371' },

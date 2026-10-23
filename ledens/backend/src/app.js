@@ -8,6 +8,8 @@ import oauthRouter from './routes/oauth.js';
 import adminRouter from './routes/admin.js';
 import { createIngestionRouter } from './routes/ingestion.js';
 import { createFinanzasRouter } from './routes/finanzas.js';
+import bridgeRouter from './routes/bridge.js';
+import financeRouter from './routes/finance.js';
 
 // Builds the Express app without starting it listening — used both by
 // src/index.js (real server) and by the tests (ephemeral server on a random
@@ -57,6 +59,8 @@ export function createApp() {
   app.use('/api/auth', oauthRouter);
   app.use('/api/auth', authRouter);
   app.use('/api/admin', adminRouter);
+  app.use('/api/bridge', bridgeRouter);
+  app.use('/api', financeRouter);
 
   app.use((err, _req, res, _next) => {
     console.error('[error]', err);

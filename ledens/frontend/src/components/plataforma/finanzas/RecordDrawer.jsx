@@ -44,14 +44,14 @@ export default function RecordDrawer({ type, id, onClose, onSaved, toast }) {
     if (hasAssignment && !reason.trim()) return setFormError('Indica el motivo del cambio.');
     setSaving(true); setFormError('');
     try {
-      const r = await api.assign(type, id, { projectId: project.id, expectedProjectId: rec.project_id || null, reason: reason.trim() || undefined });
+      const r = await api.assign(type, id, { projectId: project.id, version:rec.version,expectedProjectId: rec.project_id || null, reason: reason.trim() || undefined });
       done(r.record, r.changed ? `Asignado a ${project.label}.` : 'Sin cambios: ya estaba asignado a ese proyecto.');
     } catch (e) { fail(e); }
   };
   const removeAssign = async () => {
     if (!reason.trim()) return setFormError('Indica el motivo para quitar el proyecto.');
     setSaving(true); setFormError('');
-    try { const r = await api.assign(type, id, { projectId: null, expectedProjectId: rec.project_id || null, reason: reason.trim() }); done(r.record, 'Proyecto quitado. El registro vuelve a pendientes.'); }
+    try { const r = await api.assign(type, id, { projectId: null, version:rec.version,expectedProjectId: rec.project_id || null, reason: reason.trim() }); done(r.record, 'Proyecto quitado. El registro vuelve a pendientes.'); }
     catch (e) { fail(e); }
   };
 
@@ -67,7 +67,7 @@ export default function RecordDrawer({ type, id, onClose, onSaved, toast }) {
     if (hasAssignment && !reason.trim()) return setFormError('Indica el motivo del cambio.');
     setSaving(true); setFormError('');
     try {
-      const r = await api.distribute(type, id, { parts: parts.map((p, i) => ({ projectId: p.project.id, amount: parsed[i] })), reason: reason.trim() || undefined });
+      const r = await api.distribute(type, id, { version:rec.version,parts: parts.map((p, i) => ({ projectId: p.project.id, amount: parsed[i] })), reason: reason.trim() || undefined });
       done(r.record, r.exact === false ? 'Distribución guardada. Queda importe sin asignar.' : 'Distribución guardada.');
     } catch (e) { fail(e); }
   };
@@ -76,7 +76,7 @@ export default function RecordDrawer({ type, id, onClose, onSaved, toast }) {
   const toggleReview = async () => {
     setSaving(true); setFormError('');
     try {
-      const r = await api.review(type, id, { needsReview: !rec.needs_review, note: note.trim() || undefined });
+      const r = await api.review(type, id, { version:rec.version,needsReview: !rec.needs_review, note: note.trim() || undefined });
       setNote(''); done(r.record, rec.needs_review ? 'Revisión cerrada.' : 'Marcado para revisión.');
     } catch (e) { fail(e); }
   };
@@ -183,6 +183,7 @@ export default function RecordDrawer({ type, id, onClose, onSaved, toast }) {
 
             <section className="fin-section">
               <h3>Detalle</h3>
+              {rec.accounting_status!=='approved'?<p className="fin-warn">Pendiente de validación contable: asignar una obra no aprueba el coste o ingreso.</p>:null}
               <dl className="fin-dl">
                 <dt>Tipo</dt><dd>{rec.typeLabel}</dd>
                 <dt>Fecha</dt><dd>{fecha(rec.fecha)}</dd>

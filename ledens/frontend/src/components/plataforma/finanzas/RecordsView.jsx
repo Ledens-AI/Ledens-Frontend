@@ -56,7 +56,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
     }
     setBusy((b) => ({ ...b, [key(row)]: true }));
     try {
-      const { record } = await api.assign(row.type, row.id, { projectId: project.id, expectedProjectId: row.project_id || null, reason });
+      const { record } = await api.assign(row.type, row.id, { projectId: project.id, version:row.version,expectedProjectId: row.project_id || null, reason });
       replaceRow({ ...record, suggestion: undefined });
       toast(`Asignado a ${project.label}.`);
       onChanged?.();
@@ -78,7 +78,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
   const runBulk = async (body) => {
     setDialog((d) => ({ ...d, saving: true, error: '' }));
     try {
-      const res = await api.bulk({ ...body, items: sel.map((r) => ({ type: r.type, id: r.id })) });
+      const res = await api.bulk({ ...body, items: sel.map((r) => ({ type: r.type, id: r.id,version:r.version })) });
       const byKey = new Map(sel.map((r) => [key(r), r]));
       setDialog({ kind: 'result', res, rows: res.results.map((x) => ({ ...x, row: byKey.get(x.type + ':' + x.id) })) });
       setSelected(new Map(res.results.filter((x) => !x.ok).map((x) => [x.type + ':' + x.id, byKey.get(x.type + ':' + x.id)])));

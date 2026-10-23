@@ -13,6 +13,7 @@ const INTRO = {
   material: 'Cada concepto de factura se imputa por separado: una misma factura puede repartirse entre obras.',
   trabajador: 'Un pago que cubre varias obras se distribuye por importes, sin duplicarlo.',
   cliente: 'Cobros recibidos de clientes. Son cobros, no ingresos reconocidos: un anticipo no es facturación.',
+  concepto:'Líneas de facturas y documentos pendientes de clasificar, sin duplicar el original.',
   conciliacion: 'Movimientos bancarios y documentos que todavía no cuadran.',
   rentabilidad: 'Costes imputados, cobros y margen previsto de un proyecto.',
 };
@@ -40,7 +41,7 @@ export default function GestionFinanciera({ tab, go, toast, onPending }) {
   useEffect(() => { setDrill((d) => (d && d.tab !== tab ? null : d)); }, [tab]);
 
   const label = FIN_TABS.find((t) => t[0] === tab)?.[1] || '';
-  const isRecords = ['pendientes', 'material', 'trabajador', 'cliente'].includes(tab);
+  const isRecords = ['pendientes', 'material', 'trabajador', 'cliente','concepto'].includes(tab);
   const project = drill && drill.tab === tab ? drill.project : null;
 
   return (

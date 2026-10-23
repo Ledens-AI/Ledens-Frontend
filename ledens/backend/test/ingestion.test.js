@@ -20,8 +20,9 @@ before(async()=>{
   await db.exec(`CREATE SCHEMA ledens; CREATE TABLE ledens.documents
     (id uuid PRIMARY KEY DEFAULT gen_random_uuid(),registered_on date, review_state text,enlacearchivo text,
     observaciones text,document_on date,trimestre text,numerodocumento text,tercero text,niftercero text,
-    base_amount numeric,vat_amount numeric,total numeric);`);
+    base_amount numeric,vat_amount numeric,total numeric,tipo text);`);
   await db.exec(await fs.readFile(new URL('../src/db/migrations/004_invoice_ingestion.sql',import.meta.url),'utf8'));
+  await db.exec('ALTER TABLE ledens.invoice_ingestions ADD COLUMN invoice_currency text,ADD COLUMN total_confidence numeric,ADD COLUMN number_confidence numeric,ADD COLUMN party_confidence numeric,ADD COLUMN tax_id_confidence numeric,ADD COLUMN direction_confidence numeric');
   const pool={connect:async()=>({query:(q,p)=>db.query(q,p),release(){}})};
   service=new IngestionService(pool,ocr,config);
   const pdf=await PDFDocument.create();pdf.addPage();pdf64=Buffer.from(await pdf.save()).toString('base64');

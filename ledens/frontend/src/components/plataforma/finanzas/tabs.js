@@ -7,6 +7,7 @@ export const FIN_TABS = [
   ['material', 'Materiales', 'ri-hammer-line'],
   ['trabajador', 'Pagos a trabajadores', 'ri-user-settings-line'],
   ['cliente', 'Pagos de clientes', 'ri-hand-coin-line'],
+  ['concepto', 'Conceptos de facturas', 'ri-file-list-line'],
   ['conciliacion', 'Conciliación bancaria', 'ri-bank-line'],
   ['rentabilidad', 'Rentabilidad por proyecto', 'ri-line-chart-line'],
 ];
