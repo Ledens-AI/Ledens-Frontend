@@ -102,7 +102,7 @@ export function createFinanzasRouter({ service, authenticate, origin=process.env
   }));
 
   router.get('/conciliacion', handle(async (req, res) => {
-    const view = req.query.vista || 'registros';
+    const view = req.query.vista || 'movimientos';
     res.json(await svc(req).reconciliation({ view, page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), reason:req.query.motivo, from:req.query.desde, to:req.query.hasta }));
   }));
 

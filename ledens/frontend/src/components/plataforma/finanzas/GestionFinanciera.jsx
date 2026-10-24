@@ -14,7 +14,7 @@ const INTRO = {
   trabajador: 'Un pago que cubre varias obras se distribuye por importes, sin duplicarlo.',
   cliente: 'Cobros recibidos de clientes. Son cobros, no ingresos reconocidos: un anticipo no es facturación.',
   concepto:'Líneas de facturas y documentos pendientes de clasificar, sin duplicar el original.',
-  conciliacion: 'Registros sin documento o sin Bridge confirmado, conciliaciones parciales y casos pendientes de revisión.',
+  conciliacion: 'Movimientos bancarios pendientes de conciliar con sus documentos.',
   rentabilidad: 'Costes imputados, cobros y margen previsto de un proyecto.',
 };
 

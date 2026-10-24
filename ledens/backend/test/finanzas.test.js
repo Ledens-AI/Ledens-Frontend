@@ -70,21 +70,30 @@ test('HTTP authentication, role check, CSRF and assignment version survive the a
 });
 
 test('reconciliation inbox includes missing documents and Bridge, partial and review; excludes confirmed',async()=>{
- const r=await source();let inbox=await svc.reconciliation({q:'Cemento'});assert.ok(inbox.rows.some(x=>x.id===r.id&&x.motivos.includes('sin_documento')&&x.motivos.includes('sin_bridge')));
+ const r=await source();let inbox=await svc.reconciliation({view:'registros',q:'Cemento'});assert.ok(inbox.rows.some(x=>x.id===r.id&&x.motivos.includes('sin_documento')&&x.motivos.includes('sin_bridge')));
  const doc=(await db.query("INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento) VALUES(-1200,'Pagar','2025-09-01','RECON-TEST') RETURNING id")).rows[0].id;
  const bank=(await db.query("INSERT INTO ledens.bank_movements(total_amount,amount,currency,completed_on,description) VALUES(-1200,-1200,'EUR','2025-09-01','RECON-TEST') RETURNING id")).rows[0].id;
  await db.query('UPDATE ledens.material_expenses SET document_id=$1 WHERE id=$2',[doc,r.id]);
- inbox=await svc.reconciliation({reason:'sin_bridge',q:'RECON-TEST'});assert.ok(inbox.rows.some(x=>x.id===r.id));
+ inbox=await svc.reconciliation({view:'registros',reason:'sin_bridge',q:'RECON-TEST'});assert.ok(inbox.rows.some(x=>x.id===r.id));
  await db.query("INSERT INTO ledens.bank_document_allocations(document_id,bank_movement_id,allocated_amount,state) VALUES($1,$2,-600,'Confirmado')",[doc,bank]);
- assert.ok((await svc.reconciliation({reason:'parcial',q:'RECON-TEST'})).rows.some(x=>x.id===r.id));
+ assert.ok((await svc.reconciliation({view:'registros',reason:'parcial',q:'RECON-TEST'})).rows.some(x=>x.id===r.id));
  await db.query("UPDATE ledens.bank_document_allocations SET allocated_amount=-1200 WHERE document_id=$1",[doc]);
- assert.ok(!(await svc.reconciliation({q:'RECON-TEST'})).rows.some(x=>x.id===r.id));
+ assert.ok(!(await svc.reconciliation({view:'registros',q:'RECON-TEST'})).rows.some(x=>x.id===r.id));
  assert.equal((await svc.reconciliation({view:'documentos',q:'RECON-TEST'})).total,0);
  assert.equal((await svc.reconciliation({view:'movimientos',q:'RECON-TEST'})).total,0);
  await db.query("UPDATE ledens.bank_document_allocations SET state='Revisar' WHERE document_id=$1",[doc]);
- assert.ok((await svc.reconciliation({reason:'revision',q:'RECON-TEST'})).rows.some(x=>x.id===r.id));
+ assert.ok((await svc.reconciliation({view:'registros',reason:'revision',q:'RECON-TEST'})).rows.some(x=>x.id===r.id));
  assert.equal((await svc.reconciliation({view:'movimientos',q:'RECON-TEST'})).total,1);
- const beyond=await svc.reconciliation({q:'RECON-TEST',page:100,pageSize:1});assert.equal(beyond.rows.length,0);assert.ok(beyond.total>0);
+ const beyond=await svc.reconciliation({view:'registros',q:'RECON-TEST',page:100,pageSize:1});assert.equal(beyond.rows.length,0);assert.ok(beyond.total>0);
  await assert.rejects(svc.reconciliation({view:'invalid'}),{status:400});await assert.rejects(svc.reconciliation({from:'invalid'}),{status:400});
  await assert.rejects(new FinanzasService(pool,jefe).reconciliation({view:'registros'}),{status:403});
+});
+
+test('default reconciliation inbox contains only bank movements and deduplicates document links',async()=>{
+ const d1=(await db.query("INSERT INTO ledens.documents(total,tipo,numerodocumento) VALUES(-40,'Pagar','BANK-ONLY-A') RETURNING id")).rows[0].id;
+ const d2=(await db.query("INSERT INTO ledens.documents(total,tipo,numerodocumento) VALUES(-60,'Pagar','BANK-ONLY-B') RETURNING id")).rows[0].id;
+ const bank=(await db.query("INSERT INTO ledens.bank_movements(total_amount,amount,currency,description) VALUES(-100,-100,'EUR','BANK-ONLY') RETURNING id")).rows[0].id;
+ await db.query("INSERT INTO ledens.bank_document_allocations(document_id,bank_movement_id,allocated_amount,state) VALUES($1,$3,-40,'Confirmado'),($2,$3,-30,'Confirmado')",[d1,d2,bank]);
+ const inbox=await svc.reconciliation({q:'BANK-ONLY'});assert.equal(inbox.total,1);assert.equal(inbox.rows.length,1);assert.equal(inbox.rows[0].type,'movimiento');assert.equal(Number(inbox.rows[0].por_conciliar),-30);assert.equal(inbox.rows[0].enlaces,2);assert.ok(inbox.rows[0].numerodocumento.includes('BANK-ONLY-A'));
+ await db.query("UPDATE ledens.bank_document_allocations SET allocated_amount=-60 WHERE document_id=$1",[d2]);assert.equal((await svc.reconciliation({q:'BANK-ONLY'})).total,0);
 });
