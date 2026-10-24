@@ -1,3 +1,4 @@
+import {AlertService} from '../notifications/service.js';
 import {createHash} from 'node:crypto';
 import {LOCK_ID,RULE_VERSION,cents,abs,decimal,day,automaticBlock,eligibleBank,hasParty,hasReference,documentFingerprint,bankFingerprint} from './rules.js';
 
@@ -124,7 +125,7 @@ export class BridgeService{
     const pending=(await this.pool.query(`SELECT document_id FROM ledens.bridge_cases WHERE status='pending' AND next_attempt_at<=now()
       ORDER BY next_attempt_at,created_at LIMIT $1`,[limit])).rows;
     const results=[];
-    for(const row of pending){try{results.push(await this.evaluate(row.document_id));}catch(e){results.push({document_id:row.document_id,status:'error',reason:e.code||'bridge_failed'});}}
+    for(const row of pending){try{results.push(await this.evaluate(row.document_id));}catch(e){results.push({document_id:row.document_id,status:'error',reason:e.code||'bridge_failed'});try{await new AlertService(this.pool).error({type:'bridge',documentId:row.document_id,reason:e.code||'bridge_failed'});}catch{console.error('[alerts] unable to persist Bridge failure');}}}
     return {evaluated:results.length,matched:results.filter(x=>x.status==='matched').length,pending:results.filter(x=>x.status==='pending').length,errors:results.filter(x=>x.status==='error').length};
   }
   async preview(limit=1000){

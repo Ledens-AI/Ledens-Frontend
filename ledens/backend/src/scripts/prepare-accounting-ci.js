@@ -9,4 +9,5 @@ try{
  await pool.query(fixture);
  await pool.query('CREATE DATABASE ledens_finance_test');
  await pool.query('CREATE DATABASE ledens_finance_ui_test');
+ await pool.query('CREATE DATABASE ledens_notifications_test');
 }finally{await pool.end();}

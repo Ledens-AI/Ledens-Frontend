@@ -4,6 +4,7 @@ import { getPool, isDbConfigured } from '../db/pool.js';
 import { validateInvoice, IngestError } from '../ingestion/validation.js';
 import { InvoiceOcr } from '../ingestion/ocr.js';
 import { IngestionService } from '../ingestion/service.js';
+import {AlertService} from '../notifications/service.js';
 import {BridgeService} from '../bridge/service.js';
 
 export function createIngestionRouter({service,config,tokenHash}={}) {
@@ -37,6 +38,12 @@ export function createIngestionRouter({service,config,tokenHash}={}) {
     const result=await new BridgeService(getPool()).run(50);
     res.status(result.errors?503:200).json(result);
   }));
+  router.post('/notifications/claim',handle(async(req,res)=>res.json(await new AlertService(getPool()).claim())));
+  router.post('/notifications/:id/ack',handle(async(req,res)=>{
+    if(!/^[0-9a-f-]{36}$/i.test(req.body?.lease_token||'')||typeof req.body?.delivered!=='boolean')return res.status(400).json({error:'invalid_ack'});
+    const ok=await new AlertService(getPool()).acknowledge(req.params.id,req.body.lease_token,req.body.delivered);
+    res.status(ok?200:409).json({acknowledged:ok});
+  }));
   router.param('id',(req,res,next,id)=>{
     if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return res.status(400).json({error:'invalid_id'});
     next();
@@ -46,11 +53,12 @@ export function createIngestionRouter({service,config,tokenHash}={}) {
     const result=await getService().archived(req.params.id,req.body?.archive_url);
     if(process.env.BRIDGE_ENABLED==='true'){
       try{await new BridgeService(getPool()).evaluate(result.document_id,{force:true});}
-      catch(e){console.error('[bridge] deferred',e.code||e.name);}
+      catch(e){console.error('[bridge] deferred',e.code||e.name);try{await new AlertService(getPool()).error({type:'bridge',documentId:result.document_id,reason:e.code||'bridge_deferred'});}catch{console.error('[alerts] unable to persist Bridge failure');}}
     }
     res.json(result);
   }));
-  router.use((err,req,res,next)=>{
+  router.use(async(err,req,res,next)=>{
+    if(!req.path.startsWith('/notifications')&&isDbConfigured()){try{await new AlertService(getPool()).error({documentId:null,type:req.path.includes('/bridge')?'bridge':'ingestion',reason:err instanceof IngestError?err.code:'ingestion_temporarily_unavailable',filename:req.body?.filename});}catch{console.error('[alerts] unable to persist request failure');}} 
     if(err instanceof IngestError) return res.status(err.status).json({error:err.code});
     if(err.type==='entity.too.large') return res.status(413).json({error:'payload_too_large'});
     if(err.type==='entity.parse.failed') return res.status(400).json({error:'invalid_json'});
