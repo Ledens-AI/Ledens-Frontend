@@ -48,3 +48,15 @@ jobs:
           DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_finance_test
           FINANCE_TEST_DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_finance_test
         run: node --test test/finance.test.js
+
+      - name: Financial UI adapter on PostgreSQL 16
+        env:
+          DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_finance_ui_test
+          FINANZAS_TEST_DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_finance_ui_test
+        run: node --test test/finanzas.test.js
+      - name: Frontend dependency installation
+        working-directory: ledens/frontend
+        run: npm ci
+      - name: Frontend production build
+        working-directory: ledens/frontend
+        run: npm run build

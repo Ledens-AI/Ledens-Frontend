@@ -298,7 +298,7 @@ export class FinanceService {
  }
  async evolution(user,projectId,{limit=50,offset=0}={}){
    await this.permission(this.pool,user,projectId);
-   return (await this.pool.query(`SELECT date_trunc('month',recognized_on)::date month,
+   return (await this.pool.query(`SELECT date_trunc('month',recognized_on)::date AS "month",
     coalesce(sum(economic_amount) FILTER(WHERE category='revenue'),0)::text revenue,
     coalesce(sum(economic_amount) FILTER(WHERE category IN ('materials','labor','subcontract','other_direct')),0)::text direct_cost
     FROM ledens.v_project_recognized WHERE project_id=$1 AND recognized_on IS NOT NULL GROUP BY 1 ORDER BY 1 LIMIT $2 OFFSET $3`,[projectId,limit,offset])).rows;

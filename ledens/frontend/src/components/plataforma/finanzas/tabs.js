@@ -1,0 +1,13 @@
+// Sections of Gestión financiera, in navigation order. Kept apart from the
+// screens so Plataforma.jsx can build the sidebar without loading them
+// (the module itself is lazy-loaded: clients never download it).
+export const FIN_TABS = [
+  ['resumen', 'Resumen', 'ri-dashboard-line'],
+  ['pendientes', 'Pendientes de asignación', 'ri-inbox-line'],
+  ['material', 'Materiales', 'ri-hammer-line'],
+  ['trabajador', 'Pagos a trabajadores', 'ri-user-settings-line'],
+  ['cliente', 'Pagos de clientes', 'ri-hand-coin-line'],
+  ['concepto', 'Conceptos de facturas', 'ri-file-list-line'],
+  ['conciliacion', 'Conciliación bancaria', 'ri-bank-line'],
+  ['rentabilidad', 'Rentabilidad por proyecto', 'ri-line-chart-line'],
+];

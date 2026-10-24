@@ -8,4 +8,5 @@ try{
    .split('\n').filter(line=>!line.startsWith('CREATE TABLE public.')).join('\n');
  await pool.query(fixture);
  await pool.query('CREATE DATABASE ledens_finance_test');
+ await pool.query('CREATE DATABASE ledens_finance_ui_test');
 }finally{await pool.end();}

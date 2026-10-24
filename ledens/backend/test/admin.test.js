@@ -96,6 +96,24 @@ test('/api/admin is 401 logged out and 403 for clients and jefes de obra', { ski
   }
 });
 
+test('/api/finanzas is 401 logged out and 403 for clients, open to jefes and admins', { skip }, async () => {
+  const client = await loginAs('client');
+  const jefe = await loginAs('jefe');
+  const admin = await loginAs('admin');
+  try {
+    assert.equal((await call('GET', '/api/finanzas/registros')).status, 401);
+    assert.equal((await call('GET', '/api/finanzas/registros', null, client.cookie)).status, 403);
+    assert.equal((await call('POST', '/api/finanzas/registros/lote', { action: 'review', items: [] }, client.cookie)).status, 403);
+    // 200 with the accounting tables imported, 503 on a local auth-only database.
+    for (const u of [jefe, admin]) {
+      const s = (await call('GET', '/api/finanzas/resumen', null, u.cookie)).status;
+      assert.ok([200, 503].includes(s), `got ${s}`);
+    }
+  } finally {
+    await cleanup(client.email, jefe.email, admin.email);
+  }
+});
+
 test('an admin lists users without password hashes', { skip }, async () => {
   const admin = await loginAs('admin');
   try {
