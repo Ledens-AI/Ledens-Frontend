@@ -68,3 +68,23 @@ test('HTTP authentication, role check, CSRF and assignment version survive the a
  assert.equal((await fetch(url,{method:'PUT',headers:{'x-user':'admin','content-type':'application/json',origin:'https://ledens.test'},body:JSON.stringify(body)})).status,200);
  }finally{await new Promise(resolve=>server.close(resolve));}
 });
+
+test('reconciliation inbox includes missing documents and Bridge, partial and review; excludes confirmed',async()=>{
+ const r=await source();let inbox=await svc.reconciliation({q:'Cemento'});assert.ok(inbox.rows.some(x=>x.id===r.id&&x.motivos.includes('sin_documento')&&x.motivos.includes('sin_bridge')));
+ const doc=(await db.query("INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento) VALUES(-1200,'Pagar','2025-09-01','RECON-TEST') RETURNING id")).rows[0].id;
+ const bank=(await db.query("INSERT INTO ledens.bank_movements(total_amount,amount,currency,completed_on,description) VALUES(-1200,-1200,'EUR','2025-09-01','RECON-TEST') RETURNING id")).rows[0].id;
+ await db.query('UPDATE ledens.material_expenses SET document_id=$1 WHERE id=$2',[doc,r.id]);
+ inbox=await svc.reconciliation({reason:'sin_bridge',q:'RECON-TEST'});assert.ok(inbox.rows.some(x=>x.id===r.id));
+ await db.query("INSERT INTO ledens.bank_document_allocations(document_id,bank_movement_id,allocated_amount,state) VALUES($1,$2,-600,'Confirmado')",[doc,bank]);
+ assert.ok((await svc.reconciliation({reason:'parcial',q:'RECON-TEST'})).rows.some(x=>x.id===r.id));
+ await db.query("UPDATE ledens.bank_document_allocations SET allocated_amount=-1200 WHERE document_id=$1",[doc]);
+ assert.ok(!(await svc.reconciliation({q:'RECON-TEST'})).rows.some(x=>x.id===r.id));
+ assert.equal((await svc.reconciliation({view:'documentos',q:'RECON-TEST'})).total,0);
+ assert.equal((await svc.reconciliation({view:'movimientos',q:'RECON-TEST'})).total,0);
+ await db.query("UPDATE ledens.bank_document_allocations SET state='Revisar' WHERE document_id=$1",[doc]);
+ assert.ok((await svc.reconciliation({reason:'revision',q:'RECON-TEST'})).rows.some(x=>x.id===r.id));
+ assert.equal((await svc.reconciliation({view:'movimientos',q:'RECON-TEST'})).total,1);
+ const beyond=await svc.reconciliation({q:'RECON-TEST',page:100,pageSize:1});assert.equal(beyond.rows.length,0);assert.ok(beyond.total>0);
+ await assert.rejects(svc.reconciliation({view:'invalid'}),{status:400});await assert.rejects(svc.reconciliation({from:'invalid'}),{status:400});
+ await assert.rejects(new FinanzasService(pool,jefe).reconciliation({view:'registros'}),{status:403});
+});
