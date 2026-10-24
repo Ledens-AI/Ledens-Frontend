@@ -13,3 +13,9 @@ Se conservan las sesiones y roles existentes. Cliente recibe 403. Admin accede a
 Pruebas: test/finanzas.test.js verifica que interfaz y API usan una sola asignación, límites y reparto, concurrencia, permisos, filtros, marcas de revisión, lotes, historial, separación de tesorería y autenticación/CSRF. Se ejecuta además la batería canónica del PR 21. El frontend se valida con vite build.
 
 El despliegue normal aplica la migración 010 después de las 005/006 ya desplegadas. No se sustituye la ingesta de facturas, el Bridge, Revolut ni la autenticación. Las sugerencias no asignan automáticamente proyectos desde la interfaz.
+
+## Pendiente de conciliación
+
+La sección de conciliación muestra registros financieros sin documento, documentos sin enlaces Bridge, enlaces no confirmados y diferencias entre el total firmado del documento y sus imputaciones confirmadas. Las vistas Movimientos y Documentos permiten detectar también orígenes sin registro financiero. Solo administrador puede consultar la bandeja global. Es una consulta de revisión; no crea ni confirma conciliaciones desde la pantalla.
+
+GET /api/finanzas/conciliacion: vista=registros|movimientos|documentos (por defecto registros), motivo=sin_documento|sin_bridge|revision|parcial, q, desde, hasta, pagina, tam (máximo 100). Respuesta: rows, total, page, pageSize. Cada fila incluye id,type,fecha,tercero,concepto,numerodocumento,referencia,importe,document_id,enlaces,conciliado,motivos. Los importes mantienen el signo original; conciliado es el total confirmado del documento o movimiento, no un coste adicional. Los registros financieros comparten el estado de su documento. Las transferencias internas se excluyen de la vista bancaria. No se modifica el esquema ni el Bridge.
