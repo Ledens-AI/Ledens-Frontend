@@ -10,7 +10,7 @@ export const STATES=['pendiente','asignado','parcial','revision'];
 // Unassigned cash (016) shares the «movimientos» inbox: signed like a bank movement.
 const CASH_CANDIDATES=` UNION ALL SELECT k.id,'efectivo',k.occurred_on,k.counterparty,k.concept,NULL,'Efectivo',
   CASE WHEN k.kind='pago' THEN -k.amount ELSE k.amount END,NULL::uuid,0,'0',ARRAY['efectivo'],true
-  FROM ledens.cash_movements k WHERE k.assigned_to IS NULL AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=k.id)`;
+  FROM ledens.cash_movements k WHERE k.kind IN ('pago','cobro') AND k.assigned_to IS NULL AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=k.id)`;
 const CASH_TARGETS={trabajadores:'pago',materiales:'pago',clientes:'cobro'};
 const SCOPE=`($1 OR (NOT EXISTS(SELECT 1 FROM ledens.project_financial_allocations ax WHERE ax.record_id=f.id AND NOT EXISTS
  (SELECT 1 FROM ledens.finance_project_permissions fp WHERE fp.user_id=$2 AND fp.project_id=ax.project_id)) AND

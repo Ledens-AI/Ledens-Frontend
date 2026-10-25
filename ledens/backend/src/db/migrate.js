@@ -16,9 +16,9 @@ const LOCK_ID = 727001;
  * schema_migrations table. Never edit a migration that has already shipped —
  * add a new numbered file instead.
  */
-export async function runMigrations() {
-  const files = (await fs.readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql')).sort();
-  const client = await getPool().connect();
+export async function runMigrations({pool=getPool(),migrationsDir=MIGRATIONS_DIR}={}) {
+  const files = (await fs.readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort();
+  const client = await pool.connect();
   let failure;
   try {
     await client.query('SELECT pg_advisory_lock($1)', [LOCK_ID]);
@@ -31,8 +31,10 @@ export async function runMigrations() {
     const applied = new Set(rows.map((r) => r.name));
 
     for (const file of files) {
-      if (applied.has(file)) continue;
-      const sql = await fs.readFile(path.join(MIGRATIONS_DIR, file), 'utf8');
+      // A compatibility migration may adopt an existing schema and record the
+      // equivalent later migration transactionally. Refresh before each file.
+      if (applied.has(file) || (await client.query('SELECT 1 FROM schema_migrations WHERE name=$1',[file])).rows.length) continue;
+      const sql = await fs.readFile(path.join(migrationsDir, file), 'utf8');
       await client.query('BEGIN');
       try {
         await client.query(sql);

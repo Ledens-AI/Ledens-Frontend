@@ -32,7 +32,7 @@ export class BridgeWorkspace {
  async counts(){
   const pending=(await this.movements({limit:1})).total;
   const cash=Boolean((await this.pool.query("SELECT to_regclass('ledens.cash_movements') name")).rows[0].name);
-  const cashPending=cash?(await this.pool.query('SELECT count(*)::int n FROM ledens.cash_movements WHERE assigned_to IS NULL')).rows[0].n:0;
+  const cashPending=cash?(await this.pool.query("SELECT count(*)::int n FROM ledens.cash_movements WHERE kind IN ('pago','cobro') AND assigned_to IS NULL")).rows[0].n:0;
   return {pending,reconciliation:pending+cashPending};
  }
  async allocations(filters={}){
