@@ -238,6 +238,8 @@ export class FinanceService {
    const {funding,capacities}=await this.documentFunding();
    // Treasury is distributed through the SAME document/Bridge, once per record share.
    // Advances represent the bank receipt only when that bank has no confirmed document link.
+   // Cash entries (016) have no bank or Bridge: their approved share is the flow.
+   const cashView=(await this.pool.query("SELECT to_regclass('ledens.v_cash_records') IS NOT NULL ok")).rows[0].ok;
    const cash=(await this.pool.query(`WITH shares AS (
     SELECT r.*,a.allocated_amount/r.gross_amount share FROM ledens.financial_records r
     JOIN ledens.project_financial_allocations a ON a.record_id=r.id
@@ -252,6 +254,9 @@ export class FinanceService {
     FROM shares s JOIN ledens.bank_movements m ON m.id=s.bank_movement_id
     WHERE s.category='advance' AND m.state='COMPLETED' AND m.currency='EUR' AND m.total_amount<>0
     AND NOT EXISTS(SELECT 1 FROM ledens.bank_document_allocations b WHERE b.bank_movement_id=m.id AND b.state='Confirmado')
+    ${cashView?`UNION ALL
+    SELECT NULL::uuid,CASE WHEN s.category IN ('advance','revenue') THEN 1 ELSE -1 END*abs(s.gross_amount*s.share)
+    FROM shares s WHERE s.document_id IS NULL AND s.bank_movement_id IS NULL AND s.id IN (SELECT record_id FROM ledens.v_cash_records)`:''}
    ) SELECT coalesce(sum(amount) FILTER(WHERE amount>0),0)::text collections,
      coalesce(-sum(amount) FILTER(WHERE amount<0),0)::text payments,coalesce(sum(amount),0)::text net_cash_flow FROM flows`,[projectId])).rows[0];
    const pending=(await this.pool.query(`SELECT count(*)::int pending_review,

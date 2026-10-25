@@ -27,7 +27,7 @@ before(async()=>{
  if(process.env.PURCHASE_TEST_DATABASE_URL){pool=new pg.Pool({connectionString:process.env.PURCHASE_TEST_DATABASE_URL});db={query:(...a)=>pool.query(...a),exec:q=>pool.query(q),close:()=>pool.end()};}
  else {const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};}
  await db.exec(await read('./finance-fixture.sql'));await db.exec('ALTER TABLE users ADD COLUMN name text');
- for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','011_transaction_alerts.sql','012_bridge_party_amount_date.sql','013_pago_trabajadores.sql','014_purchase_settlements.sql'])await db.exec(await read('../src/db/migrations/'+name));
+ for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','011_transaction_alerts.sql','012_bridge_party_amount_date.sql','013_pago_trabajadores.sql','016_cash_movements.sql','014_purchase_settlements.sql'])await db.exec(await read('../src/db/migrations/'+name));
  delivery=JSON.parse(await read('./fixtures/obramat-order-delivery.json'));refund=JSON.parse(await read('./fixtures/obramat-order-refund.json'));
  admin=(await db.query("INSERT INTO users(email,role) VALUES('admin@purchases.test','admin') RETURNING id,email,role")).rows[0];project=(await db.query("INSERT INTO ledens.projects(name) VALUES('Obra') RETURNING id")).rows[0].id;
  service=new IngestionService(pool,null,config);finance=new FinanceService(pool);bridge=new BridgeService(pool);

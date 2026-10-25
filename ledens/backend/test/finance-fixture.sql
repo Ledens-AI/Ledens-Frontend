@@ -25,3 +25,6 @@ CREATE TABLE ledens.customer_payments(id uuid PRIMARY KEY DEFAULT gen_random_uui
 CREATE TABLE ledens.positions(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text,activo boolean);
 CREATE TABLE ledens.employees(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text,primary_position_id uuid REFERENCES ledens.positions(id),activo boolean);
 ALTER TABLE ledens.worker_payments ADD COLUMN employee_id uuid REFERENCES ledens.employees(id);
+-- Production columns written by Efectivo (material unit/quantity/price, customer payment id).
+ALTER TABLE ledens.material_expenses ADD COLUMN und text, ADD COLUMN quantity numeric, ADD COLUMN unit_price numeric;
+ALTER TABLE ledens.customer_payments ADD COLUMN id_pago text;
