@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
 import { eur, num, fecha, TIPO, ESTADO } from './format.js';
 import ProjectPicker from './ProjectPicker.jsx';
@@ -26,8 +26,10 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
   const [open, setOpen] = useState(null);
   const [dialog, setDialog] = useState(null);
   const [reload, setReload] = useState(0);
+  // Projects chosen in the table but not saved yet: key → { row, project, saving, error }.
+  const [staged, setStaged] = useState(() => new Map());
 
-  useEffect(() => { setFilters({ ...EMPTY_FILTERS, proyecto: initialProject || null }); setDraftQ(''); setPage(1); setSelected(new Map()); }, [mode, initialProject]);
+  useEffect(() => { setFilters({ ...EMPTY_FILTERS, proyecto: initialProject || null }); setDraftQ(''); setPage(1); setSelected(new Map()); setStaged(new Map()); }, [mode, initialProject]);
   useEffect(() => { const t = setTimeout(() => { setFilters((f) => (f.q === draftQ ? f : { ...f, q: draftQ })); setPage(1); }, 300); return () => clearTimeout(t); }, [draftQ]);
 
   useEffect(() => {
@@ -47,6 +49,89 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
   const refresh = useCallback(() => { setReload((n) => n + 1); onChanged?.(); }, [onChanged]);
   const setF = (patch) => { setFilters((f) => ({ ...f, ...patch })); setPage(1); };
   const replaceRow = (rec) => setData((d) => d && ({ ...d, rows: d.rows.map((r) => (key(r) === key(rec) ? { ...r, ...rec } : r)) }));
+  // In Pendientes a record that now has its project leaves the list (it is
+  // still in its own table); elsewhere the row just shows its new state.
+  const removed = useRef(false);
+  const settle = (rec) => {
+    if (pending && rec.estado === 'asignado') {
+      removed.current = true;
+      setData((d) => d && ({ ...d, total: Math.max(0, d.total - 1), rows: d.rows.filter((r) => key(r) !== key(rec)) }));
+      setSelected((s) => { if (!s.has(key(rec))) return s; const n = new Map(s); n.delete(key(rec)); return n; });
+    } else replaceRow({ ...rec, suggestion: undefined });
+  };
+  // If saving emptied the page, show what moves up (or the previous page).
+  // Only after local removals, so an empty server page never loops.
+  useEffect(() => {
+    if (!removed.current || !data || data.rows.length) return;
+    removed.current = false;
+    if (data.total > 0) { if (page > Math.ceil(data.total / data.pageSize)) setPage((p) => Math.max(1, p - 1)); else setReload((n) => n + 1); }
+  }, [data, page]);
+
+  // Choosing a project for a record without one only stages it; «Guardar»
+  // writes it and, in Pendientes, takes it off the list. Changing a project
+  // that is already set still asks for the reason first (assign below).
+  const stage = (row, project) => setStaged((m) => new Map(m).set(key(row), { row, project }));
+  const unstage = (keys) => setStaged((m) => { const n = new Map(m); keys.forEach((k) => n.delete(k)); return n; });
+  const patchStaged = (keys, patch) => setStaged((m) => { const n = new Map(m); keys.forEach((k) => n.has(k) && n.set(k, { ...n.get(k), ...patch })); return n; });
+  const saveStaged = async (keys) => {
+    const items = keys.map((k) => staged.get(k)).filter((x) => x && !x.saving);
+    if (!items.length) return;
+    patchStaged(items.map((x) => key(x.row)), { saving: true, error: '' });
+    let ok = 0, bulkOk = false;
+    if (items.length === 1) {
+      const { row, project } = items[0];
+      try {
+        const { record } = await api.assign(row.type, row.id, { projectId: project.id, version: row.version, expectedProjectId: null });
+        unstage([key(row)]); settle(record); ok = 1;
+      } catch (e) {
+        const stale = e.status === 409;
+        patchStaged([key(row)], { saving: false, error: stale ? 'El registro ha cambiado mientras tanto; se ha actualizado. Pulsa Guardar de nuevo.' : e.message });
+        if (stale) setReload((n) => n + 1);
+      }
+    } else {
+      // One bulk request per chosen project; the server answers per record.
+      const byProject = new Map();
+      for (const it of items) byProject.set(it.project.id, [...(byProject.get(it.project.id) || []), it]);
+      for (const [projectId, group] of byProject) {
+        try {
+          const res = await api.bulk({ action: 'assign', projectId, items: group.map(({ row }) => ({ type: row.type, id: row.id, version: row.version })) });
+          for (const x of res.results) {
+            const k = x.type + ':' + x.id, it = group.find((g) => key(g.row) === k);
+            if (x.ok) { unstage([k]); settle({ ...it.row, project_id: projectId, project_label: it.project.label, estado: 'asignado' }); ok++; bulkOk = true; }
+            else patchStaged([k], { saving: false, error: x.error });
+          }
+        } catch (e) {
+          patchStaged(group.map(({ row }) => key(row)), { saving: false, error: e.message });
+        }
+      }
+      // The bulk answer has no records, so a row that stays on screen still
+      // holds its pre-save version: fetch the page again (Pendientes already
+      // dropped the saved rows).
+      if (bulkOk && !pending) setReload((n) => n + 1);
+    }
+    if (ok) { onChanged?.(); toast(ok === 1 && items.length === 1 ? `Guardado: asignado a ${items[0].project.label}.` : `Guardadas ${ok} de ${items.length} asignaciones.`); }
+    else if (items.length > 1) toast('No se ha guardado ninguna asignación. Revisa los avisos en cada fila.');
+  };
+  const stagedList = [...staged.values()];
+  // Whenever the page is fetched again (e.g. after a 409), staged choices take
+  // the record's current snapshot so «Guardar» sends its current version; a
+  // record that meanwhile got a project is no longer staged.
+  useEffect(() => {
+    if (!data) return;
+    setStaged((m) => {
+      if (!m.size) return m;
+      let changed = false;
+      const n = new Map(m);
+      for (const r of data.rows) {
+        const st = n.get(key(r));
+        if (!st || st.saving || st.row === r) continue;
+        changed = true;
+        if (r.project_id || r.parts > 0) n.delete(key(r));
+        else n.set(key(r), { ...st, row: r });
+      }
+      return changed ? n : m;
+    });
+  }, [data]);
 
   // Inline assignment. Changing an existing project asks for a reason first.
   const assign = async (row, project, reason) => {
@@ -57,7 +142,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
     setBusy((b) => ({ ...b, [key(row)]: true }));
     try {
       const { record } = await api.assign(row.type, row.id, { projectId: project.id, version:row.version,expectedProjectId: row.project_id || null, reason });
-      replaceRow({ ...record, suggestion: undefined });
+      settle(record);
       toast(`Asignado a ${project.label}.`);
       onChanged?.();
     } catch (e) {
@@ -149,6 +234,17 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
         {hasFilters ? <button type="button" className="fin-btn is-ghost fin-self-end" onClick={() => { setDraftQ(''); setF({ ...EMPTY_FILTERS }); }}>Limpiar filtros</button> : null}
       </div>
 
+      {stagedList.length ? (
+        <div className="fin-bulkbar is-staged" role="region" aria-label="Asignaciones sin guardar">
+          <strong>{stagedList.length === 1 ? '1 asignación sin guardar' : `${stagedList.length} asignaciones sin guardar`}</strong>
+          <span className="fin-grow"></span>
+          <button type="button" className="fin-btn is-primary" disabled={stagedList.some((x) => x.saving)} onClick={() => saveStaged([...staged.keys()])}>
+            <i className="ri-save-3-line"></i>{stagedList.length === 1 ? 'Guardar' : `Guardar todas (${stagedList.length})`}
+          </button>
+          <button type="button" className="fin-btn is-ghost" disabled={stagedList.some((x) => x.saving)} onClick={() => setStaged(new Map())}>Descartar</button>
+        </div>
+      ) : null}
+
       {sel.length ? (
         <div className="fin-bulkbar" role="region" aria-label="Acciones sobre la selección">
           <strong>{sel.length} {sel.length === 1 ? 'registro seleccionado' : 'registros seleccionados'}</strong>
@@ -186,8 +282,9 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
                 {rows.map((r) => {
                   const k = key(r);
                   const split = r.parts > 0;
+                  const st = staged.get(k);
                   return (
-                    <tr key={k} className={selected.has(k) ? 'is-selected' : ''}>
+                    <tr key={k} className={(selected.has(k) ? 'is-selected' : '') + (st ? ' is-staged' : '')}>
                       <td className="fin-col-check"><input type="checkbox" aria-label="Seleccionar registro" checked={selected.has(k)} onChange={() => toggle(r)} /></td>
                       {pending ? <td><Badge {...TIPO[r.type]} icon={TIPO[r.type].icon}>{TIPO[r.type].label}</Badge></td> : null}
                       <td className="fin-nowrap">{fecha(r.fecha)}</td>
@@ -200,17 +297,27 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
                         {split ? (
                           <button type="button" className="fin-link" onClick={() => setOpen(r)}>{`Distribuido en ${r.parts} proyectos`}</button>
                         ) : (
-                          <ProjectPicker compact value={r.project_id ? { id: r.project_id, label: r.project_label } : null}
-                            placeholder="Asignar proyecto…" disabled={!!busy[k]} onChange={(p) => p.id !== r.project_id && assign(r, p)} />
+                          <ProjectPicker compact value={st ? st.project : r.project_id ? { id: r.project_id, label: r.project_label } : null}
+                            placeholder="Asignar proyecto…" disabled={!!busy[k] || st?.saving}
+                            onChange={(p) => (r.project_id ? p.id !== r.project_id && assign(r, p) : stage(r, p))} />
                         )}
-                        {r.suggestion && !r.project_id && !split ? (
-                          <button type="button" className="fin-suggest" disabled={!!busy[k]} onClick={() => assign(r, { id: r.suggestion.projectId, label: r.suggestion.label })}
+                        {st ? (
+                          <div className="fin-stage-actions">
+                            <button type="button" className="fin-btn is-primary is-small" disabled={st.saving} onClick={() => saveStaged([k])}>
+                              <i className="ri-check-line"></i>{st.saving ? 'Guardando…' : 'Guardar'}
+                            </button>
+                            <button type="button" className="fin-btn is-ghost is-small" disabled={st.saving} onClick={() => unstage([k])}>Descartar</button>
+                          </div>
+                        ) : null}
+                        {st?.error ? <div className="fin-error-inline fin-small">{st.error}</div> : null}
+                        {r.suggestion && !r.project_id && !split && !st ? (
+                          <button type="button" className="fin-suggest" disabled={!!busy[k]} onClick={() => stage(r, { id: r.suggestion.projectId, label: r.suggestion.label })}
                             title={`Sugerencia (no confirmada): ${r.suggestion.reason}`}>
                             <i className="ri-lightbulb-line"></i>Sugerido: {r.suggestion.label}
                           </button>
                         ) : null}
                       </td>
-                      <td>{busy[k] ? <span className="fin-muted">Guardando…</span> : <Badge {...ESTADO[r.estado]}>{ESTADO[r.estado].label}</Badge>}</td>
+                      <td>{busy[k] ? <span className="fin-muted">Guardando…</span> : st ? <Badge bg="#FBF1DE" fg="#7A4E0E">Sin guardar</Badge> : <Badge {...ESTADO[r.estado]}>{ESTADO[r.estado].label}</Badge>}</td>
                       <td><button type="button" className="fin-iconbtn" aria-label="Ver detalle y editar" title="Ver detalle y editar" onClick={() => setOpen(r)}><i className="ri-side-bar-line"></i></button></td>
                     </tr>
                   );
@@ -230,7 +337,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
 
       {open ? (
         <RecordDrawer type={open.type} id={open.id} onClose={() => setOpen(null)} toast={toast}
-          onSaved={(rec) => { replaceRow(rec); onChanged?.(); }} />
+          onSaved={(rec) => { unstage([key(rec)]); replaceRow(rec); onChanged?.(); }} />
       ) : null}
 
       {dialog?.kind === 'reason' ? (

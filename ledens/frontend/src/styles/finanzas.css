@@ -193,3 +193,10 @@
   .fin-hbars li { grid-template-columns: 1fr auto; }
   .fin-hbars li .fin-hbars-track, .fin-hbars li .fin-hbars-stack { grid-column: 1 / -1; grid-row: 2; }
 }
+
+/* Project chosen in a row, waiting for «Guardar» (RecordsView). */
+.fin-table tbody tr.is-staged { background: #FFFBF2; }
+.fin-stage-actions { display: flex; gap: 6px; margin-top: 6px; }
+.fin-btn.is-small { min-height: 32px; padding: 5px 10px; font-size: 13px; }
+.fin-bulkbar.is-staged { background: #3E4D85; position: static; }
+
