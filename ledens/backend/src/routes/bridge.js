@@ -2,6 +2,7 @@ import {Router} from 'express';
 import {getPool,isDbConfigured} from '../db/pool.js';
 import {requireRole} from '../auth/sessions.js';
 import {BridgeService,BridgeError} from '../bridge/service.js';
+import {BridgeWorkspace} from '../bridge/workspace.js';
 import {traced} from '../logs/runs.js';
 
 const uuid=s=>typeof s==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
@@ -16,6 +17,10 @@ export function createBridgeRouter({service,authorize=requireRole('admin')}={}){
     next();
   });
   router.param('id',(req,res,next,id)=>{if(!uuid(id))return res.status(400).json({error:'invalid_id'});next();});
+  router.get('/workspace/counts',handle(async(req,res)=>res.json(await new BridgeWorkspace(get().pool).counts())));
+  router.get('/workspace/movements',handle(async(req,res)=>res.json(await new BridgeWorkspace(get().pool).movements({...req.query,pending:true}))));
+  router.get('/workspace/allocations',handle(async(req,res)=>res.json(await new BridgeWorkspace(get().pool).allocations(req.query))));
+  router.get('/workspace/movements/:id/documents',handle(async(req,res)=>res.json(await new BridgeWorkspace(get().pool).documents(req.params.id,req.query))));
   router.get('/',handle(async(req,res)=>{
     const status=['pending','matched','dismissed'].includes(req.query.status)?req.query.status:'pending';
     const offset=Math.min(100000,Math.max(0,parseInt(req.query.offset,10)||0));

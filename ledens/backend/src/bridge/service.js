@@ -105,7 +105,7 @@ export class BridgeService{
         (document_id,bank_movement_id,allocated_amount,reconciled_on,state,observaciones)
         VALUES($1,$2,$3,CURRENT_DATE,'Confirmado',$4) RETURNING id`,[id,bank.id,d.total,'AUTO_BRIDGE:'+RULE_VERSION])).rows[0];
       await c.query(`UPDATE ledens.documents SET estadopagocobro=$2 WHERE id=$1`,[id,d.tipo==='Pagar'?'Pagado':'Cobrado']);
-      await this.event(c,id,'auto_confirmed',{rule:RULE_VERSION,evidence_mode:bankMatchRule(d,bank),amount:String(d.total),reference:hasReference(d.numerodocumento,bank),party:true,near_date_days:bankMatchRule(d,bank)==='party_amount_near_date'?NEAR_DATE_DAYS:null}, {bankId:bank.id,allocationId:allocation.id});
+      await this.event(c,id,'auto_confirmed',{rule:RULE_VERSION,evidence_mode:bankMatchRule(d,bank),amount:String(d.total),reference:hasReference(d.numerodocumento,bank),party:hasParty(d,bank,{verified:true}),near_date_days:bankMatchRule(d,bank)==='exact_reference'?null:NEAR_DATE_DAYS}, {bankId:bank.id,allocationId:allocation.id});
       return this.updateCase(c,id,'matched','auto_confirmed',[],{terminal:true,mode:'automatic',allocationId:allocation.id,documentFingerprint:documentFingerprint(d),bankFingerprint:bankFingerprint(bank)});
     });
   }
@@ -173,8 +173,10 @@ export class BridgeService{
       const replay=(await c.query('SELECT request_hash,allocation_id FROM ledens.bridge_events WHERE request_id=$1',[body.request_id])).rows[0];
       if(replay){if(replay.request_hash!==requestHash)throw new BridgeError(409,'idempotency_conflict');return {status:'confirmed',allocation_id:replay.allocation_id,replay:true};}
       const d=await this.load(c,id,true);
+      const documentBefore={total:String(d.total),tipo:d.tipo};
+      const created=(await c.query('INSERT INTO ledens.bridge_cases(document_id) VALUES($1) ON CONFLICT DO NOTHING RETURNING document_id',[id])).rows.length>0;
       const x=(await c.query('SELECT * FROM ledens.bridge_cases WHERE document_id=$1 FOR UPDATE',[id])).rows[0];
-      if(!x||x.status!=='pending'||x.version!==body.version||documentFingerprint(d)!==body.document_fingerprint)throw new BridgeError(409,'case_changed');
+      if(!x||x.status!=='pending'||(created?0:x.version)!==body.version||documentFingerprint(d)!==body.document_fingerprint)throw new BridgeError(409,'case_changed');
       await c.query('SELECT id FROM ledens.bank_movements WHERE id=$1 FOR UPDATE',[body.bank_movement_id]);
       const b=(await c.query(BANK+' WHERE b.id=$1',[body.bank_movement_id])).rows[0];
       if(Boolean((await c.query("SELECT to_regclass('ledens.worker_payment_batches') name")).rows[0].name)&&(await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1',[body.bank_movement_id])).rows.length)throw new BridgeError(409,'bank_is_worker_payment');
@@ -191,8 +193,10 @@ export class BridgeService{
           base_amount=CASE WHEN base_amount IS NULL THEN NULL ELSE abs(base_amount)*$4 END,
           vat_amount=CASE WHEN vat_amount IS NULL THEN NULL ELSE abs(vat_amount)*$4 END WHERE id=$1`,[id,decimal(abs(total)*sign),body.tipo,Number(sign)]);
         d.total=decimal(abs(total)*sign);d.tipo=body.tipo;
-      }else if(d.tipo&&d.tipo!==body.tipo)throw new BridgeError(409,'document_direction_mismatch');
-      else if(!d.tipo)await c.query('UPDATE ledens.documents SET tipo=$2 WHERE id=$1',[id,body.tipo]);
+      }else if(d.tipo!==body.tipo){
+        if(rows.length)throw new BridgeError(409,'document_direction_mismatch');
+        await c.query('UPDATE ledens.documents SET tipo=$2 WHERE id=$1',[id,body.tipo]);
+      }
       if((amount(b.total_amount)<0n)!==(sign<0n))throw new BridgeError(409,'direction_mismatch');
       const existing=rows.find(a=>a.bank_movement_id===b.id);
       if(rows.some(a=>a.state!=='Confirmado'&&a.id!==existing?.id))throw new BridgeError(409,'existing_allocation_requires_review');
@@ -209,7 +213,7 @@ export class BridgeService{
         VALUES($1,$2,$3,'Confirmado',CURRENT_DATE,$4) RETURNING id`,[id,b.id,decimal(sign*value),'MANUAL_BRIDGE: '+body.reason.trim()])).rows[0];}
       const complete=docRemaining===value;
       await c.query('UPDATE ledens.documents SET estadopagocobro=$2 WHERE id=$1',[id,complete?(body.tipo==='Pagar'?'Pagado':'Cobrado'):'Parcial']);
-      await this.event(c,id,'manual_confirmed',{amount:decimal(sign*value),currency:'EUR',reason:body.reason.trim()},
+      await this.event(c,id,'manual_confirmed',{amount:decimal(sign*value),currency:'EUR',reason:body.reason.trim(),document_before:documentBefore,document_after:{total:decimal(abs(total)*sign),tipo:body.tipo}},
         {bankId:b.id,allocationId:allocation.id,actorId,requestId:body.request_id,requestHash});
       await this.updateCase(c,id,complete?'matched':'pending',complete?'manual_confirmed':'partial_payment',[],{terminal:true,mode:'manual',allocationId:allocation.id});
       return {status:complete?'confirmed':'partial',allocation_id:allocation.id,replay:false};

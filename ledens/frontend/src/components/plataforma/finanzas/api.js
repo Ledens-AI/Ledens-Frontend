@@ -31,6 +31,11 @@ const qs = (params) => {
 };
 
 export const api = {
+  bridgeCounts: () => request('GET', '/api/bridge/workspace/counts'),
+  bridgeMovements: (f) => request('GET', '/api/bridge/workspace/movements' + qs(f)),
+  bridgeAllocations: (f) => request('GET', '/api/bridge/workspace/allocations' + qs(f)),
+  bridgeDocuments: (id,f) => request('GET', `/api/bridge/workspace/movements/${id}/documents` + qs(f)),
+  bridgeConfirm: (id,body) => request('POST', `/api/bridge/${id}/confirm`, body),
   projects: (q) => request('GET', '/api/finanzas/proyectos' + qs({ q, limit: 30 })),
   summary: () => request('GET', '/api/finanzas/resumen'),
   records: (f) => request('GET', '/api/finanzas/registros' + qs(f)),

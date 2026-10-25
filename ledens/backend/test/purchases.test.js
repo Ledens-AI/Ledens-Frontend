@@ -107,13 +107,13 @@ test('a different item under the same fiscal identity is a conflict, not another
  assert.equal((await db.query('SELECT count(*)::int n FROM ledens.purchase_documents WHERE document_number=$1',[delivery.document_number])).rows[0].n,1);
 });
 
-test('CARD_REFUND requires a verified refund source, exact amount, party and nearby date',async()=>{
+test('CARD_REFUND requires a verified refund source, exact amount and nearby date',async()=>{
  const d=await bridge.load(pool,documents.r);
  const bank=(await db.query("SELECT * FROM ledens.bank_movements WHERE type='CARD_REFUND' AND total_amount=6.44")).rows[0];
- assert.equal(bankMatchRule(d,bank),'party_amount_near_date');
+ assert.equal(bankMatchRule(d,bank),'amount_near_date');
  assert.equal(bankMatchRule({...d,purchase_proof:null},bank),false);
  assert.equal(bankMatchRule({...d,tipo:'Pagar'},bank),false);
- assert.equal(bankMatchRule(d,{...bank,description:'OTHER MERCHANT'}),false);
+ assert.equal(bankMatchRule(d,{...bank,description:'OTHER MERCHANT'}),'amount_near_date');
  assert.equal(bankMatchRule(d,{...bank,amount:'10.00',total_amount:'10.00'}),false);
  assert.equal(bankMatchRule(d,{...bank,completed_on:'2026-11-30'}),false);
  assert.equal(bankMatchRule(d,{...bank,state:'PENDING'}),false);

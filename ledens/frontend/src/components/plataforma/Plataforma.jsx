@@ -20,12 +20,12 @@ const HOME = { client: 'c_home', worker: 'w_home', admin: 'a_home' };
 const PREFIX = { client: 'c_', worker: 'w_', admin: 'a_' };
 
 class PlataformaView extends React.Component {
-  state={role:ROLE_VIEW[this.props.user.role]||'client',screen:HOME[ROLE_VIEW[this.props.user.role]||'client'],obraId:'o1',tab:'resumen',userId:null,adminUsers:null,adminAudit:[],roleEdit:null,saving:false,partFilter:'all',photoFilter:'Todas',cmp:50,notifOpen:false,mods:{},modal:null,accStep:1,accA:false,accB:false,accepted031:false,overrides:{},progCode:null,progQty:'',progNote:'',progErr:'',toast:'',phone:'',personType:'fisica',profErr:'',reason:'',audit:[],resolved:{},extraAct:[],userFilter:'all',q:'',reviewed:{},readN:{},docOpen:null,budgetId:'031',finTab:'resumen',finPending:0};
+  state={role:ROLE_VIEW[this.props.user.role]||'client',screen:HOME[ROLE_VIEW[this.props.user.role]||'client'],obraId:'o1',tab:'resumen',userId:null,adminUsers:null,adminAudit:[],roleEdit:null,saving:false,partFilter:'all',photoFilter:'Todas',cmp:50,notifOpen:false,mods:{},modal:null,accStep:1,accA:false,accB:false,accepted031:false,overrides:{},progCode:null,progQty:'',progNote:'',progErr:'',toast:'',phone:'',personType:'fisica',profErr:'',reason:'',audit:[],resolved:{},extraAct:[],userFilter:'all',q:'',reviewed:{},readN:{},docOpen:null,budgetId:'031',finTab:'resumen',finPending:0,finBridgePending:0,finConciliationPending:0};
   // Screens belong to one role each (c_ client, w_ jefe de obra, a_ admin);
   // anything else is ignored. The backend enforces the same split for data.
   // Gestión financiera is w_fin / a_fin (jefe de obra and admin), never c_.
   go=(screen,x)=>{if(!screen.startsWith(PREFIX[this.state.role]))return;this.setState(Object.assign({screen,notifOpen:false},x||{}));window.scrollTo(0,0);};
-  componentDidMount(){if(this.state.role==='admin'){this.loadUsers();this.loadAudit();}if(this.state.role!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.pendientes}),()=>{});}
+  componentDidMount(){if(this.state.role==='admin'){this.loadUsers();this.loadAudit();this.getJSON('/api/bridge/workspace/counts').then(d=>this.setState({finBridgePending:d.pending,finConciliationPending:d.reconciliation??d.pending}),()=>{});}if(this.state.role!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.pendientes}),()=>{});}
   getJSON=async(url)=>{const r=await fetch(url);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'No se pudieron cargar los datos.');return d;};
   loadUsers=()=>this.getJSON('/api/admin/users').then(d=>this.setState({adminUsers:d.users}),e=>{this.setState({adminUsers:[]});this.flash(e.message);});
   loadAudit=()=>this.getJSON('/api/admin/audit').then(d=>this.setState({adminAudit:d.entries}),e=>this.flash(e.message));
@@ -74,7 +74,7 @@ class PlataformaView extends React.Component {
       :[mk('Panel','ri-dashboard-3-line','a_home'),mk('Usuarios','ri-group-line','a_users',rowsAll.filter(u=>u.issues.length).length,['a_users','a_user']),mk('Auditoría','ri-history-line','a_audit')];
     const finScreen=PREFIX[role]+'fin',isFin=s.screen===finScreen;
     if(role!=='client')nav.push({header:'Gestión financiera'},...FIN_TABS.filter(t=>!t[3]||this.props.user.role==='admin').map(([k,label,icon])=>{const on=isFin&&s.finTab===k;
-      return {label,icon,badge:k==='pendientes'?s.finPending:0,go:()=>this.go(finScreen,{finTab:k}),bg:on?'#F2F4FA':'transparent',fg:on?'#3E4D85':'#3A3A38',fw:on?700:500};}));
+      return {label,icon,badge:k==='pendientes'?s.finPending:k==='conciliacion'?s.finConciliationPending:k==='pendiente-bridge'?s.finBridgePending:0,finConciliationPending:0,go:()=>this.go(finScreen,{finTab:k}),bg:on?'#F2F4FA':'transparent',fg:on?'#3E4D85':'#3A3A38',fw:on?700:500};}));
     const U=this.props.user,meName=U.name||U.email;
     const me={name:meName,initials:initials(meName),role:ROLE_LABEL[U.role]||'Cliente',avBg:role==='client'?'#EC6090':role==='worker'?'#68C0B5':'#0C062B'};
     const titles={c_home:['Inicio'],c_obras:['Mis obras'],c_obra:['Mis obras',obra.name],c_presupuestos:['Presupuestos'],c_presupuesto:['Presupuestos','PRE-2026-031 v1'],c_perfil:['Mi perfil'],w_home:['Hoy'],w_obras:['Obras asignadas'],w_obra:['Obras asignadas',obra.name],a_home:['Panel de administración'],a_users:['Usuarios'],a_user:['Usuarios',user.name],a_audit:['Auditoría']};
@@ -125,7 +125,7 @@ class PlataformaView extends React.Component {
     const wObras=[obras[0],obras[1],Object.assign({},obras[0],{id:'o3',name:'Cocina abierta al salón',addr:'C/ Granada, 8 · Málaga',type:'Cocina · 18 m²',cover:IMG.t17,physS:'0%',physW:'0%',status:'Inicio 3 nov',upd:'—',openC:()=>this.flash('Obra pendiente de inicio: las partidas se publican el 3 nov.')})];
     const myIssues=user.issues.map(i=>({...i,done:false,open:false,tBg:ITYPE[i.type][0],tFg:ITYPE[i.type][1]}));
     return Object.assign({},is,it,{
-      showDemo:role!=='admin'&&!isFin,isFin,finTab:s.finTab,finGo:k=>this.go(finScreen,{finTab:k}),finPending:n=>n!==s.finPending&&this.setState({finPending:n}),flash:this.flash,isClient:role==='client',isWorker:role==='worker',isAdmin:role==='admin',isInternal:view==='internal',
+      showDemo:role!=='admin'&&!isFin,isFin,finTab:s.finTab,finGo:k=>this.go(finScreen,{finTab:k}),finPending:n=>n!==s.finPending&&this.setState({finPending:n}),finBridgePending:(n,c=n)=>(n!==s.finBridgePending||c!==s.finConciliationPending)&&this.setState({finBridgePending:n,finConciliationPending:c}),flash:this.flash,isClient:role==='client',isWorker:role==='worker',isAdmin:role==='admin',isInternal:view==='internal',
       areaLabel:role==='client'?'Área de cliente':role==='worker'?'Workspace':'Administración',nav,me,crumbs,notifs,unread,notifOpen:s.notifOpen,
       firstName:firstName(U),meFirst:(U.name||'').trim().split(/\s+/)[0]||'',meLast:(U.name||'').trim().split(/\s+/).slice(1).join(' '),meEmail:U.email,meSince:fmtDate(U.created_at).replace(/^\d+ /,''),
       logout:()=>this.props.onLogout(),barsFrom:sb.from,barsTo:sb.to,roleOpts,
@@ -322,7 +322,7 @@ class PlataformaView extends React.Component {
         <main style={{ padding: "32px", maxWidth: "1240px", width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: "28px" }}>
           {v.isFin ? (
             <React.Suspense fallback={<div style={{ padding: "32px", color: "#6B6B68" }}>{"Cargando Gestión financiera…"}</div>}>
-              <GestionFinanciera tab={v.finTab} go={v.finGo} toast={v.flash} onPending={v.finPending} />
+              <GestionFinanciera tab={v.finTab} go={v.finGo} toast={v.flash} onPending={v.finPending} onBridgePending={v.finBridgePending} />
             </React.Suspense>
           ) : null}
           {v.is_c_home ? (

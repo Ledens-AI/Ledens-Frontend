@@ -7,7 +7,7 @@ const MOTIVOS = {sin_documento:'Sin documento',sin_bridge:'Sin registros en el B
 const TIPOS = {material:'Material',trabajador:'Trabajador',cliente:'Cliente',concepto:'Concepto de factura',movimiento:'Movimiento bancario',documento:'Documento',efectivo:'Efectivo'};
 // Only outgoing movements (bank or cash) can be sent to «Pago a trabajadores».
 const payable=(r)=>(r.type==='movimiento'||r.type==='efectivo')&&Number(r.importe)<0;
-export default function Conciliacion({ toast }) {
+export default function Conciliacion({ toast,go,onChanged }) {
   const vista='movimientos';
   const [q,setQ]=useState(''),[query,setQuery]=useState('');
   const [motivo,setMotivo]=useState(''),[desde,setDesde]=useState(''),[hasta,setHasta]=useState('');
@@ -41,6 +41,7 @@ export default function Conciliacion({ toast }) {
       setData(d=>d&&({...d,total:Math.max(0,d.total-moved.size),rows:d.rows.filter(r=>!moved.has(r.id))}));
       setSelected(new Set(res.results.filter(r=>!r.ok).map(r=>r.id)));
       setFailures(res.results.filter(r=>!r.ok));
+      if(moved.size)onChanged?.();
       if(moved.size)toast?.(moved.size===1?'Movimiento enviado a Pendiente de trabajador.':moved.size+' movimientos enviados a Pendiente de trabajador.');
     }catch(e){toast?.(e.message);}finally{setMoving(false);}
   };
@@ -51,6 +52,7 @@ export default function Conciliacion({ toast }) {
       <label className="fin-field"><span>Desde</span><input type="date" value={desde} onChange={filter(setDesde)} /></label>
       <label className="fin-field"><span>Hasta</span><input type="date" value={hasta} onChange={filter(setHasta)} /></label>
       <button className="fin-btn" type="button" onClick={()=>setReload(n=>n+1)}>Actualizar</button>
+      <button className="fin-btn is-primary" type="button" onClick={()=>go?.('pendiente-bridge')}>Resolver Bridge</button>
       <button className="fin-btn is-primary" type="button" onClick={()=>setAdding(true)}><i className="ri-money-euro-circle-line"></i>Añadir efectivo</button>
     </div>
     {adding?<CashForm onClose={()=>setAdding(false)} onSaved={(k)=>{setAdding(false);setReload(n=>n+1);toast?.(k.kind==='pago'?'Pago en efectivo añadido.':'Cobro en efectivo añadido.');}} />:null}

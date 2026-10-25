@@ -24,7 +24,7 @@ test('exact verified reference and party reconcile once using signed Confirmado 
 });
 test('unique nearby supplier and amount reconcile without reference',async()=>{
  const d=await document('TEST-000002','-122');await bank('Transferencia','-122');assert.equal((await service.evaluate(d,{force:true})).status,'matched');
- const event=(await db.query("SELECT detail FROM ledens.bridge_events WHERE document_id=$1 AND action='auto_confirmed'",[d])).rows[0].detail;assert.equal(event.reference,false);assert.equal(event.evidence_mode,'party_amount_near_date');
+ const event=(await db.query("SELECT detail FROM ledens.bridge_events WHERE document_id=$1 AND action='auto_confirmed'",[d])).rows[0].detail;assert.equal(event.reference,false);assert.equal(event.evidence_mode,'amount_near_date');
 });
 test('ambiguous banks and competing documents are not assigned greedily',async()=>{
  const d=await document('TEST-000003','-123');await bank('TEST-000003','-123');await bank('TEST-000003','-123');assert.equal((await service.evaluate(d,{force:true})).reason,'ambiguous_match');
@@ -52,7 +52,7 @@ test('all invoice confidence checks use inclusive 50 percent threshold',()=>{
  const bank={amount:'-121',total_amount:'-121',state:'COMPLETED',currency:'EUR',type:'TRANSFER',completed_on:'2025-09-02',is_internal_transfer:false,reference:'TEST-000050',beneficiary_name:'Proveedor Ejemplo'};
  assert.equal(automaticBlock(d),null);assert.equal(eligibleBank(d,bank),true);
  for(const key of ['date_confidence','total_confidence','direction_confidence'])assert.equal(automaticBlock({...d,[key]:.499}),'unverified_invoice_fields');
- assert.equal(eligibleBank({...d,party_confidence:.499},bank),false);
+ assert.equal(eligibleBank({...d,party_confidence:.499},bank),true);
 });
 
 test('reference-free matching accepts exactly +/- 7 days and needs no invoice-number confidence',async()=>{
@@ -66,8 +66,8 @@ test('two nearby unreferenced banks or two competing invoices stay pending',asyn
  const d=await document('AMBIGUOUS-001','-903');await bank(null,'-903');await bank(null,'-903');assert.equal((await service.evaluate(d,{force:true})).reason,'ambiguous_match');
  const a=await document('COMPETE-001','-904'),other=await document('COMPETE-002','-904');await bank(null,'-904');assert.equal((await service.evaluate(a,{force:true})).reason,'competing_document');assert.equal((await service.evaluate(other,{force:true})).reason,'competing_document');
 });
-test('wrong supplier, wrong amount, refunds and occupied bank rows do not match',async()=>{
- const d=await document('REJECT-00001','-905'),wrong=await bank(null,'-905');await db.query("UPDATE ledens.bank_movements SET beneficiary_name='Otro Proveedor' WHERE id=$1",[wrong]);assert.equal((await service.evaluate(d,{force:true})).status,'pending');
+test('wrong amount, opposite sign and occupied bank rows do not match',async()=>{
+ const d=await document('REJECT-00001','-905'),wrong=await bank(null,'-904');await db.query("UPDATE ledens.bank_movements SET beneficiary_name='Otro Proveedor' WHERE id=$1",[wrong]);assert.equal((await service.evaluate(d,{force:true})).status,'pending');
  await db.query("UPDATE ledens.bank_movements SET beneficiary_name='Proveedor Ejemplo',amount=-904,total_amount=-904 WHERE id=$1",[wrong]);assert.equal((await service.evaluate(d,{force:true})).status,'pending');
  await db.query('UPDATE ledens.bank_movements SET amount=905,total_amount=905 WHERE id=$1',[wrong]);assert.equal((await service.evaluate(d,{force:true})).status,'pending');
  const held=await document('HELD-0001','-909'),owner=await document('HELD-0002','-909'),reserved=await bank(null,'-909');await db.query("INSERT INTO ledens.bank_document_allocations(document_id,bank_movement_id,allocated_amount,state) VALUES($1,$2,-909,'Confirmado')",[owner,reserved]);assert.equal((await service.evaluate(held,{force:true})).status,'pending');
@@ -88,7 +88,7 @@ test('PostgreSQL competing evaluations cannot allocate one bank twice',{skip:!pr
 });
 
 test('corroborated supplier may match without inflating its low raw field confidence',async()=>{
- const d=await document('SUPPORTED-001','-910'),b=await bank(null,'-910');
+ const d=await document('SUPPORTED-001','-910'),b=await bank('SUPPORTED-001','-910');await db.query("UPDATE ledens.bank_movements SET completed_on='2025-10-01' WHERE id=$1",[b]);
  await db.query("UPDATE ledens.documents SET niftercero='B84406289' WHERE id=$1",[d]);await db.query('UPDATE ledens.invoice_ingestions SET party_confidence=.481,tax_id_confidence=.82 WHERE document_id=$1',[d]);assert.equal((await service.evaluate(d,{force:true})).status,'pending');
  const evidence={rule:'party_name_span_and_tax_id',source:'azure-di',name:'PROVEEDOR EJEMPLO',tax_id:'B84406289',name_field_confidence:.481,word_confidence:.989,tax_id_confidence:.82};
  await db.query('UPDATE ledens.invoice_ingestions SET party_evidence=$2 WHERE document_id=$1',[d,JSON.stringify({...evidence,tax_id:'B00000000'})]);assert.equal((await service.evaluate(d,{force:true})).status,'pending');
