@@ -1,0 +1,437 @@
+{
+  "kind": "delivery",
+  "issuer_tax_id": "B84406289",
+  "buyer_tax_id": "B19753805",
+  "document_number": "008-0010-459619",
+  "order_reference": "302957",
+  "currency": "EUR",
+  "issued_on": "2026-10-22",
+  "nominal_gross": "0.00",
+  "nominal_net": "0.00",
+  "nominal_vat": "0.00",
+  "goods_gross": "766.12",
+  "goods_net": "633.16",
+  "goods_vat": "132.96",
+  "applied_gross": "766.12",
+  "lines": [
+    {
+      "line_number": 1,
+      "description": "IMPRIMACIÓN DE ADHERENCIA PUENTE DE UNIÓ",
+      "product_code": "25058267",
+      "quantity": 1,
+      "gross_amount": "23.72",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "25058267",
+        "unit_price": "19.60",
+        "unit_gross": "23.72",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "19.60",
+      "vat_amount": "4.12"
+    },
+    {
+      "line_number": 2,
+      "description": "PUERTA PARA MUEBLE DE COCINA BORMUJOS RO",
+      "product_code": "25071053",
+      "quantity": 1,
+      "gross_amount": "25.00",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "25071053",
+        "unit_price": "20.66",
+        "unit_gross": "25.00",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "20.66",
+      "vat_amount": "4.34"
+    },
+    {
+      "line_number": 3,
+      "description": "MÓDULO COCINA BLANCO ALTO 80X50X35CM",
+      "product_code": "25070694",
+      "quantity": 2,
+      "gross_amount": "60.00",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "25070694",
+        "unit_price": "24.79",
+        "unit_gross": "30.00",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "49.59",
+      "vat_amount": "10.41"
+    },
+    {
+      "line_number": 4,
+      "description": "PUERTA PARA MUEBLE DE COCINA BORMUJOS RO",
+      "product_code": "25071049",
+      "quantity": 1,
+      "gross_amount": "26.00",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "25071049",
+        "unit_price": "21.49",
+        "unit_gross": "26.00",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "21.49",
+      "vat_amount": "4.51"
+    },
+    {
+      "line_number": 5,
+      "description": "PACK 4 PATAS",
+      "product_code": "25079658",
+      "quantity": 2,
+      "gross_amount": "4.00",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "25079658",
+        "unit_price": "1.65",
+        "unit_gross": "2.00",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "3.31",
+      "vat_amount": "0.69"
+    },
+    {
+      "line_number": 6,
+      "description": "PAQUETE 5 PULSADORES EXPULSORES PARA PUE",
+      "product_code": "25096374",
+      "quantity": 1,
+      "gross_amount": "4.50",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "25096374",
+        "unit_price": "3.72",
+        "unit_gross": "4.50",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "3.72",
+      "vat_amount": "0.78"
+    },
+    {
+      "line_number": 7,
+      "description": "MÓDULO COCINA BLANCO BAJO 80X50X58CM",
+      "product_code": "25070695",
+      "quantity": 1,
+      "gross_amount": "34.00",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "25070695",
+        "unit_price": "28.10",
+        "unit_gross": "34.00",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "28.10",
+      "vat_amount": "5.90"
+    },
+    {
+      "line_number": 8,
+      "description": "CABLE LIBRE DE HALÓGENOS RZ1-K 3G 6MM2 V",
+      "product_code": "10550890",
+      "quantity": 5,
+      "gross_amount": "21.85",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "10550890",
+        "unit_price": "3.61",
+        "unit_gross": "4.37",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "18.06",
+      "vat_amount": "3.79"
+    },
+    {
+      "line_number": 9,
+      "description": "EXTRACTOR DE BAÑO Ø100MM",
+      "product_code": "25109199",
+      "quantity": 2,
+      "gross_amount": "27.90",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "25109199",
+        "unit_price": "11.53",
+        "unit_gross": "13.95",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "23.06",
+      "vat_amount": "4.84"
+    },
+    {
+      "line_number": 10,
+      "description": "CAPAZO OBRA PLASTICO 40L BELLOTA",
+      "product_code": "25080131",
+      "quantity": 2,
+      "gross_amount": "7.20",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "25080131",
+        "unit_price": "2.98",
+        "unit_gross": "3.60",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "5.95",
+      "vat_amount": "1.25"
+    },
+    {
+      "line_number": 11,
+      "description": "PALOTE MANGO RECTO BELLOTA",
+      "product_code": "10494484",
+      "quantity": 1,
+      "gross_amount": "23.55",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "10494484",
+        "unit_price": "19.46",
+        "unit_gross": "23.55",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "19.46",
+      "vat_amount": "4.09"
+    },
+    {
+      "line_number": 12,
+      "description": "MEZCLADORA DE MORTERO 1200W STAYER M1100",
+      "product_code": "10912853",
+      "quantity": 1,
+      "gross_amount": "62.00",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "10912853",
+        "unit_price": "51.24",
+        "unit_gross": "62.00",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "51.24",
+      "vat_amount": "10.76"
+    },
+    {
+      "line_number": 13,
+      "description": "PEINE 280MM 10X10MM MANGO BIMATERIA BELL",
+      "product_code": "10926300",
+      "quantity": 1,
+      "gross_amount": "10.80",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "10926300",
+        "unit_price": "8.93",
+        "unit_gross": "10.80",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "8.93",
+      "vat_amount": "1.87"
+    },
+    {
+      "line_number": 14,
+      "description": "JUNTA ALTAS PRESTACIONES 5KG GRIS MACAEL",
+      "product_code": "25118318",
+      "quantity": 2,
+      "gross_amount": "17.90",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "25118318",
+        "unit_price": "7.40",
+        "unit_gross": "8.95",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "14.79",
+      "vat_amount": "3.11"
+    },
+    {
+      "line_number": 15,
+      "description": "CALZO JUNTA CERAMICA 0.5MM SISTEMA ALICA",
+      "product_code": "10922723",
+      "quantity": 2,
+      "gross_amount": "56.00",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "10922723",
+        "unit_price": "23.14",
+        "unit_gross": "28.00",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "46.28",
+      "vat_amount": "9.72"
+    },
+    {
+      "line_number": 16,
+      "description": "CEMENTO COLA FLEX DUO WEBER C2TE 25KG BL",
+      "product_code": "10547005",
+      "quantity": 30,
+      "gross_amount": "298.50",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "10547005",
+        "unit_price": "8.22",
+        "unit_gross": "9.95",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "246.69",
+      "vat_amount": "51.81"
+    },
+    {
+      "line_number": 17,
+      "description": "CUÑA JUNTAS CERÁMICA SISTEMA ALICATE EMB",
+      "product_code": "25100809",
+      "quantity": 1,
+      "gross_amount": "23.00",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "25100809",
+        "unit_price": "19.01",
+        "unit_gross": "23.00",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "19.01",
+      "vat_amount": "3.99"
+    },
+    {
+      "line_number": 18,
+      "description": "MANGUERA AQUAPRESS CRISTAL 10MMX15M",
+      "product_code": "25093997",
+      "quantity": 1,
+      "gross_amount": "8.20",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "25093997",
+        "unit_price": "6.78",
+        "unit_gross": "8.20",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "6.78",
+      "vat_amount": "1.42"
+    },
+    {
+      "line_number": 19,
+      "description": "PINTURA PLASTICA BLANCA MATE 4L L3000",
+      "product_code": "10838604",
+      "quantity": 1,
+      "gross_amount": "13.00",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "10838604",
+        "unit_price": "10.74",
+        "unit_gross": "13.00",
+        "unit": "UNID.",
+        "line_kind": "product",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "10.74",
+      "vat_amount": "2.26"
+    },
+    {
+      "line_number": 20,
+      "description": "COSTE PALET RETORNABLE",
+      "product_code": "49000175",
+      "quantity": 1,
+      "gross_amount": "10.00",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "49000175",
+        "unit_price": "8.26",
+        "unit_gross": "10.00",
+        "unit": "UNID.",
+        "line_kind": "returnable_deposit",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "8.26",
+      "vat_amount": "1.74"
+    },
+    {
+      "line_number": 21,
+      "description": "PREPARACION MERCANCIA",
+      "product_code": "49000392",
+      "quantity": 1,
+      "gross_amount": "9.00",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "49000392",
+        "unit_price": "7.44",
+        "unit_gross": "9.00",
+        "unit": "UNID.",
+        "line_kind": "preparation_service",
+        "net_basis": "gross_and_document_tax_group",
+        "rounding_rule": "largest_remainder_line_number"
+      },
+      "net_amount": "7.44",
+      "vat_amount": "1.56"
+    }
+  ],
+  "settlement_lines": [
+    {
+      "line_number": 22,
+      "description": "YA PAGADO DEL PEDIDO 302957",
+      "product_code": "99999991",
+      "quantity": 1,
+      "gross_amount": "-766.12",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "99999991",
+        "unit_price": "-633.16",
+        "unit_gross": "-766.12",
+        "unit": "UNID.",
+        "line_kind": "advance_application"
+      }
+    }
+  ],
+  "financial_pages": 2,
+  "original_pages": 3,
+  "fingerprint": "f7414ec838a5d9e01809a30483fcff64ede6627d97d8f69d9c5a00edfcdf8599"
+}

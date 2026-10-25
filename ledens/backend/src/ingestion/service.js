@@ -1,3 +1,4 @@
+import {registerPurchaseDocument,hasPurchases,PurchaseReviewError} from '../finance/purchases.js';
 import {extractLines,storeInvoiceLines} from '../finance/ingestion.js';
 import { IngestError } from './validation.js';
 import { extractInvoice } from './ocr.js';
@@ -15,19 +16,36 @@ export class IngestionService {
       reason:row.reason, invoice_date:row.invoice_date instanceof Date ? row.invoice_date.toISOString().slice(0,10) : row.invoice_date || null,
       destination_folder:row.destination_folder, filename:row.filename, ...extra };
   }
+  async readyNative(c,row,p,{actorId=null}={}){
+    try{await registerPurchaseDocument(c,row.document_id,p,{actorId});}catch(e){if(e instanceof PurchaseReviewError)throw new IngestError(409,e.message);throw e;}
+    row.invoice_date=p.issued_on;row.destination_folder='/Shared Documents/'+this.config.archiveRoot+'/'+(Math.floor((Number(p.issued_on.slice(5,7))-1)/3)+1)+'T-'+p.issued_on.slice(0,4);
+    if(row.status!=='archived')row.status='ready';row.reason=null;
+    await c.query('UPDATE ledens.invoice_ingestions SET status=$2,reason=NULL,invoice_date=$3,destination_folder=$4,content=NULL,updated_at=now() WHERE id=$1',[row.id,row.status,row.invoice_date,row.destination_folder]);
+    return row;
+  }
   async receive(file) {
     return this.transaction(async c=>{
+      if(file.nativePurchase)await c.query('SELECT pg_advisory_xact_lock(727032)');
       // Serialize both same-content submissions and replays of the same source.
       await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[file.hash]);
       await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,1))',[file.sourceKey]);
-      const previous=(await c.query(`SELECT i.*,s.is_duplicate FROM ledens.invoice_sources s
+      const previous=(await c.query(`SELECT i.*,s.is_duplicate,to_jsonb(s)->>'content_hash' source_content_hash FROM ledens.invoice_sources s
         JOIN ledens.invoice_ingestions i ON i.id=s.ingestion_id WHERE s.source_key=$1`,[file.sourceKey])).rows[0];
       if(previous) {
-        if(previous.content_hash!==file.hash) throw new IngestError(409,'source_content_changed');
+        if((previous.source_content_hash||previous.content_hash)!==file.hash) throw new IngestError(409,'source_content_changed');
+        if(file.nativePurchase)await this.readyNative(c,previous,file.nativePurchase);
         return this.response(previous,{duplicate:previous.is_duplicate,replay:true});
       }
       let row=(await c.query('SELECT * FROM ledens.invoice_ingestions WHERE content_hash=$1',[file.hash])).rows[0];
-      const duplicate=Boolean(row);
+      let duplicate=Boolean(row);
+      const purchasesReady=file.nativePurchase&&await hasPurchases(c);
+      if(file.nativePurchase&&!purchasesReady)throw new IngestError(503,'purchase_schema_not_ready');
+      if(file.nativePurchase&&!row){
+        const p=file.nativePurchase;
+        await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,3))',[p.issuer_tax_id+'|'+p.buyer_tax_id+'|'+p.document_number]);
+        const canonical=(await c.query('SELECT p.document_id,p.fingerprint FROM ledens.purchase_documents p WHERE issuer_tax_id=$1 AND buyer_tax_id=$2 AND document_number=$3',[p.issuer_tax_id,p.buyer_tax_id,p.document_number])).rows[0];
+        if(canonical){if(canonical.fingerprint!==p.fingerprint)throw new IngestError(409,'purchase_identity_conflict');row=(await c.query('SELECT * FROM ledens.invoice_ingestions WHERE document_id=$1 ORDER BY created_at LIMIT 1',[canonical.document_id])).rows[0];if(!row)throw new IngestError(409,'purchase_canonical_source_missing');duplicate=true;}
+      }
       if(!row) {
         // source_id/raw_id remain NULL: those columns belong to the legacy import.
         const document=(await c.query(`INSERT INTO ledens.documents
@@ -39,9 +57,11 @@ export class IngestionService {
           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
           [document.id,file.hash,file.filename,file.type,file.reason?null:file.content,file.reason?'review':'received',file.reason])).rows[0];
       }
+      if(file.nativePurchase)await this.readyNative(c,row,file.nativePurchase);
       await c.query(`INSERT INTO ledens.invoice_sources
         (source_key,ingestion_id,source_item_id,filename,is_duplicate) VALUES ($1,$2,$3,$4,$5)`,
         [file.sourceKey,row.id,file.item_id,file.filename,duplicate]);
+      if(file.nativePurchase)await c.query('UPDATE ledens.invoice_sources SET content_hash=$2 WHERE source_key=$1',[file.sourceKey,file.hash]);
       return this.response(row,{duplicate,replay:false});
     });
   }

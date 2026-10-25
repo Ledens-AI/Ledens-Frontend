@@ -95,6 +95,13 @@ export default function RecordDrawer({ type, id, onClose, onSaved, toast }) {
         {!rec && !error ? <div className="fin-loading">Cargando…</div> : null}
         {rec ? (
           <div className="fin-drawer-body">
+            {rec.purchaseSettlement ? <section className="fin-card">
+              <h3>Pedido {rec.purchaseSettlement.order_reference}</h3>
+              <p>{rec.purchaseSettlement.document.kind === 'delivery' ? 'Partida de la entrega. El anticipo aplicado no añade otro coste ni otro pago.' : 'Anticipo y documentos vinculados.'}</p>
+              <p>Documentos: {rec.purchaseSettlement.family.map(d => d.document_number).join(' · ')}</p>
+              <p>Anticipo sin aplicar: {eur(rec.purchaseSettlement.advance_available)}</p>
+              {rec.purchaseSettlement.refunds.map(r => <p key={r.document_id}>{r.status === 'matched' ? 'Devolución conciliada' : 'Devolución pendiente de banco'}: {eur(r.expected)}</p>)}
+            </section> : null}
             <div>
               <div className="fin-drawer-amount">{eur(rec.importe)}</div>
               <div className="fin-drawer-title">{rec.concepto || 'Sin concepto'}</div>

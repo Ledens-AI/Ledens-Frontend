@@ -11,4 +11,5 @@ try{
  await pool.query('CREATE DATABASE ledens_finance_ui_test');
  await pool.query('CREATE DATABASE ledens_notifications_test');
  await pool.query('CREATE DATABASE ledens_bridge_test');
+ await pool.query('CREATE DATABASE ledens_purchase_test');
 }finally{await pool.end();}
