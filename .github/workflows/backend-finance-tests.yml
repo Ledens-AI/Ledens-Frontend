@@ -74,6 +74,10 @@ jobs:
         env:
           LEGACY_CASH_TEST_DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_legacy_cash_test
         run: node --test test/legacy-cash.test.js
+      - name: Revolut statements and incomplete archive protection on PostgreSQL 16
+        env:
+          STATEMENT_TEST_DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_statement_test
+        run: node --test test/revolut-statement.test.js
       - name: Frontend dependency installation
         working-directory: ledens/frontend
         run: npm ci

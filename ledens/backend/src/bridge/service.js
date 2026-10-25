@@ -5,6 +5,7 @@ import {LOCK_ID,RULE_VERSION,OWNED_RULE_VERSIONS,NEAR_DATE_DAYS,bankMatchRule,ce
 
 export class BridgeError extends Error{constructor(status,code){super(code);this.status=status;this.code=code;}}
 const DOC=`SELECT d.*,to_jsonb(i)->>'invoice_currency' invoice_currency,i.date_confidence,
+  to_jsonb(i)->'document_evidence' document_evidence,i.content_hash ingestion_hash,
   to_jsonb(i)->'party_evidence' party_evidence,to_jsonb(i)->'purchase_proof' purchase_proof,
   (to_jsonb(i)->>'total_confidence')::numeric total_confidence,(to_jsonb(i)->>'number_confidence')::numeric number_confidence,
   (to_jsonb(i)->>'party_confidence')::numeric party_confidence,(to_jsonb(i)->>'tax_id_confidence')::numeric tax_id_confidence,

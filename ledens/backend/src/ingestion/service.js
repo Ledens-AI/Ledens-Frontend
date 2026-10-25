@@ -1,6 +1,8 @@
 import {registerPurchaseDocument,hasPurchases,PurchaseReviewError} from '../finance/purchases.js';
 import {extractLines,storeInvoiceLines} from '../finance/ingestion.js';
 import { IngestError } from './validation.js';
+import {archiveIssue} from './completeness.js';
+import {cents,decimal} from '../bridge/rules.js';
 import { extractInvoice } from './ocr.js';
 
 export class IngestionService {
@@ -23,9 +25,38 @@ export class IngestionService {
     await c.query('UPDATE ledens.invoice_ingestions SET status=$2,reason=NULL,invoice_date=$3,destination_folder=$4,content=NULL,updated_at=now() WHERE id=$1',[row.id,row.status,row.invoice_date,row.destination_folder]);
     return row;
   }
+  async archiveProblem(c,id){
+    const x=(await c.query('SELECT d.*,to_jsonb(i) ingestion FROM ledens.invoice_ingestions i JOIN ledens.documents d ON d.id=i.document_id WHERE i.id=$1',[id])).rows[0];
+    if(!x)return 'incomplete_document';
+    return archiveIssue({...x,...x.ingestion,document_on:x.document_on,tipo:x.tipo,total:x.total,tercero:x.tercero,numerodocumento:x.numerodocumento,ingestion_hash:x.ingestion.content_hash});
+  }
+  async checkComplete(c,row){
+    if(!['ready','archived'].includes(row.status))return;
+    const reason=await this.archiveProblem(c,row.id);if(!reason)return;
+    row.status='review';row.reason=reason;
+    await c.query("UPDATE ledens.invoice_ingestions SET status='review',reason=$2,updated_at=now() WHERE id=$1",[row.id,reason]);
+  }
+  async readyStatement(c,row,p,{actorId=null}={}){
+    await c.query('SELECT pg_advisory_xact_lock(727032)');
+    const old=(await c.query('SELECT document_evidence FROM ledens.invoice_ingestions WHERE id=$1',[row.id])).rows[0]?.document_evidence;
+    if(old?.fingerprint){if(old.fingerprint!==p.fingerprint)throw new IngestError(409,'statement_evidence_conflict');if(old.content_hash===row.content_hash)return row;}
+    const protectedRows=(await c.query("SELECT 1 FROM ledens.financial_records r WHERE document_id=$1 AND source_valid AND status<>'excluded' AND (status<>'pending' OR EXISTS(SELECT 1 FROM ledens.project_financial_allocations a WHERE a.record_id=r.id)) LIMIT 1",[row.document_id])).rows;
+    if(protectedRows.length)throw new IngestError(409,'assigned_document_requires_review');
+    const prior=(await c.query('SELECT total,tipo,document_on FROM ledens.documents WHERE id=$1 FOR UPDATE',[row.document_id])).rows[0];
+    const proof={...p,content_hash:row.content_hash};
+    const linked=(await c.query('SELECT 1 FROM ledens.bank_document_allocations WHERE document_id=$1 LIMIT 1',[row.document_id])).rows.length;
+    if(linked&&(cents(prior.total)!==cents(p.total)||prior.tipo!==p.direction))throw new IngestError(409,'linked_document_requires_review');
+    row.invoice_date=p.date;row.destination_folder='/Shared Documents/'+this.config.archiveRoot+'/'+(Math.floor((Number(p.date.slice(5,7))-1)/3)+1)+'T-'+p.date.slice(0,4);
+    if(row.status!=='archived')row.status='ready';row.reason=null;
+    await c.query('UPDATE ledens.documents SET total=$2,tipo=$3,document_on=$4,trimestre=$5,tercero=$6 WHERE id=$1',[row.document_id,p.total,p.direction,p.date,row.destination_folder.split('/').at(-1),p.vendor]);
+    await c.query('UPDATE ledens.invoice_ingestions SET document_evidence=$2,invoice_currency=$3,invoice_date=$4,status=$5,reason=NULL,destination_folder=$6,content=NULL,updated_at=now() WHERE id=$1',[row.id,JSON.stringify(proof),p.currency,p.date,row.status,row.destination_folder]);
+    await storeInvoiceLines(c,row.document_id,[{line_number:1,description:p.description,quantity:1,gross_amount:decimal(cents(p.total)<0n?-cents(p.total):cents(p.total)),currency:p.currency,evidence:{origin:p.source,amount_basis:'statement_gross_only',fingerprint:p.fingerprint}}],{currency:p.currency,direction:p.direction,actorId});
+    if(!old)await c.query('INSERT INTO ledens.bridge_events(document_id,actor_id,action,detail) VALUES($1,$2,$3,$4)',[row.document_id,actorId,'statement_extracted',JSON.stringify({source:p.source,content_hash:row.content_hash,before:prior,after:{total:p.total,tipo:p.direction,date:p.date},fingerprint:p.fingerprint})]);
+    return row;
+  }
   async receive(file) {
     return this.transaction(async c=>{
-      if(file.nativePurchase)await c.query('SELECT pg_advisory_xact_lock(727032)');
+      if(file.nativePurchase||file.nativeStatement)await c.query('SELECT pg_advisory_xact_lock(727032)');
       // Serialize both same-content submissions and replays of the same source.
       await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[file.hash]);
       await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,1))',[file.sourceKey]);
@@ -34,6 +65,8 @@ export class IngestionService {
       if(previous) {
         if((previous.source_content_hash||previous.content_hash)!==file.hash) throw new IngestError(409,'source_content_changed');
         if(file.nativePurchase)await this.readyNative(c,previous,file.nativePurchase);
+        if(file.nativeStatement)await this.readyStatement(c,previous,file.nativeStatement);
+        await this.checkComplete(c,previous);
         return this.response(previous,{duplicate:previous.is_duplicate,replay:true});
       }
       let row=(await c.query('SELECT * FROM ledens.invoice_ingestions WHERE content_hash=$1',[file.hash])).rows[0];
@@ -58,6 +91,8 @@ export class IngestionService {
           [document.id,file.hash,file.filename,file.type,file.reason?null:file.content,file.reason?'review':'received',file.reason])).rows[0];
       }
       if(file.nativePurchase)await this.readyNative(c,row,file.nativePurchase);
+      if(file.nativeStatement)await this.readyStatement(c,row,file.nativeStatement);
+      await this.checkComplete(c,row);
       await c.query(`INSERT INTO ledens.invoice_sources
         (source_key,ingestion_id,source_item_id,filename,is_duplicate) VALUES ($1,$2,$3,$4,$5)`,
         [file.sourceKey,row.id,file.item_id,file.filename,duplicate]);
@@ -69,7 +104,7 @@ export class IngestionService {
     return this.transaction(async c=>{
       const row=(await c.query('SELECT * FROM ledens.invoice_ingestions WHERE id=$1 FOR UPDATE',[id])).rows[0];
       if(!row) throw new IngestError(404,'not_found');
-      if(['ready','review','archived'].includes(row.status)) return this.response(row);
+      if(['ready','review','archived'].includes(row.status)){await this.checkComplete(c,row);return this.response(row);}
       if(!this.ocr) throw new IngestError(503,'ocr_not_configured');
       try {
         if(row.status==='received') {
@@ -82,6 +117,7 @@ export class IngestionService {
         const result=await this.ocr.poll(row.operation_url);
         if(['running','notStarted'].includes(result.status)) return this.response(row);
         const extracted=result.status==='succeeded'?extractInvoice(result):{reason:'ocr_failed'};
+        if(!extracted.reason)extracted.reason=archiveIssue({document_on:extracted.date,total:extracted.total,tipo:extracted.direction,invoice_currency:extracted.currency,date_confidence:extracted.confidence,total_confidence:extracted.totalConfidence,direction_confidence:extracted.directionConfidence});
         if(extracted.reason) {
           row.status='review';row.reason=extracted.reason;
           await c.query(`UPDATE ledens.invoice_ingestions SET status='review',reason=$2,content=NULL,
@@ -122,6 +158,7 @@ export class IngestionService {
       const row=(await c.query('SELECT * FROM ledens.invoice_ingestions WHERE id=$1 FOR UPDATE',[id])).rows[0];
       if(!row) throw new IngestError(404,'not_found');
       if(!['ready','archived'].includes(row.status)) throw new IngestError(409,'not_ready_for_archive');
+      if(await this.archiveProblem(c,id))throw new IngestError(409,'incomplete_document_cannot_archive');
       const expected=new URL(this.config.site+row.destination_folder+'/'+encodeURIComponent(row.filename));
       let actual;try{actual=new URL(archiveUrl);}catch{throw new IngestError(400,'invalid_archive_url');}
       const expectedPath=decodeURIComponent(expected.pathname).split('/');

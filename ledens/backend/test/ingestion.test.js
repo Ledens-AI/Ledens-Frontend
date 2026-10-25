@@ -14,7 +14,7 @@ const config={site:'https://ledenses.sharepoint.com/sites/ledens.es',folder:'dat
 let db,service,pdf64;
 let starts=0;
 const ocr={start:async()=>{starts++;return 'https://test.cognitiveservices.azure.com/documentintelligence/documentModels/prebuilt-invoice/analyzeResults/1';},
-  poll:async()=>({status:'succeeded',analyzeResult:{documents:[{fields:{InvoiceDate:{valueDate:'2025-09-30',confidence:0.99},InvoiceTotal:{valueCurrency:{amount:121}}}}]}})};
+  poll:async()=>({status:'succeeded',analyzeResult:{documents:[{fields:{InvoiceDate:{valueDate:'2025-09-30',confidence:0.99},InvoiceTotal:{valueCurrency:{amount:121,currencyCode:'EUR'},confidence:.99},VendorTaxId:{valueString:'B19753805',confidence:.99}}}]}})};
 before(async()=>{
   db=new PGlite();
   await db.exec(`CREATE SCHEMA ledens; CREATE TABLE ledens.documents

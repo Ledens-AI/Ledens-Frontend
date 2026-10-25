@@ -34,6 +34,10 @@ export function nativePurchaseVerified(doc){
  const p=doc.purchase_proof,t=cents(doc.total);
  return Boolean(p?.source==='native-pdf-obramat-v1'&&['advance','advance_refund','delivery'].includes(p.kind)&&p.tax_id===taxId(doc.niftercero)&&p.vendor===normalize(doc.tercero)&&p.document_number===doc.numerodocumento&&p.date===new Date(day(doc.document_on)*86400000).toISOString().slice(0,10)&&p.currency===doc.invoice_currency&&p.direction===doc.tipo&&t!==null&&p.ledger_total===decimal(t));
 }
+export function nativeStatementVerified(doc){
+ const p=doc.document_evidence,total=cents(doc.total),date=day(doc.document_on);
+ return Boolean(p?.source==='native-revolut-statement-v1'&&p.statement_status==='Completed'&&date!==null&&p.date===new Date(date*86400000).toISOString().slice(0,10)&&p.total===decimal(total??0n)&&total!==null&&total!==0n&&p.currency===doc.invoice_currency&&p.currency==='EUR'&&p.direction===doc.tipo&&p.vendor===doc.tercero&&/^[a-f0-9]{64}$/.test(p.content_hash||'')&&p.content_hash===doc.ingestion_hash);
+}
 export function hasParty(doc,bank,{verified=false}={}){
   const text=' '+normalize([bank.reference,bank.description,bank.beneficiary_name,bank.payer].join(' '))+' ';
   const nif=taxId(doc.niftercero);
@@ -50,7 +54,7 @@ export function automaticBlock(doc){
   if(!['Pagar','Cobrar'].includes(doc.tipo)||(doc.tipo==='Pagar')!==(total<0n))return 'unknown_direction';
   if(doc.review_state==='Incidencia')return 'invoice_issue';
   if(doc.invoice_currency!=='EUR')return 'unverified_currency';
-  if(nativePurchaseVerified(doc))return null;
+  if(nativePurchaseVerified(doc)||nativeStatementVerified(doc))return null;
   for(const [key,threshold] of [['total_confidence',INVOICE_MIN_CONFIDENCE],['date_confidence',INVOICE_MIN_CONFIDENCE],['direction_confidence',INVOICE_MIN_CONFIDENCE]]){
     const value=Number(doc[key]);if(!Number.isFinite(value)||value<threshold||value>1)return 'unverified_invoice_fields';
   }
@@ -60,7 +64,7 @@ export function bankMatchRule(doc,bank){
   const dt=cents(doc.total),amount=cents(bank.amount),total=cents(bank.total_amount);
   if(dt===null||dt===0n||amount===null||total===null||dt!==amount||dt!==total)return false;
   if(bank.state!=='COMPLETED'||bank.currency!=='EUR'||bank.is_internal_transfer===true)return false;
-  const verifiedRefund=bank.type==='CARD_REFUND'&&dt>0n&&doc.tipo==='Cobrar'&&doc.purchase_proof?.kind==='advance_refund'&&nativePurchaseVerified(doc);
+  const verifiedRefund=bank.type==='CARD_REFUND'&&dt>0n&&doc.tipo==='Cobrar'&&((doc.purchase_proof?.kind==='advance_refund'&&nativePurchaseVerified(doc))||nativeStatementVerified(doc));
   const incomingTopup=bank.type==='TOPUP'&&dt>0n&&doc.tipo==='Cobrar';
   if(!['TRANSFER','CARD_PAYMENT','CHARGE'].includes(bank.type)&&!verifiedRefund&&!incomingTopup)return false;
   if(bank.type==='TRANSFER'&&bank.is_internal_transfer!==false)return false;
