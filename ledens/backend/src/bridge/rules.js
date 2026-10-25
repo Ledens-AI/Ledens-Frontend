@@ -6,7 +6,10 @@ export const OWNED_RULE_VERSIONS=['exact-reference-party-v1','party-amount-date-
 export const NEAR_DATE_DAYS=7;
 export const LOCK_ID=727032;
 export const normalize=s=>String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();
-export const taxId=s=>normalize(s).replace(/\s/g,'').replace(/^ES(?=[A-Z0-9]{9}$)/,'');
+// A label printed before the number («ES NIF B…», «NIF: B…», «IE VAT IE…», «N.I.F. B…»)
+// is not part of it; an optional country code may precede the label.
+const TAX_LABEL=/^(?:[A-Z]{2} )?(?:N I F(?: IVA)?|NIF(?: IVA)?|C I F|CIF|N I E|NIE|DNI|VAT(?: (?:NO|NUMBER|REG|ID))?|IVA|TAX ID) /;
+export const taxId=s=>normalize(s).replace(TAX_LABEL,'').replace(/\s/g,'').replace(/^ES(?=[A-Z0-9]{9}$)/,'');
 export function cents(value){
   const s=String(value??'');
   if(!/^-?\d+(?:\.\d{1,2})?$/.test(s))return null;

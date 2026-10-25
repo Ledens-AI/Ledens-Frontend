@@ -171,3 +171,17 @@ test('the total is looked for in the first three pages: page 3 replaces page 2 o
   assert.deepEqual(await sent(['Factura FA-4','Subtotal 10,00','Detalle de llamadas']),[[1,2],[301,302]],'a subtotal is not the total');
   assert.deepEqual(await sent(['Factura FA-5','Detalle','Total factura 3,00 €'],3),[[1,3],[301,303]],'also with exactly three pages');
 });
+test('a tax id printed with its label («ES NIF B…», «IE VAT IE…») is still recognised: an Anthropic-style invoice is to pay',async()=>{
+  const {taxId}=await import('../src/bridge/rules.js');
+  for(const [raw,id] of [['ES NIF B19753805','B19753805'],['NIF: B19753805','B19753805'],['N.I.F. B-19753805','B19753805'],['CIF B19753805','B19753805'],
+    ['IE VAT IE4276970QH','IE4276970QH'],['VAT No. GB123456789','GB123456789'],['NIE X1234567L','X1234567L'],['ESB19753805','B19753805'],['B19753805','B19753805'],['A82009812','A82009812']])
+    assert.equal(taxId(raw),id,raw);
+  const inv=(fields)=>({analyzeResult:{documents:[{fields:{InvoiceDate:{valueDate:'2026-10-19',confidence:.99},InvoiceId:{valueString:'9BF0758D-9436361',confidence:.95},
+    InvoiceTotal:{valueCurrency:{amount:18,currencyCode:'EUR'},confidence:.98},SubTotal:{valueCurrency:{amount:18}},...fields}}]}});
+  // Our NIF as the buyer, with its label, is enough even when the seller's id is not read.
+  const buyer=extractInvoice(inv({CustomerTaxId:{valueString:'ES NIF B19753805',confidence:.93},VendorName:{valueString:'Anthropic Ireland, Limited',confidence:.9}}));
+  assert.deepEqual([buyer.direction,buyer.total,buyer.directionConfidence],['Pagar',-18,.93]);
+  const seller=extractInvoice(inv({VendorTaxId:{valueString:'IE VAT IE4276970QH',confidence:.9}}));
+  assert.equal(seller.direction,'Pagar');
+  assert.equal(extractInvoice(inv({VendorTaxId:{valueString:'ES NIF B19753805',confidence:.9}})).direction,'Cobrar','our labelled id as seller');
+});
