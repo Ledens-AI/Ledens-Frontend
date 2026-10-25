@@ -30,6 +30,13 @@ export class IngestionService {
     if(!x)return 'incomplete_document';
     return archiveIssue({...x,...x.ingestion,document_on:x.document_on,tipo:x.tipo,total:x.total,tercero:x.tercero,numerodocumento:x.numerodocumento,ingestion_hash:x.ingestion.content_hash});
   }
+  // A PDF held as f0_page_limit before the first-page rule: when it arrives again
+  // with OCR input, it goes back to «received» and is analysed like a new one.
+  async recoverPageLimit(c,row,file){
+    if(row.status!=='review'||row.reason!=='f0_page_limit'||file.reason||!file.ocrContent)return;
+    await c.query("UPDATE ledens.invoice_ingestions SET status='received',reason=NULL,content=$2,operation_url=NULL,updated_at=now() WHERE id=$1",[row.id,file.ocrContent]);
+    Object.assign(row,{status:'received',reason:null,operation_url:null});return true;
+  }
   async checkComplete(c,row){
     if(!['ready','archived'].includes(row.status))return;
     const reason=await this.archiveProblem(c,row.id);if(!reason)return;
@@ -66,8 +73,9 @@ export class IngestionService {
         if((previous.source_content_hash||previous.content_hash)!==file.hash) throw new IngestError(409,'source_content_changed');
         if(file.nativePurchase)await this.readyNative(c,previous,file.nativePurchase);
         if(file.nativeStatement)await this.readyStatement(c,previous,file.nativeStatement);
+        const recovered=await this.recoverPageLimit(c,previous,file);
         await this.checkComplete(c,previous);
-        return this.response(previous,{duplicate:previous.is_duplicate,replay:true});
+        return this.response(previous,{duplicate:recovered?false:previous.is_duplicate,replay:true});
       }
       let row=(await c.query('SELECT * FROM ledens.invoice_ingestions WHERE content_hash=$1',[file.hash])).rows[0];
       let duplicate=Boolean(row);
@@ -88,8 +96,8 @@ export class IngestionService {
         row=(await c.query(`INSERT INTO ledens.invoice_ingestions
           (document_id,content_hash,filename,content_type,content,status,reason)
           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-          [document.id,file.hash,file.filename,file.type,file.reason?null:file.content,file.reason?'review':'received',file.reason])).rows[0];
-      }
+          [document.id,file.hash,file.filename,file.type,file.reason?null:file.ocrContent||file.content,file.reason?'review':'received',file.reason])).rows[0];
+      } else if(await this.recoverPageLimit(c,row,file))duplicate=false; // the Logic App processes only non-duplicates
       if(file.nativePurchase)await this.readyNative(c,row,file.nativePurchase);
       if(file.nativeStatement)await this.readyStatement(c,row,file.nativeStatement);
       await this.checkComplete(c,row);
