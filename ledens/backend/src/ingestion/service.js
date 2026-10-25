@@ -32,9 +32,17 @@ export class IngestionService {
   }
   // A PDF held as f0_page_limit before the first-page rule: when it arrives again
   // with OCR input, it goes back to «received» and is analysed like a new one.
-  async recoverPageLimit(c,row,file){
-    if(row.status!=='review'||row.reason!=='f0_page_limit'||file.reason||!file.ocrContent)return;
-    await c.query("UPDATE ledens.invoice_ingestions SET status='received',reason=NULL,content=$2,operation_url=NULL,updated_at=now() WHERE id=$1",[row.id,file.ocrContent]);
+  // Likewise a supplier invoice held as invoice_direction_requires_review before
+  // the seller-tax-id rule, while no bank movement is linked to its document.
+  async linked(c,documentId){
+    if(!(await c.query("SELECT to_regclass('ledens.bank_document_allocations') IS NOT NULL ok")).rows[0].ok)return false;
+    return (await c.query('SELECT 1 FROM ledens.bank_document_allocations WHERE document_id=$1 LIMIT 1',[documentId])).rows.length>0;
+  }
+  async recoverReview(c,row,file){
+    if(row.status!=='review'||file.reason||file.nativePurchase||file.nativeStatement)return;
+    if(row.reason==='f0_page_limit'){if(!file.ocrContent)return;}
+    else if(row.reason!=='invoice_direction_requires_review'||!row.document_id||await this.linked(c,row.document_id))return;
+    await c.query("UPDATE ledens.invoice_ingestions SET status='received',reason=NULL,content=$2,operation_url=NULL,updated_at=now() WHERE id=$1",[row.id,file.ocrContent||file.content]);
     Object.assign(row,{status:'received',reason:null,operation_url:null});return true;
   }
   async checkComplete(c,row){
@@ -73,7 +81,7 @@ export class IngestionService {
         if((previous.source_content_hash||previous.content_hash)!==file.hash) throw new IngestError(409,'source_content_changed');
         if(file.nativePurchase)await this.readyNative(c,previous,file.nativePurchase);
         if(file.nativeStatement)await this.readyStatement(c,previous,file.nativeStatement);
-        const recovered=await this.recoverPageLimit(c,previous,file);
+        const recovered=await this.recoverReview(c,previous,file);
         await this.checkComplete(c,previous);
         return this.response(previous,{duplicate:recovered?false:previous.is_duplicate,replay:true});
       }
@@ -97,7 +105,7 @@ export class IngestionService {
           (document_id,content_hash,filename,content_type,content,status,reason)
           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
           [document.id,file.hash,file.filename,file.type,file.reason?null:file.ocrContent||file.content,file.reason?'review':'received',file.reason])).rows[0];
-      } else if(await this.recoverPageLimit(c,row,file))duplicate=false; // the Logic App processes only non-duplicates
+      } else if(await this.recoverReview(c,row,file))duplicate=false; // the Logic App processes only non-duplicates
       if(file.nativePurchase)await this.readyNative(c,row,file.nativePurchase);
       if(file.nativeStatement)await this.readyStatement(c,row,file.nativeStatement);
       await this.checkComplete(c,row);
