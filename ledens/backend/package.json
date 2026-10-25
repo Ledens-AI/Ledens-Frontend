@@ -15,8 +15,9 @@
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "express-rate-limit": "^7.4.1",
-    "pg": "^8.23.0",
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "4.10.38",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.10"

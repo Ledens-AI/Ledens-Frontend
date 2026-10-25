@@ -1,3 +1,4 @@
+import {readObramatPdf} from './obramat.js';
 import { createHash } from 'node:crypto';
 import { PDFDocument } from 'pdf-lib';
 
@@ -29,18 +30,22 @@ export async function validateInvoice(body, config) {
   if (!content.length || content.length > 4 * 1024 * 1024) throw new IngestError(413, 'file_exceeds_f0_limit');
   let type;
   let reason = null;
+  let nativePurchase=null;
   if (/\.pdf$/i.test(body.filename) && content.subarray(0,5).toString() === '%PDF-') {
     type = 'application/pdf';
     try {
       const pdf = await PDFDocument.load(content, { updateMetadata: false });
-      if (pdf.getPageCount() > 2) reason = 'f0_page_limit';
+      const parsed=await readObramatPdf(content,{businessTaxId:config.businessTaxId||process.env.BRIDGE_BUSINESS_TAX_ID||'B19753805'});
+      if(parsed?.data)nativePurchase=parsed.data;
+      else if(parsed?.reason)reason=parsed.reason;
+      else if(pdf.getPageCount()>2)reason='f0_page_limit';
     } catch { reason = 'unreadable_or_encrypted_pdf'; }
   } else if (/\.png$/i.test(body.filename) && content.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))) {
     type = 'image/png';
   } else if (/\.jpe?g$/i.test(body.filename) && content[0] === 255 && content[1] === 216 && content[2] === 255) {
     type = 'image/jpeg';
   } else throw new IngestError(415, 'supported_formats_pdf_png_jpeg');
-  return { ...body, content, type, reason,
+  return { ...body, content, type, reason, nativePurchase,
     hash: createHash('sha256').update(content).digest('hex'),
     sourceKey: `${config.site}|Shared Documents|${body.item_id}` };
 }

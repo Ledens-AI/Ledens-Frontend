@@ -1,3 +1,4 @@
+import {hasPurchases,purchaseDetails} from './purchases.js';
 import {createHash} from 'node:crypto';
 import {cents} from '../bridge/rules.js';
 import {projectSuggestions} from './ingestion.js';
@@ -11,6 +12,15 @@ const categories=['materials','labor','subcontract','other_direct','revenue','ad
 const absolute=n=>n<0n?-n:n;
 export class FinanceService {
  constructor(pool){this.pool=pool;}
+ async documentFunding(c=this.pool){
+  const native=await hasPurchases(c);
+  return {native,funding:native?'SELECT * FROM ledens.v_document_funding':"SELECT b.document_id,b.bank_movement_id,b.allocated_amount,abs(d.total) capacity FROM ledens.bank_document_allocations b JOIN ledens.documents d ON d.id=b.document_id JOIN ledens.bank_movements m ON m.id=b.bank_movement_id AND m.state='COMPLETED' AND m.currency='EUR' WHERE b.state='Confirmado' AND d.total<>0",capacities:native?'SELECT * FROM ledens.v_document_economic_capacity':'SELECT id document_id,abs(total) capacity FROM ledens.documents'};
+ }
+ async purchase(user,documentId){
+  if(!await hasPurchases(this.pool))return null;
+  await this.documentPermission(this.pool,user,documentId);const data=await purchaseDetails(this.pool,documentId);
+  if(data)for(const doc of data.family)await this.documentPermission(this.pool,user,doc.document_id);return data;
+ }
  async transaction(fn){const c=await this.pool.connect();try{await c.query('BEGIN');
    await c.query('SELECT pg_advisory_xact_lock(727032)');
    const result=await fn(c);await c.query('COMMIT');return result;
@@ -55,13 +65,17 @@ export class FinanceService {
    if(project_id)await this.permission(this.pool,user,project_id);
    // A record shared across projects is visible only to users authorized for every share.
    const values=[user.role==='admin',user.id,type||null,status||null,project_id||null,Boolean(unassigned),search||null,from||null,to||null,min||null,max||null,limit,offset];
+   const purchaseSchema=await hasPurchases(this.pool);
+   const covered=purchaseSchema?"EXISTS(SELECT 1 FROM ledens.v_purchase_coverage pc WHERE pc.document_id=r.document_id AND pc.paid>=pc.goods_gross)":'false';
+   const delivery=purchaseSchema?"EXISTS(SELECT 1 FROM ledens.purchase_documents pd WHERE pd.document_id=r.document_id AND pd.kind='delivery')":'false';
    return (await this.pool.query(`SELECT r.*,
     coalesce((SELECT jsonb_agg(jsonb_build_object('project_id',a.project_id,'project_name',p.name,'amount',a.allocated_amount::text)) FROM ledens.project_financial_allocations a JOIN ledens.projects p ON p.id=a.project_id WHERE a.record_id=r.id),'[]'::jsonb) allocations,
     coalesce((SELECT sum(a.allocated_amount) FROM ledens.project_financial_allocations a WHERE a.record_id=r.id),0) allocated_amount,
     r.gross_amount-coalesce((SELECT sum(a.allocated_amount) FROM ledens.project_financial_allocations a WHERE a.record_id=r.id),0) unassigned_amount,
     d.numerodocumento document_number,
-    EXISTS(SELECT 1 FROM ledens.bank_document_allocations b WHERE b.document_id=r.document_id AND b.state='Confirmado') reconciled,
-    CASE WHEN EXISTS(SELECT 1 FROM ledens.bank_document_allocations b WHERE b.document_id=r.document_id AND b.state IS DISTINCT FROM 'Confirmado') THEN 'review'
+    (EXISTS(SELECT 1 FROM ledens.bank_document_allocations b WHERE b.document_id=r.document_id AND b.state='Confirmado') OR (${covered})) reconciled,
+    CASE WHEN (${delivery}) THEN CASE WHEN (${covered}) THEN 'covered_by_advance' ELSE 'awaiting_advance_payment' END
+      WHEN EXISTS(SELECT 1 FROM ledens.bank_document_allocations b WHERE b.document_id=r.document_id AND b.state IS DISTINCT FROM 'Confirmado') THEN 'review'
       WHEN abs(d.total)=coalesce((SELECT sum(abs(b.allocated_amount)) FROM ledens.bank_document_allocations b WHERE b.document_id=r.document_id AND b.state='Confirmado'),0) AND d.total<>0 THEN 'matched'
       WHEN EXISTS(SELECT 1 FROM ledens.bank_document_allocations b WHERE b.document_id=r.document_id AND b.state='Confirmado') THEN 'partial'
       WHEN r.bank_movement_id IS NOT NULL THEN 'bank_recorded' ELSE 'unmatched' END reconciliation_status
@@ -147,16 +161,17 @@ export class FinanceService {
      if(body.category!=='advance'&&r.bank_movement_id&&!r.document_id)fail(409,'recognition_requires_document');
      if(body.category!=='advance'&&r.document_id){
        const d=(await c.query('SELECT * FROM ledens.documents WHERE id=$1 FOR UPDATE',[r.document_id])).rows[0];
+       const capSql=(await this.documentFunding(c)).capacities;const capacity=(await c.query('SELECT capacity FROM ('+capSql+') caps WHERE document_id=$1',[d.id])).rows[0].capacity;
        if(r.invoice_line_id){
          if(!['Pagar','Cobrar'].includes(d.tipo))fail(409,'document_direction_requires_review');
-         const expected=d.tipo==='Pagar'?-cents(d.total):cents(d.total);
+         const expected=cents(d.total)===0n?cents(capacity):d.tipo==='Pagar'?-cents(d.total):cents(d.total);
          if(expected===0n||(expected>0n)!==(cents(r.gross_amount)>0n)||
            (d.tipo==='Cobrar')!==(body.category==='revenue'))fail(409,'document_direction_mismatch');
        }
-       const envelope=(await c.query(`SELECT abs(d.total) capacity,coalesce(sum(abs(r.gross_amount)),0) used,
+       const envelope=(await c.query(`SELECT caps.capacity,coalesce(sum(abs(r.gross_amount)),0) used,
          coalesce(bool_or((r.invoice_line_id IS NULL)<>($3::uuid IS NULL)) FILTER(WHERE r.id IS NOT NULL),false) mixed
-         FROM ledens.documents d LEFT JOIN ledens.financial_records r ON r.document_id=d.id AND r.id<>$2 AND r.status='approved' AND r.category<>'advance'
-         WHERE d.id=$1 GROUP BY d.id`,[r.document_id,r.id,r.invoice_line_id])).rows[0];
+         FROM ledens.documents d JOIN (${capSql}) caps ON caps.document_id=d.id LEFT JOIN ledens.financial_records r ON r.document_id=d.id AND r.id<>$2 AND r.status='approved' AND r.category<>'advance'
+         WHERE d.id=$1 GROUP BY d.id,caps.capacity`,[r.document_id,r.id,r.invoice_line_id])).rows[0];
        if(envelope.mixed)fail(409,'duplicate_document_representation');
        if(envelope.capacity===null||absolute(cents(r.gross_amount))+cents(envelope.used)>cents(envelope.capacity))fail(409,'document_amount_exceeded');
      }
@@ -197,7 +212,8 @@ export class FinanceService {
      await this.documentPermission(c,user,documentId,true);
      const d=(await c.query('SELECT * FROM ledens.documents WHERE id=$1 FOR UPDATE',[documentId])).rows[0];
      if(!d)fail(404,'document_not_found');
-     if(absolute(cents(body.gross_amount))>absolute(cents(d.total)||0n))fail(409,'document_amount_exceeded');
+     const capSql=(await this.documentFunding(c)).capacities;const cap=(await c.query('SELECT capacity FROM ('+capSql+') caps WHERE document_id=$1',[d.id])).rows[0].capacity;
+     if(absolute(cents(body.gross_amount))>absolute(cents(cap)||0n))fail(409,'document_amount_exceeded');
      const l=(await c.query(`INSERT INTO ledens.invoice_lines(document_id,line_number,description) VALUES($1,$2,$3)
        ON CONFLICT(document_id,line_number) DO UPDATE SET document_id=excluded.document_id RETURNING id`,[documentId,body.line_number,body.description])).rows[0];
      const existing=(await c.query('SELECT * FROM ledens.financial_records WHERE invoice_line_id=$1',[l.id])).rows[0];
@@ -219,6 +235,7 @@ export class FinanceService {
     coalesce(sum(economic_amount) FILTER(WHERE category IN ('materials','labor','subcontract','other_direct')),0)::text direct_cost,
     coalesce(sum(allocated_amount) FILTER(WHERE category='revenue'),0)::text invoiced_gross
     FROM ledens.v_project_recognized WHERE project_id=$1`,[projectId])).rows[0];
+   const {funding,capacities}=await this.documentFunding();
    // Treasury is distributed through the SAME document/Bridge, once per record share.
    // Advances represent the bank receipt only when that bank has no confirmed document link.
    const cash=(await this.pool.query(`WITH shares AS (
@@ -226,11 +243,10 @@ export class FinanceService {
     JOIN ledens.project_financial_allocations a ON a.record_id=r.id
     WHERE a.project_id=$1 AND r.status='approved' AND r.currency='EUR'
    ), flows AS (
-    SELECT b.bank_movement_id,b.allocated_amount * abs(s.gross_amount/d.total)*s.share amount
+    SELECT b.bank_movement_id,b.allocated_amount * abs(s.gross_amount/b.capacity)*s.share amount
     FROM shares s JOIN ledens.documents d ON d.id=s.document_id
-    JOIN ledens.bank_document_allocations b ON b.document_id=d.id AND b.state='Confirmado'
-    JOIN ledens.bank_movements m ON m.id=b.bank_movement_id AND m.state='COMPLETED' AND m.currency='EUR'
-    WHERE s.category<>'advance' AND d.total<>0
+    JOIN (${funding}) b ON b.document_id=d.id
+    WHERE s.category<>'advance' AND b.capacity>0
     UNION ALL
     SELECT m.id,m.total_amount*s.share*abs(s.gross_amount/m.total_amount)
     FROM shares s JOIN ledens.bank_movements m ON m.id=s.bank_movement_id
@@ -241,12 +257,12 @@ export class FinanceService {
    const pending=(await this.pool.query(`SELECT count(*)::int pending_review,
     coalesce(sum(abs(r.gross_amount)),0)::text pending_review_gross FROM ledens.financial_records r
     WHERE status='pending' AND EXISTS(SELECT 1 FROM ledens.project_financial_allocations a WHERE a.record_id=r.id AND a.project_id=$1)`,[projectId])).rows[0];
-   const due=(await this.pool.query(`WITH balances AS (
-    SELECT r.category,a.allocated_amount*(1-least(1,coalesce((SELECT sum(abs(b.allocated_amount)) FROM ledens.bank_document_allocations b
-      JOIN ledens.bank_movements m ON m.id=b.bank_movement_id AND m.state='COMPLETED' AND m.currency='EUR'
-      WHERE b.document_id=d.id AND b.state='Confirmado'),0)/nullif(abs(d.total),0))) due
+   const due=(await this.pool.query(`WITH capacities AS(${capacities}),funding AS(${funding}),balances AS (
+    SELECT r.category,a.allocated_amount*(1-least(1,coalesce((SELECT sum(abs(b.allocated_amount)) FROM funding b
+      WHERE b.document_id=d.id),0)/nullif(caps.capacity,0))) due
     FROM ledens.financial_records r JOIN ledens.project_financial_allocations a ON a.record_id=r.id
-    JOIN ledens.documents d ON d.id=r.document_id WHERE a.project_id=$1 AND r.status='approved' AND r.currency='EUR'
+    JOIN ledens.documents d ON d.id=r.document_id JOIN capacities caps ON caps.document_id=d.id
+    WHERE a.project_id=$1 AND r.status='approved' AND r.currency='EUR'
    ) SELECT coalesce(sum(due) FILTER(WHERE category='revenue'),0)::text pending_collections,
     coalesce(sum(due) FILTER(WHERE category IN ('materials','labor','subcontract','other_direct')),0)::text pending_payments FROM balances`,[projectId])).rows[0];
    // Database arithmetic retains NUMERIC precision; money is serialized as decimal strings.

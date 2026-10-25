@@ -1,3 +1,4 @@
+import {hasPurchases} from '../finance/purchases.js';
 // Spanish UI facade: never writes source project_id or a parallel money ledger.
 import {createHash} from 'node:crypto';
 import {FinanceService,FinanceError,uuid} from '../finance/service.js';
@@ -100,7 +101,8 @@ export class FinanzasService {
    b.total_amount-(SELECT coalesce(sum(a.allocated_amount),0) FROM ledens.bank_document_allocations a WHERE a.bank_movement_id=b.id AND a.state='Confirmado') difference,
    (SELECT count(*) FROM ledens.bank_document_allocations a WHERE a.bank_movement_id=b.id) document_links FROM ledens.bank_movements b WHERE b.id=$1`,[r.bank_movement_id])).rows[0];
   const suggestion=full.suggestions.length===1?{projectId:full.suggestions[0].project_id,label:full.suggestions[0].project_name,reason:full.suggestions[0].evidence}:undefined;
-  return {...r,typeLabel:TYPES[type].label,documento,movimiento,distribucion:r.project_id?[]:full.allocations.map(a=>({project_id:a.project_id,label:a.project_name,amount:a.allocated_amount})),historial:await this.history(type,id),suggestion};
+  let purchaseSettlement=null;if(r.document_id){try{purchaseSettlement=await this.finance.purchase(this.user,r.document_id);}catch(e){if(!(e instanceof FinanceError&&e.status===403))throw e;}}
+  return {...r,typeLabel:TYPES[type].label,documento,movimiento,purchaseSettlement,distribucion:r.project_id?[]:full.allocations.map(a=>({project_id:a.project_id,label:a.project_name,amount:a.allocated_amount})),historial:await this.history(type,id),suggestion};
  }
  reason(r,reason,version){if(r.version===version&&(r.project_id||r.parts)&&(!reason||reason.trim().length<5))throw new FinError(400,'Escribe un motivo de al menos cinco caracteres');return reason?.trim()||'Asignación confirmada en gestión financiera';}
  async assign({type,id,projectId,version,requestId,reason}){
@@ -151,6 +153,7 @@ export class FinanzasService {
   // Aggregate each Bridge side before joining: multiple links must never duplicate a source row.
   const bridge=`bridge_doc AS(SELECT document_id,count(*)::int enlaces,count(*) FILTER(WHERE state<>'Confirmado' OR state IS NULL)::int revision,coalesce(sum(allocated_amount) FILTER(WHERE state='Confirmado'),0) confirmado FROM ledens.bank_document_allocations GROUP BY document_id),
   bridge_bank AS(SELECT a.bank_movement_id,count(*)::int enlaces,count(*) FILTER(WHERE a.state<>'Confirmado' OR a.state IS NULL)::int revision,coalesce(sum(a.allocated_amount) FILTER(WHERE a.state='Confirmado'),0) confirmado,string_agg(DISTINCT coalesce(d.numerodocumento,'Sin número'),', ') documentos FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id GROUP BY a.bank_movement_id)`;
+  const hideCovered=await hasPurchases(this.pool)?"NOT EXISTS(SELECT 1 FROM ledens.v_purchase_coverage pc WHERE pc.document_id=x.id AND pc.paid>=pc.goods_gross)":'true';
   let base;
   if(view==='registros')base=BASE+', '+bridge+`, candidates AS(SELECT l.id,l.type,l.fecha,l.tercero,l.concepto,l.numerodocumento,l.id::text referencia,l.importe,l.document_id,
     coalesce(a.enlaces,0) enlaces,coalesce(a.confirmado,0)::text conciliado,
@@ -161,7 +164,7 @@ export class FinanzasService {
   else {const bank=view==='movimientos';base='WITH '+bridge+`, candidates AS(SELECT x.id,'`+(bank?'movimiento':'documento')+`'::text type,`+(bank?'x.completed_on':'x.document_on')+` fecha,`+(bank?"coalesce(x.beneficiary_name,x.payer)":"x.tercero")+` tercero,`+(bank?'x.description':"to_jsonb(x)->>'descripcion'")+` concepto,`+(bank?'a.documentos':'x.numerodocumento')+` numerodocumento,`+(bank?'x.source_id':'x.id::text')+` referencia,`+(bank?'x.total_amount':'x.total')+` importe,`+(bank?'NULL::uuid':'x.id')+` document_id,coalesce(a.enlaces,0) enlaces,coalesce(a.confirmado,0)::text conciliado,
     array_remove(ARRAY[CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_bridge' END,`+(bank?"CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_documento' END,":"")+`CASE WHEN a.revision>0 THEN 'revision' END,CASE WHEN a.enlaces>0 AND coalesce(a.confirmado,0)<>`+(bank?'x.total_amount':'x.total')+` THEN 'parcial' END],NULL) motivos,
     (coalesce(a.enlaces,0)=0 OR a.revision>0 OR coalesce(a.confirmado,0)<>`+(bank?'x.total_amount':'x.total')+`) pendiente
-    FROM ledens.`+(bank?'bank_movements':'documents')+` x LEFT JOIN `+(bank?'bridge_bank a ON a.bank_movement_id':'bridge_doc a ON a.document_id')+`=x.id `+(bank?'WHERE NOT coalesce(x.is_internal_transfer,false) AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=x.id)':'')+`)`;}
+    FROM ledens.`+(bank?'bank_movements':'documents')+` x LEFT JOIN `+(bank?'bridge_bank a ON a.bank_movement_id':'bridge_doc a ON a.document_id')+`=x.id `+(bank?'WHERE NOT coalesce(x.is_internal_transfer,false) AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=x.id)':'WHERE '+hideCovered)+`)`;}
   const filtered=base+' SELECT *, (importe-coalesce(conciliado::numeric,0))::text por_conciliar FROM candidates WHERE '+where.join(' AND ');
   const rows=(await this.query(filtered+' ORDER BY fecha DESC NULLS LAST,id LIMIT '+size+' OFFSET '+((p-1)*size),params)).rows;
   const total=(await this.query('SELECT count(*)::int n FROM ('+filtered+') matching',params)).rows[0].n;

@@ -1,10 +1,11 @@
+import {hasPurchases,purchaseFundingState} from '../finance/purchases.js';
 import {AlertService} from '../notifications/service.js';
 import {createHash} from 'node:crypto';
 import {LOCK_ID,RULE_VERSION,OWNED_RULE_VERSIONS,NEAR_DATE_DAYS,bankMatchRule,cents,abs,decimal,day,automaticBlock,eligibleBank,hasParty,hasReference,documentFingerprint,bankFingerprint} from './rules.js';
 
 export class BridgeError extends Error{constructor(status,code){super(code);this.status=status;this.code=code;}}
 const DOC=`SELECT d.*,to_jsonb(i)->>'invoice_currency' invoice_currency,i.date_confidence,
-  to_jsonb(i)->'party_evidence' party_evidence,
+  to_jsonb(i)->'party_evidence' party_evidence,to_jsonb(i)->'purchase_proof' purchase_proof,
   (to_jsonb(i)->>'total_confidence')::numeric total_confidence,(to_jsonb(i)->>'number_confidence')::numeric number_confidence,
   (to_jsonb(i)->>'party_confidence')::numeric party_confidence,(to_jsonb(i)->>'tax_id_confidence')::numeric tax_id_confidence,
   (to_jsonb(i)->>'direction_confidence')::numeric direction_confidence FROM ledens.documents d
@@ -40,11 +41,13 @@ export class BridgeService{
   remaining(d,allocations){const total=amount(d.total);if(total===null)return null;const paid=allocations.filter(a=>a.state==='Confirmado').reduce((s,a)=>s+abs(amount(a.allocated_amount)??0n),0n);return abs(total)-paid;}
   async candidates(c,d){
     if(amount(d.total)===null||day(d.document_on)===null)return {rows:[],overflow:false};
+    const workers=Boolean((await c.query("SELECT to_regclass('ledens.worker_payment_batches') name")).rows[0].name);
     const allocations=await this.allocations(c,d.id),remaining=this.remaining(d,allocations);
     if(remaining===null||remaining<=0n)return {rows:[],overflow:false};
     const {rows}=await c.query(BANK+` WHERE sign(b.total_amount)=sign($1::numeric)
       AND b.completed_on BETWEEN $2::date-7 AND $2::date+90
       AND abs(b.total_amount)>=$3::numeric
+      ${workers?'AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wp WHERE wp.bank_movement_id=b.id)':''}
       ORDER BY abs(abs(b.total_amount)-$3::numeric),b.completed_on,b.id LIMIT 101`,[d.total,d.document_on,decimal(remaining)]);
     return {rows:rows.slice(0,100),overflow:rows.length>100};
   }
@@ -69,6 +72,10 @@ export class BridgeService{
       const current=(await c.query('SELECT * FROM ledens.bridge_cases WHERE document_id=$1 FOR UPDATE',[id])).rows[0];
       if(current.status!=='pending')return {document_id:id,status:current.status,reason:current.reason};
       if(!force&&+new Date(current.next_attempt_at)>Date.now())return {document_id:id,status:'pending',reason:current.reason};
+      if(await hasPurchases(c)){
+        const p=await purchaseFundingState(c,id);
+        if(p)return this.updateCase(c,id,cents(p.paid)===cents(p.goods_gross)?'matched':'pending',cents(p.paid)===cents(p.goods_gross)?'covered_by_advance':'awaiting_advance_payment',[],{mode:'document_settlement',terminal:false});
+      }
       const allocations=await this.allocations(c,id),remaining=this.remaining(d,allocations);
       if(remaining!==null&&remaining===0n&&allocations.every(a=>a.state==='Confirmado')){
         return this.updateCase(c,id,'matched','existing_allocations',[],{mode:'existing',terminal:true});
@@ -105,7 +112,9 @@ export class BridgeService{
   async monitor(id){
     return this.tx(async c=>{
       const x=(await c.query('SELECT * FROM ledens.bridge_cases WHERE document_id=$1 FOR UPDATE',[id])).rows[0];
-      if(!x||x.status!=='matched'||x.resolution_mode!=='automatic')return;
+      if(!x||x.status!=='matched')return;
+      if(x.resolution_mode==='document_settlement'){const p=await purchaseFundingState(c,id);if(!p||cents(p.paid)!==cents(p.goods_gross))return this.updateCase(c,id,'pending','advance_funding_changed',[],{mode:'document_settlement'});await c.query('UPDATE ledens.bridge_cases SET checked_at=now() WHERE document_id=$1',[id]);return;}
+      if(x.resolution_mode!=='automatic')return;
       const d=await this.load(c,id,true);
       const a=(await c.query('SELECT * FROM ledens.bank_document_allocations WHERE id=$1 FOR UPDATE',[x.allocation_id])).rows[0];
       const b=a?(await c.query(BANK+' WHERE b.id=$1',[a.bank_movement_id])).rows[0]:null;
@@ -122,7 +131,7 @@ export class BridgeService{
   }
   async run(limit=50){
     await this.seed();
-    const monitor=(await this.pool.query(`SELECT document_id FROM ledens.bridge_cases WHERE status='matched' AND resolution_mode='automatic'
+    const monitor=(await this.pool.query(`SELECT document_id FROM ledens.bridge_cases WHERE status='matched' AND resolution_mode IN ('automatic','document_settlement')
       ORDER BY checked_at NULLS FIRST LIMIT 20`)).rows;
     for(const x of monitor)await this.monitor(x.document_id);
     const pending=(await this.pool.query(`SELECT document_id FROM ledens.bridge_cases WHERE status='pending' AND next_attempt_at<=now()
@@ -168,6 +177,7 @@ export class BridgeService{
       if(!x||x.status!=='pending'||x.version!==body.version||documentFingerprint(d)!==body.document_fingerprint)throw new BridgeError(409,'case_changed');
       await c.query('SELECT id FROM ledens.bank_movements WHERE id=$1 FOR UPDATE',[body.bank_movement_id]);
       const b=(await c.query(BANK+' WHERE b.id=$1',[body.bank_movement_id])).rows[0];
+      if(Boolean((await c.query("SELECT to_regclass('ledens.worker_payment_batches') name")).rows[0].name)&&(await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1',[body.bank_movement_id])).rows.length)throw new BridgeError(409,'bank_is_worker_payment');
       if(!b||bankFingerprint(b)!==body.bank_fingerprint)throw new BridgeError(409,'bank_changed');
       if(amount(b.total_amount)===null||amount(b.confirmed)===null)throw new BridgeError(409,'invalid_bank_amount');
       if(b.state!=='COMPLETED'||b.currency!=='EUR'||b.is_internal_transfer===true)throw new BridgeError(409,'ineligible_bank_movement');
