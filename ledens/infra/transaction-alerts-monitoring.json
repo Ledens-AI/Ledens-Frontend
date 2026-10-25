@@ -1,6 +1,6 @@
 {
   "scope": "rg-ledens",
-  "recipient": "alvaro.navarro@ledens.es",
+  "recipients": ["alvaro.navarro@ledens.es", "ajnavarrosilva@gmail.com"],
   "workflows": [
     "ledens-invoice-ingestion",
     "ledens-bank-bridge",

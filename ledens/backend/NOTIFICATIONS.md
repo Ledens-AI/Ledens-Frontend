@@ -1,6 +1,6 @@
 # Avisos de transacciones de Ledens
 
-Destinatario: alvaro.navarro@ledens.es. Remitente: la cuenta Microsoft 365 autorizada en office365-ledens-alerts. Sin contraseñas en el código.
+Destinatarios: alvaro.navarro@ledens.es y ajnavarrosilva@gmail.com (campo To separado por «;»; también en los grupos de acción de Azure Monitor). Remitente: la cuenta Microsoft 365 autorizada en office365-ledens-alerts. Sin contraseñas en el código.
 
 ## Cobertura
 
@@ -12,7 +12,7 @@ El mensaje incluye fecha e ID del evento, estado, motivo, archivo/documento, imp
 
 011_transaction_alerts.sql crea una cola con eventos capturados dentro de las transacciones de negocio. Unicidad por operación/estado evita el correo por cada reintento. Los errores idénticos se agrupan por hora. Los eventos quedan guardados si Outlook falla.
 
-Logic App Consumption ledens-transaction-alerts, cada 5 minutos, una ejecución simultánea, máximo 10 mensajes por lote, envío secuencial a un destinatario fijo. POST /api/v1/facturas/ingesta/notifications/claim reserva 30 minutos. POST /notifications/{id}/ack con lease_token y delivered confirma o programa reintento en 15 minutos. Autenticación Bearer existente; el navegador no recibe acceso a estos endpoints.
+Logic App Consumption ledens-transaction-alerts, cada 5 minutos, una ejecución simultánea, máximo 10 mensajes por lote, envío secuencial a destinatarios fijos. POST /api/v1/facturas/ingesta/notifications/claim reserva 30 minutos. POST /notifications/{id}/ack con lease_token y delivered confirma o programa reintento en 15 minutos. Autenticación Bearer existente; el navegador no recibe acceso a estos endpoints.
 
 La entrega es al menos una vez: si Outlook acepta el correo pero se pierde la respuesta o falla la confirmación, podría repetirse. El ID de evento permite identificarlo. No se promete entrega exactamente una vez por SMTP/Outlook. Los errores de correo no revierten facturas ni conciliaciones. Los eventos se conservan para auditoría; no existe limpieza automática destructiva.
 

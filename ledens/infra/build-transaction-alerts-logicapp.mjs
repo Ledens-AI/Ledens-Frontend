@@ -12,7 +12,7 @@ export function buildTransactionAlertsLogicApp({state='Disabled'}={}){
  Get_ingest_token:{type:'Http',runAfter:{},runtimeConfiguration:secure,inputs:{method:'GET',uri:'https://kv-ledens-ee069061.vault.azure.net/secrets/invoice-ingest-token?api-version=7.4',authentication:{type:'ManagedServiceIdentity',audience:'https://vault.azure.net'}}},
  Claim_messages:{type:'Http',runAfter:{Get_ingest_token:['Succeeded']},runtimeConfiguration:secure,inputs:{method:'POST',uri:api+'/claim',headers:auth,body:{},retryPolicy:{type:'none'}}},
  Deliver_messages:{type:'Foreach',foreach:"@body('Claim_messages')?['messages']",runAfter:{Claim_messages:['Succeeded']},runtimeConfiguration:{concurrency:{repetitions:1}},actions:{
- Send_email:{type:'ApiConnection',runAfter:{},runtimeConfiguration:secure,inputs:{host:{connection:{name:"@parameters('$connections')['office365']['connectionId']"}},method:'post',path:'/v2/Mail',body:{To:'alvaro.navarro@ledens.es',Subject:"@items('Deliver_messages')?['subject']",Body:"@items('Deliver_messages')?['html']",Importance:'Normal'},retryPolicy:{type:'none'}}},
+ Send_email:{type:'ApiConnection',runAfter:{},runtimeConfiguration:secure,inputs:{host:{connection:{name:"@parameters('$connections')['office365']['connectionId']"}},method:'post',path:'/v2/Mail',body:{To:'alvaro.navarro@ledens.es;ajnavarrosilva@gmail.com',Subject:"@items('Deliver_messages')?['subject']",Body:"@items('Deliver_messages')?['html']",Importance:'Normal'},retryPolicy:{type:'none'}}},
  Mark_delivered:ack(true,{Send_email:['Succeeded']}),Retry_later:ack(false,{Send_email:['Failed','TimedOut']})}}
  }}}};
 }
