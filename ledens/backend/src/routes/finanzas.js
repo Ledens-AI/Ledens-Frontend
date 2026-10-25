@@ -4,6 +4,7 @@ import { getPool, isDbConfigured } from '../db/pool.js';
 import { requireRole, checkRole } from '../auth/sessions.js';
 import {FinanceError} from '../finance/service.js';
 import { FinanzasService, FinError, TYPES, isUuid } from '../finanzas/service.js';
+import { ProjectsService } from '../finanzas/projects.js';
 
 // Gestión financiera (/api/finanzas). Internal accounting data: admins and
 // jefes de obra only — a client never reaches any of it, whatever the
@@ -13,7 +14,7 @@ export const FINANZAS_ROLES = ['admin', 'jefe'];
 
 // `authenticate` replaces only the session lookup (tests); the role check is
 // always the real one.
-export function createFinanzasRouter({ service, authenticate, origin=process.env.CORS_ORIGIN } = {}) {
+export function createFinanzasRouter({ service, projects, authenticate, origin=process.env.CORS_ORIGIN } = {}) {
   const router = Router();
   router.use((_req, res, next) => {
     if (!service && !isDbConfigured()) return res.status(503).json({ error: 'Gestión financiera no disponible todavía' });
@@ -128,6 +129,21 @@ export function createFinanzasRouter({ service, authenticate, origin=process.env
 
   router.delete('/pendiente-trabajador/:batchId', handle(async (req, res) => {
     res.json(await svc(req).returnWorkerBatch({ batchId: req.params.batchId }));
+  }));
+
+  // Proyectos: list for everyone with finance access, create/edit for admins.
+  const projectsSvc = (req) => projects || new ProjectsService(getPool(), req.user);
+  router.get('/gestion-proyectos', handle(async (req, res) => {
+    res.json(await projectsSvc(req).list({ q: req.query.q || '', estado: req.query.estado || '', page: req.query.pagina, pageSize: req.query.tam }));
+  }));
+  router.get('/gestion-proyectos/opciones', handle(async (req, res) => {
+    res.json(await projectsSvc(req).options());
+  }));
+  router.post('/gestion-proyectos', handle(async (req, res) => {
+    res.status(201).json({ project: await projectsSvc(req).create(req.body || {}) });
+  }));
+  router.put('/gestion-proyectos/:id', handle(async (req, res) => {
+    res.json({ project: await projectsSvc(req).update(req.params.id, req.body || {}) });
   }));
 
   router.use((err, _req, res, next) => {

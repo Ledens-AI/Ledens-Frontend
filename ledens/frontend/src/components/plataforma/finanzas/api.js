@@ -45,6 +45,11 @@ export const api = {
   classifyWorkerPayments: (movementIds) => request('POST', '/api/finanzas/conciliacion/pago-trabajadores', { movementIds }),
   workerQueue: (f) => request('GET', '/api/finanzas/pendiente-trabajador' + qs(f)),
   employees: () => request('GET', '/api/finanzas/trabajadores'),
+  // Proyectos (backend: finanzas/projects.js). Writes are admin-only server-side.
+  projectList: (f) => request('GET', '/api/finanzas/gestion-proyectos' + qs(f)),
+  projectOptions: () => request('GET', '/api/finanzas/gestion-proyectos/opciones'),
+  createProject: (body) => request('POST', '/api/finanzas/gestion-proyectos', body),
+  updateProject: (id, body) => request('PUT', `/api/finanzas/gestion-proyectos/${id}`, body),
   saveWorkerSplits: (items) => request('POST', '/api/finanzas/pendiente-trabajador/guardar', { items }),
   returnWorkerBatch: (batchId) => request('DELETE', `/api/finanzas/pendiente-trabajador/${batchId}`),
 };
