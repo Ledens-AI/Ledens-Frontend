@@ -73,7 +73,7 @@ class PlataformaView extends React.Component {
       :role==='worker'?[mk('Hoy','ri-sun-line','w_home'),mk('Obras asignadas','ri-building-2-line','w_obras',0,['w_obras','w_obra'])]
       :[mk('Panel','ri-dashboard-3-line','a_home'),mk('Usuarios','ri-group-line','a_users',rowsAll.filter(u=>u.issues.length).length,['a_users','a_user']),mk('Auditoría','ri-history-line','a_audit')];
     const finScreen=PREFIX[role]+'fin',isFin=s.screen===finScreen;
-    if(role!=='client')nav.push({header:'Gestión financiera'},...FIN_TABS.map(([k,label,icon])=>{const on=isFin&&s.finTab===k;
+    if(role!=='client')nav.push({header:'Gestión financiera'},...FIN_TABS.filter(t=>!t[3]||this.props.user.role==='admin').map(([k,label,icon])=>{const on=isFin&&s.finTab===k;
       return {label,icon,badge:k==='pendientes'?s.finPending:0,go:()=>this.go(finScreen,{finTab:k}),bg:on?'#F2F4FA':'transparent',fg:on?'#3E4D85':'#3A3A38',fw:on?700:500};}));
     const U=this.props.user,meName=U.name||U.email;
     const me={name:meName,initials:initials(meName),role:ROLE_LABEL[U.role]||'Cliente',avBg:role==='client'?'#EC6090':role==='worker'?'#68C0B5':'#0C062B'};

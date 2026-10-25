@@ -51,6 +51,9 @@ export const api = {
   projectOptions: () => request('GET', '/api/finanzas/gestion-proyectos/opciones'),
   createProject: (body) => request('POST', '/api/finanzas/gestion-proyectos', body),
   updateProject: (id, body) => request('PUT', `/api/finanzas/gestion-proyectos/${id}`, body),
+  // Logs de transacciones (backend: logs/runs.js; admins only).
+  logs: (f) => request('GET', '/api/finanzas/logs' + qs(f)),
+  logsSummary: () => request('GET', '/api/finanzas/logs/resumen'),
   // Trabajadores (backend: finanzas/workers.js). Writes are admin-only server-side.
   workerList: (f) => request('GET', '/api/finanzas/gestion-trabajadores' + qs(f)),
   getWorker: (id) => request('GET', `/api/finanzas/gestion-trabajadores/${id}`),

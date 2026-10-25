@@ -6,6 +6,7 @@ import {FinanceError} from '../finance/service.js';
 import { FinanzasService, FinError, TYPES, isUuid } from '../finanzas/service.js';
 import { ProjectsService } from '../finanzas/projects.js';
 import { WorkersService } from '../finanzas/workers.js';
+import { traced, RunLogService } from '../logs/runs.js';
 
 // Gestión financiera (/api/finanzas). Internal accounting data: admins and
 // jefes de obra only — a client never reaches any of it, whatever the
@@ -15,7 +16,7 @@ export const FINANZAS_ROLES = ['admin', 'jefe'];
 
 // `authenticate` replaces only the session lookup (tests); the role check is
 // always the real one.
-export function createFinanzasRouter({ service, projects, workers, authenticate, origin=process.env.CORS_ORIGIN } = {}) {
+export function createFinanzasRouter({ service, projects, workers, runLogs, authenticate, origin=process.env.CORS_ORIGIN } = {}) {
   const router = Router();
   router.use((_req, res, next) => {
     if (!service && !isDbConfigured()) return res.status(503).json({ error: 'Gestión financiera no disponible todavía' });
@@ -65,7 +66,7 @@ export function createFinanzasRouter({ service, projects, workers, authenticate,
   }));
 
   // { projectId: uuid | null, expectedProjectId?: uuid | null, reason? }
-  router.put('/registros/:type/:id/proyecto', handle(async (req, res) => {
+  router.put('/registros/:type/:id/proyecto', traced('imputacion', 'Asignación de proyecto', { entity: (req) => ({ type: req.params.type, id: req.params.id }), summary: (b) => ({ message: b.record?.project_label ? 'Asignado a ' + b.record.project_label : 'Proyecto quitado' }) })(async (req, res) => {
     const b = req.body || {};
     const s = svc(req);
     const result = await s.assign({ type: typeParam(req), id: req.params.id, projectId: projectOf(b.projectId, { nullable: true }),
@@ -75,7 +76,7 @@ export function createFinanzasRouter({ service, projects, workers, authenticate,
   }));
 
   // { parts: [{ projectId, amount }], reason? }
-  router.put('/registros/:type/:id/distribucion', handle(async (req, res) => {
+  router.put('/registros/:type/:id/distribucion', traced('imputacion', 'Distribución entre proyectos', { entity: (req) => ({ type: req.params.type, id: req.params.id }), summary: (b) => ({ message: b.exact === false ? 'Distribución parcial guardada' : 'Distribución guardada' }) })(async (req, res) => {
     const b = req.body || {};
     const s = svc(req);
     const result = await s.distribute({ type: typeParam(req), id: req.params.id, parts: b.parts,version:b.version,requestId:b.request_id, reason: reasonOf(b), actor: actor(req) });
@@ -83,7 +84,7 @@ export function createFinanzasRouter({ service, projects, workers, authenticate,
   }));
 
   // { needsReview: boolean, note? }
-  router.put('/registros/:type/:id/revision', handle(async (req, res) => {
+  router.put('/registros/:type/:id/revision', traced('imputacion', 'Marca de revisión', { entity: (req) => ({ type: req.params.type, id: req.params.id }), summary: (b, req) => ({ message: req.body?.needsReview ? 'Marcado para revisión' : 'Revisión cerrada' }) })(async (req, res) => {
     const b = req.body || {};
     if (b.note !== undefined && (typeof b.note !== 'string' || b.note.length > 500)) throw new FinError(400, 'Nota no válida');
     const s = svc(req);
@@ -92,7 +93,7 @@ export function createFinanzasRouter({ service, projects, workers, authenticate,
   }));
 
   // { action: 'assign' | 'review', items: [{ type, id }], projectId?, reason?, note? }
-  router.post('/registros/lote', handle(async (req, res) => {
+  router.post('/registros/lote', traced('imputacion', 'Operación masiva', { summary: b=>({status:b.ok===0&&b.failed?'rechazado':'ok',message:`${b.ok} correctos · ${b.failed} con error`,detail:{correctos:b.ok,errores:b.failed}}) })(async (req, res) => {
     const b = req.body || {};
     const items = Array.isArray(b.items) ? b.items.map((i) => ({ type: i?.type, id: i?.id,version:i?.version })) : b.items;
     res.json(await svc(req).bulk({ items,requestId:b.request_id, action: b.action, projectId: b.action === 'assign' ? projectOf(b.projectId, { nullable: false }) : undefined,
@@ -110,7 +111,7 @@ export function createFinanzasRouter({ service, projects, workers, authenticate,
 
   // Pago a trabajadores. { movementIds: [uuid] } → movements leave Pendiente de
   // conciliación and are split into lines in Pendiente de trabajador.
-  router.post('/conciliacion/pago-trabajadores', handle(async (req, res) => {
+  router.post('/conciliacion/pago-trabajadores', traced('pago_trabajadores', 'Envío desde conciliación', { summary: b=>({status:b.ok===0&&b.failed?'rechazado':'ok',message:`${b.ok} correctos · ${b.failed} con error`,detail:{correctos:b.ok,errores:b.failed}}) })(async (req, res) => {
     res.json(await svc(req).classifyWorkerPayments({ movementIds: req.body?.movementIds }));
   }));
 
@@ -123,12 +124,12 @@ export function createFinanzasRouter({ service, projects, workers, authenticate,
   }));
 
   // { items: [{ splitId, employeeId, projectId }] } — one result per line.
-  router.post('/pendiente-trabajador/guardar', handle(async (req, res) => {
+  router.post('/pendiente-trabajador/guardar', traced('pago_trabajadores', 'Guardar pagos', { summary: b=>({status:b.ok===0&&b.failed?'rechazado':'ok',message:`${b.ok} correctos · ${b.failed} con error`,detail:{correctos:b.ok,errores:b.failed}}) })(async (req, res) => {
     const items = Array.isArray(req.body?.items) ? req.body.items.map((i) => ({ splitId: i?.splitId, employeeId: i?.employeeId, projectId: i?.projectId })) : req.body?.items;
     res.json(await svc(req).saveWorkerSplits({ items }));
   }));
 
-  router.delete('/pendiente-trabajador/:batchId', handle(async (req, res) => {
+  router.delete('/pendiente-trabajador/:batchId', traced('pago_trabajadores', 'Devolver a conciliación', { entity: (req) => ({ type: 'lote', id: req.params.batchId }), summary: () => ({ message: 'Movimiento devuelto a conciliación' }) })(async (req, res) => {
     res.json(await svc(req).returnWorkerBatch({ batchId: req.params.batchId }));
   }));
 
@@ -143,10 +144,10 @@ export function createFinanzasRouter({ service, projects, workers, authenticate,
   router.get('/gestion-proyectos/:id', handle(async (req, res) => {
     res.json({ project: await projectsSvc(req).one(req.params.id) });
   }));
-  router.post('/gestion-proyectos', handle(async (req, res) => {
+  router.post('/gestion-proyectos', traced('proyectos', 'Alta de proyecto', { summary: (b) => ({ message: 'Creado: ' + (b.project?.name || ''), detail: { proyecto_id: b.project?.id } }) })(async (req, res) => {
     res.status(201).json({ project: await projectsSvc(req).create(req.body || {}) });
   }));
-  router.put('/gestion-proyectos/:id', handle(async (req, res) => {
+  router.put('/gestion-proyectos/:id', traced('proyectos', 'Edición de proyecto', { entity: (req) => ({ type: 'proyecto', id: req.params.id }), summary: (b) => ({ message: b.project?.changed ? 'Cambios guardados' : 'Sin cambios' }) })(async (req, res) => {
     res.json({ project: await projectsSvc(req).update(req.params.id, req.body || {}) });
   }));
 
@@ -162,16 +163,30 @@ export function createFinanzasRouter({ service, projects, workers, authenticate,
   router.get('/gestion-trabajadores/:id', handle(async (req, res) => {
     res.json({ worker: await workersSvc(req).one(req.params.id) });
   }));
-  router.post('/gestion-trabajadores', handle(async (req, res) => {
+  router.post('/gestion-trabajadores', traced('trabajadores', 'Alta de trabajador', { summary: (b) => ({ message: 'Alta: ' + (b.worker?.name || ''), detail: { trabajador_id: b.worker?.id } }) })(async (req, res) => {
     res.status(201).json({ worker: await workersSvc(req).create(req.body || {}) });
   }));
-  router.put('/gestion-trabajadores/:id', handle(async (req, res) => {
+  router.put('/gestion-trabajadores/:id', traced('trabajadores', 'Edición de trabajador', { entity: (req) => ({ type: 'trabajador', id: req.params.id }), summary: (b) => ({ message: b.worker?.changed ? 'Cambios guardados' : 'Sin cambios' }) })(async (req, res) => {
     res.json({ worker: await workersSvc(req).update(req.params.id, req.body || {}) });
   }));
   // { activo: boolean, version, reason? }
-  router.put('/gestion-trabajadores/:id/estado', handle(async (req, res) => {
+  router.put('/gestion-trabajadores/:id/estado', traced('trabajadores', 'Baja o reactivación', { entity: (req) => ({ type: 'trabajador', id: req.params.id }), summary: (b) => ({ message: b.worker?.activo ? 'Reactivado' : 'Dado de baja' }) })(async (req, res) => {
     const b = req.body || {};
     res.json({ worker: await workersSvc(req).setActive(req.params.id, { activo: b.activo, version: b.version, reason: b.reason }) });
+  }));
+
+  // Logs de transacciones (admins). RunLogService errors carry an HTTP status.
+  const logsSvc = (req) => runLogs || new RunLogService(getPool(), req.user);
+  const statusErrors = (fn) => handle(async (req, res) => {
+    try { await fn(req, res); } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); throw e; }
+  });
+  router.get('/logs', statusErrors(async (req, res) => {
+    const q = req.query;
+    res.json(await logsSvc(req).list({ process: q.proceso || '', status: q.estado || '', from: q.desde || '', to: q.hasta || '', q: q.q || '',
+      empty: q.vacios === '1', page: q.pagina, pageSize: q.tam }));
+  }));
+  router.get('/logs/resumen', statusErrors(async (req, res) => {
+    res.json(await logsSvc(req).summary());
   }));
 
   router.use((err, _req, res, next) => {
