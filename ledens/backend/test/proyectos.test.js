@@ -96,6 +96,26 @@ test('HTTP: writes need the allowed origin and a non-client role',async()=>{
  }finally{server.close();}
 });
 
+test('a project reloads by id even after its code changed, and only for those who may see it',async()=>{
+ const p=await as(admin).create({name:'Recarga por id',code:'RID-1'});
+ await as(admin).update(p.id,{...form(p),code:'RID-2',version:p.version});
+ const one=await as(admin).one(p.id);assert.equal(one.code,'RID-2');assert.equal(one.name,'Recarga por id');
+ await assert.rejects(as(jefe).one(p.id),{status:404},'not granted to the jefe');
+ await assert.rejects(as(admin).one('no-uuid'),{status:404});
+});
+
+test('a registered client replaces typed text; an unchanged client keeps its stored text',async()=>{
+ const p=await as(admin).create({name:'Cliente elegido',customerName:'Texto escrito antes',customerId:cust});
+ assert.equal(p.customer_name_source,'Cliente Prueba','the typed text is not kept next to a registered client');
+ await db.query("UPDATE ledens.projects SET customer_name_source='Nombre importado' WHERE id=$1",[p.id]);
+ const q=await as(admin).one(p.id);
+ const kept=await as(admin).update(p.id,{...form(q),name:'Cliente elegido 2',version:q.version});
+ assert.equal(kept.customer_name_source,'Nombre importado','same client: stored text untouched');
+ const other=(await db.query("INSERT INTO ledens.customers(display_name) VALUES('Otro Cliente') RETURNING id")).rows[0].id;
+ const changed=await as(admin).update(p.id,{...form(kept),customerId:other,customerName:'Nombre importado',version:kept.version});
+ assert.equal(changed.customer_name_source,'Otro Cliente','new client: its own name');
+});
+
 // The edit form sends every field back, as the page does.
 function form(p){return {code:p.code,name:p.name,customerId:p.customer_id,customerName:p.customer_name_source,salesman:p.salesman,address:p.address,
  municipio:p.municipio,provincia:p.provincia,statusId:p.status_id,startDate:p.start_date,endDate:p.end_date};}

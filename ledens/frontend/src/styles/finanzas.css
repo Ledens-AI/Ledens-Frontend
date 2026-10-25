@@ -214,3 +214,7 @@
 .fin-grid-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; }
 .fin-small { font-size: 12px; margin-top: 2px; }
 
+
+/* Trabajadores: workers de baja stay visible but dimmed. */
+.fin-table tbody tr.is-inactive td { color: #6B6B68; }
+

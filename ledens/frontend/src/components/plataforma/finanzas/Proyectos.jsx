@@ -28,7 +28,8 @@ export default function Proyectos({ toast }) {
   useEffect(() => { api.projectOptions().then(setOptions, () => {}); }, []);
 
   const canEdit = !!data?.canEdit;
-  const set = (k) => (e) => setEdit((x) => ({ ...x, form: { ...x.form, [k]: e.target.value }, error: '' }));
+  // Picking a registered client drops any free text typed before (the field is hidden then).
+  const set = (k) => (e) => setEdit((x) => ({ ...x, form: { ...x.form, [k]: e.target.value, ...(k === 'customerId' && e.target.value ? { customerName: '' } : {}) }, error: '' }));
   const check = (f) => {
     if (!f.name.trim()) return 'El nombre es obligatorio.';
     if (f.startDate && f.endDate && f.endDate < f.startDate) return 'La fecha de fin no puede ser anterior a la de inicio.';
@@ -53,7 +54,8 @@ export default function Proyectos({ toast }) {
     } catch (e) {
       // A stale version: show the current row so the person can redo the change on top of it.
       if (e.status === 409 && edit.project && /cambiado/.test(e.message)) {
-        const fresh = (await api.projectList({ q: edit.project.code || edit.project.name, tam: 100 }).catch(() => null))?.rows.find((r) => r.id === edit.project.id);
+        // By id: the code or name may be exactly what the other person changed.
+        const fresh = (await api.getProject(edit.project.id).catch(() => null))?.project;
         if (fresh) {
           setData((d) => d && ({ ...d, rows: d.rows.map((r) => (r.id === fresh.id ? fresh : r)) }));
           return setEdit({ project: fresh, form: toForm(fresh), saving: false, error: e.message });
