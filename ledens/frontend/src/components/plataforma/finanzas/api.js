@@ -41,4 +41,10 @@ export const api = {
   bulk: (body) => request('POST', '/api/finanzas/registros/lote', body),
   profitability: (projectId) => request('GET', `/api/finanzas/proyectos/${projectId}/rentabilidad`),
   reconciliation: (f) => request('GET', '/api/finanzas/conciliacion' + qs(f)),
+  // Pago a trabajadores (backend: FinanzasService.classifyWorkerPayments …).
+  classifyWorkerPayments: (movementIds) => request('POST', '/api/finanzas/conciliacion/pago-trabajadores', { movementIds }),
+  workerQueue: (f) => request('GET', '/api/finanzas/pendiente-trabajador' + qs(f)),
+  employees: () => request('GET', '/api/finanzas/trabajadores'),
+  saveWorkerSplits: (items) => request('POST', '/api/finanzas/pendiente-trabajador/guardar', { items }),
+  returnWorkerBatch: (batchId) => request('DELETE', `/api/finanzas/pendiente-trabajador/${batchId}`),
 };

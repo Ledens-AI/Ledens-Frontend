@@ -14,6 +14,9 @@ const EMPTY_FILTERS = { q: '', tipo: '', estado: '', proyecto: null, desde: '', 
  * Filtering, sorting and paging all happen on the server. */
 export default function RecordsView({ mode, summary, initialProject, onChanged, toast }) {
   const pending = mode === 'pendientes';
+  // «Pagos a trabajadores» is a read-only view (filters only): new payments are
+  // prepared and saved in «Pendiente de trabajador».
+  const readOnly = mode === 'trabajador';
   const [filters, setFilters] = useState({ ...EMPTY_FILTERS, proyecto: initialProject || null });
   const [draftQ, setDraftQ] = useState('');
   const [sort, setSort] = useState({ by: 'fecha', dir: 'desc' });
@@ -234,7 +237,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
         {hasFilters ? <button type="button" className="fin-btn is-ghost fin-self-end" onClick={() => { setDraftQ(''); setF({ ...EMPTY_FILTERS }); }}>Limpiar filtros</button> : null}
       </div>
 
-      {stagedList.length ? (
+      {!readOnly && stagedList.length ? (
         <div className="fin-bulkbar is-staged" role="region" aria-label="Asignaciones sin guardar">
           <strong>{stagedList.length === 1 ? '1 asignación sin guardar' : `${stagedList.length} asignaciones sin guardar`}</strong>
           <span className="fin-grow"></span>
@@ -245,7 +248,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
         </div>
       ) : null}
 
-      {sel.length ? (
+      {!readOnly && sel.length ? (
         <div className="fin-bulkbar" role="region" aria-label="Acciones sobre la selección">
           <strong>{sel.length} {sel.length === 1 ? 'registro seleccionado' : 'registros seleccionados'}</strong>
           <span className="fin-muted">{eur(sel.reduce((a, r) => a + Number(r.importe), 0))}</span>
@@ -265,17 +268,18 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
             <table className="fin-table">
               <thead>
                 <tr>
-                  <th className="fin-col-check"><input type="checkbox" aria-label="Seleccionar todos los de esta página" checked={allOnPage} onChange={toggleAll} /></th>
+                  {readOnly ? null : <th className="fin-col-check"><input type="checkbox" aria-label="Seleccionar todos los de esta página" checked={allOnPage} onChange={toggleAll} /></th>}
                   {pending ? th('Tipo', 'tipo') : null}
                   {th('Fecha', 'fecha')}
                   <th>Documento</th>
                   {th(terceroLabel, 'tercero')}
+                  {readOnly ? <th>Rol</th> : null}
                   {th('Concepto', 'concepto')}
                   {mode === 'material' ? <th className="fin-num">Cantidad</th> : null}
                   {th('Importe', 'importe', 'fin-num')}
                   <th className="fin-col-project">Proyecto</th>
                   {th('Estado', 'estado')}
-                  <th><span className="fin-sr">Acciones</span></th>
+                  {readOnly ? null : <th><span className="fin-sr">Acciones</span></th>}
                 </tr>
               </thead>
               <tbody>
@@ -285,15 +289,18 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
                   const st = staged.get(k);
                   return (
                     <tr key={k} className={(selected.has(k) ? 'is-selected' : '') + (st ? ' is-staged' : '')}>
-                      <td className="fin-col-check"><input type="checkbox" aria-label="Seleccionar registro" checked={selected.has(k)} onChange={() => toggle(r)} /></td>
+                      {readOnly ? null : <td className="fin-col-check"><input type="checkbox" aria-label="Seleccionar registro" checked={selected.has(k)} onChange={() => toggle(r)} /></td>}
                       {pending ? <td><Badge {...TIPO[r.type]} icon={TIPO[r.type].icon}>{TIPO[r.type].label}</Badge></td> : null}
                       <td className="fin-nowrap">{fecha(r.fecha)}</td>
                       <td className="fin-nowrap">{r.numerodocumento || (r.document_id ? 'Sin número' : <span className="fin-muted">Sin documento</span>)}</td>
                       <td className="fin-ellipsis" title={r.tercero || ''}>{r.tercero || <span className="fin-muted">—</span>}</td>
+                      {readOnly ? <td className="fin-nowrap">{r.rol || <span className="fin-muted">—</span>}</td> : null}
                       <td className="fin-ellipsis is-wide" title={r.concepto || ''}>{r.concepto || <span className="fin-muted">—</span>}</td>
                       {mode === 'material' ? <td className="fin-num fin-nowrap">{r.quantity != null ? `${num(r.quantity)} ${r.unidad || ''}` : '—'}</td> : null}
                       <td className="fin-num fin-nowrap"><strong>{eur(r.importe)}</strong></td>
-                      <td className="fin-col-project">
+                      {readOnly ? (
+                        <td className="fin-col-project">{split ? `Distribuido en ${r.parts} proyectos` : r.project_label || <span className="fin-muted">Sin proyecto</span>}</td>
+                      ) : <td className="fin-col-project">
                         {split ? (
                           <button type="button" className="fin-link" onClick={() => setOpen(r)}>{`Distribuido en ${r.parts} proyectos`}</button>
                         ) : (
@@ -316,9 +323,9 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
                             <i className="ri-lightbulb-line"></i>Sugerido: {r.suggestion.label}
                           </button>
                         ) : null}
-                      </td>
+                      </td>}
                       <td>{busy[k] ? <span className="fin-muted">Guardando…</span> : st ? <Badge bg="#FBF1DE" fg="#7A4E0E">Sin guardar</Badge> : <Badge {...ESTADO[r.estado]}>{ESTADO[r.estado].label}</Badge>}</td>
-                      <td><button type="button" className="fin-iconbtn" aria-label="Ver detalle y editar" title="Ver detalle y editar" onClick={() => setOpen(r)}><i className="ri-side-bar-line"></i></button></td>
+                      {readOnly ? null : <td><button type="button" className="fin-iconbtn" aria-label="Ver detalle y editar" title="Ver detalle y editar" onClick={() => setOpen(r)}><i className="ri-side-bar-line"></i></button></td>}
                     </tr>
                   );
                 })}

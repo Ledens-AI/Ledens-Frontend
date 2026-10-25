@@ -21,9 +21,12 @@ const BASE=`WITH base AS (
  CASE WHEN a.n=1 AND a.allocated=f.gross_amount THEN a.project_id END project_id,
  CASE WHEN a.n=1 AND a.allocated=f.gross_amount THEN a.project_label END project_label,
  CASE WHEN a.n=1 AND a.allocated=f.gross_amount THEN 0 ELSE coalesce(a.n,0) END parts,
- coalesce(rv.needs_review,false) needs_review,rv.review_note,abs(f.gross_amount)>coalesce(a.used,0) sin_proyecto
+ coalesce(rv.needs_review,false) needs_review,rv.review_note,abs(f.gross_amount)>coalesce(a.used,0) sin_proyecto,
+ CASE ws.role WHEN 'oficial' THEN 'Oficial' WHEN 'ayudante' THEN 'Ayudante' ELSE po.name END rol
  FROM ledens.financial_records f LEFT JOIN ledens.documents d ON d.id=f.document_id
  LEFT JOIN ledens.material_expenses m ON m.id=f.material_id LEFT JOIN ledens.worker_payments w ON w.id=f.worker_payment_id
+ LEFT JOIN ledens.worker_payment_splits ws ON ws.worker_payment_id=f.worker_payment_id
+ LEFT JOIN ledens.employees em ON em.id=(to_jsonb(w)->>'employee_id')::uuid LEFT JOIN ledens.positions po ON po.id=em.primary_position_id
  LEFT JOIN ledens.customer_payments c ON c.id=f.customer_payment_id
  LEFT JOIN ledens.finance_review_flags rv ON rv.record_id=f.id
  LEFT JOIN LATERAL(SELECT sum(pa.allocated_amount) allocated,sum(abs(pa.allocated_amount)) used,count(*)::int n,
@@ -32,6 +35,18 @@ const BASE=`WITH base AS (
 ), listed AS(SELECT b.*,CASE WHEN needs_review THEN 'revision' WHEN NOT sin_proyecto THEN 'asignado' WHEN allocation_count>0 THEN 'parcial' ELSE 'pendiente' END estado FROM base b)`;
 const labels={replace_allocations:'Asignación a proyecto',recognition:'Validación contable',review_flag:'Revisión',source_changed:'Origen actualizado',document_changed:'Factura actualizada'};
 const requestFor=(seed,key)=>{const h=createHash('sha256').update(seed+'|'+key).digest('hex').slice(0,32);return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;};
+// Pago a trabajadores: how a paid amount (absolute, in cents) is split.
+// Above 450 € → Oficial lines of 100 €; 450 € or less → Ayudante lines of 60 €.
+// The last line carries whatever does not make a whole unit, so the lines
+// always add up to the bank movement.
+export const WORKER_SPLIT={threshold:45000n,oficial:10000n,ayudante:6000n,maxLines:200};
+export function splitWorkerPayment(total){
+ if(typeof total!=='bigint'||total<=0n)throw new FinError(400,'Importe no válido');
+ const role=total>WORKER_SPLIT.threshold?'oficial':'ayudante',unit=WORKER_SPLIT[role];
+ const lines=Array.from({length:Number(total/unit)},()=>unit);if(total%unit)lines.push(total%unit);
+ if(lines.length>WORKER_SPLIT.maxLines)throw new FinError(409,`Importe demasiado alto para segregar automáticamente (más de ${WORKER_SPLIT.maxLines} pagos)`);
+ return {role,unit,lines};
+}
 export function safeDocumentUrl(raw){try{const u=new URL(raw);return u.protocol==='https:'&&/(^|\.)sharepoint\.com$/i.test(u.hostname)?u.href:null;}catch{return null;}}
 export class FinanzasService {
  constructor(pool,user={role:'client',id:null}){this.pool=pool;this.user=user;this.finance=new FinanceService(pool);}
@@ -144,10 +159,116 @@ export class FinanzasService {
   else {const bank=view==='movimientos';base='WITH '+bridge+`, candidates AS(SELECT x.id,'`+(bank?'movimiento':'documento')+`'::text type,`+(bank?'x.completed_on':'x.document_on')+` fecha,`+(bank?"coalesce(x.beneficiary_name,x.payer)":"x.tercero")+` tercero,`+(bank?'x.description':"to_jsonb(x)->>'descripcion'")+` concepto,`+(bank?'a.documentos':'x.numerodocumento')+` numerodocumento,`+(bank?'x.source_id':'x.id::text')+` referencia,`+(bank?'x.total_amount':'x.total')+` importe,`+(bank?'NULL::uuid':'x.id')+` document_id,coalesce(a.enlaces,0) enlaces,coalesce(a.confirmado,0)::text conciliado,
     array_remove(ARRAY[CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_bridge' END,`+(bank?"CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_documento' END,":"")+`CASE WHEN a.revision>0 THEN 'revision' END,CASE WHEN a.enlaces>0 AND coalesce(a.confirmado,0)<>`+(bank?'x.total_amount':'x.total')+` THEN 'parcial' END],NULL) motivos,
     (coalesce(a.enlaces,0)=0 OR a.revision>0 OR coalesce(a.confirmado,0)<>`+(bank?'x.total_amount':'x.total')+`) pendiente
-    FROM ledens.`+(bank?'bank_movements':'documents')+` x LEFT JOIN `+(bank?'bridge_bank a ON a.bank_movement_id':'bridge_doc a ON a.document_id')+`=x.id `+(bank?'WHERE NOT coalesce(x.is_internal_transfer,false)':'')+`)`;}
+    FROM ledens.`+(bank?'bank_movements':'documents')+` x LEFT JOIN `+(bank?'bridge_bank a ON a.bank_movement_id':'bridge_doc a ON a.document_id')+`=x.id `+(bank?'WHERE NOT coalesce(x.is_internal_transfer,false) AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=x.id)':'')+`)`;}
   const filtered=base+' SELECT *, (importe-coalesce(conciliado::numeric,0))::text por_conciliar FROM candidates WHERE '+where.join(' AND ');
   const rows=(await this.query(filtered+' ORDER BY fecha DESC NULLS LAST,id LIMIT '+size+' OFFSET '+((p-1)*size),params)).rows;
   const total=(await this.query('SELECT count(*)::int n FROM ('+filtered+') matching',params)).rows[0].n;
   return {rows,total,page:p,pageSize:size};
+ }
+ // ------------------------------------------------------------- pago a trabajadores
+ // «Pago a trabajadores» in Pendiente de conciliación (admin, like that inbox):
+ // each selected outgoing movement becomes a batch of pending lines and leaves
+ // the inbox. One savepoint per movement; the answer says which ones moved.
+ async classifyWorkerPayments({movementIds}){
+  if(this.user.role!=='admin')throw new FinError(403,'Clasificar movimientos requiere administrador');
+  const ids=[...new Set(Array.isArray(movementIds)?movementIds:[])];
+  if(!ids.length||ids.length>50||ids.some(id=>!uuid(id)))throw new FinError(400,'Selecciona entre 1 y 50 movimientos');
+  return this.finance.transaction(async c=>{
+   const results=[];
+   for(const [i,id] of ids.entries()){
+    await c.query(`SAVEPOINT m${i}`);
+    try{const r=await this.classifyOne(c,id);await c.query(`RELEASE SAVEPOINT m${i}`);results.push({id,ok:true,...r});}
+    catch(e){await c.query(`ROLLBACK TO SAVEPOINT m${i}`);if(!(e instanceof FinanceError))throw e;results.push({id,ok:false,error:e.message});}
+   }
+   return {results,ok:results.filter(r=>r.ok).length,failed:results.filter(r=>!r.ok).length};
+  });
+ }
+ async classifyOne(c,id){
+  const m=(await c.query('SELECT id,source_id,total_amount,currency,completed_on,is_internal_transfer FROM ledens.bank_movements WHERE id=$1 FOR UPDATE',[id])).rows[0];
+  if(!m)throw new FinError(404,'Movimiento no encontrado');
+  if(m.is_internal_transfer)throw new FinError(409,'Es un traspaso interno');
+  if(m.currency&&m.currency!=='EUR')throw new FinError(409,'Solo movimientos en euros');
+  const total=cents(m.total_amount);
+  if(total===null||total>=0n)throw new FinError(409,'Solo se segregan pagos salientes (importe negativo, con céntimos exactos)');
+  if((await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1',[id])).rows.length)throw new FinError(409,'Ya está en Pendiente de trabajador');
+  if((await c.query('SELECT 1 FROM ledens.worker_payments WHERE bank_movement_id=$1 LIMIT 1',[id])).rows.length)throw new FinError(409,'Ya tiene pagos a trabajadores registrados');
+  if((await c.query("SELECT 1 FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado' LIMIT 1",[id])).rows.length)throw new FinError(409,'Ya está conciliado con un documento');
+  const plan=splitWorkerPayment(-total);
+  const b=(await c.query(`INSERT INTO ledens.worker_payment_batches(bank_movement_id,role,unit_amount,total_amount,occurred_on,created_by)
+   VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,[id,plan.role,decimal(plan.unit),decimal(-total),m.completed_on,this.user.id])).rows[0];
+  for(const [i,amount] of plan.lines.entries())await c.query('INSERT INTO ledens.worker_payment_splits(batch_id,line_number,amount,role) VALUES($1,$2,$3,$4)',[b.id,i+1,decimal(amount),plan.role]);
+  return {batchId:b.id,role:plan.role,lines:plan.lines.length};
+ }
+ // The pending lines are unassigned money: admins, or whoever an admin gave the
+ // global «bandeja de pendientes» grant (same rule as unassigned records).
+ async workerQueueAccess(c=this.pool){
+  this.params();if(this.user.role==='admin')return;
+  const ok=(await c.query('SELECT 1 FROM ledens.finance_project_permissions WHERE user_id=$1 AND project_id IS NULL AND can_review_unassigned LIMIT 1',[this.user.id])).rows.length;
+  if(!ok)throw new FinError(403,'No tienes acceso a la bandeja de pagos pendientes');
+ }
+ async workerQueue({page=1,pageSize=20,q=''}={}){
+  await this.workerQueueAccess();
+  const size=Math.min(50,Math.max(1,Number(pageSize)||20)),p=Math.max(1,Math.min(4000,Number(page)||1));
+  const where=`EXISTS(SELECT 1 FROM ledens.worker_payment_splits s WHERE s.batch_id=b.id AND s.worker_payment_id IS NULL)
+   AND concat_ws(' ',m.beneficiary_name,m.payer,m.description,m.reference,m.source_id) ILIKE $1`;
+  const rows=(await this.query(`SELECT b.id,b.role,b.unit_amount,b.total_amount,b.occurred_on fecha,m.id bank_movement_id,m.source_id,
+    coalesce(m.beneficiary_name,m.payer) tercero,m.description concepto,
+    (SELECT json_agg(json_build_object('id',s.id,'line',s.line_number,'amount',s.amount::text,'role',s.role) ORDER BY s.line_number)
+      FROM ledens.worker_payment_splits s WHERE s.batch_id=b.id AND s.worker_payment_id IS NULL) lines,
+    (SELECT count(*)::int FROM ledens.worker_payment_splits s WHERE s.batch_id=b.id AND s.worker_payment_id IS NOT NULL) saved
+   FROM ledens.worker_payment_batches b JOIN ledens.bank_movements m ON m.id=b.bank_movement_id
+   WHERE ${where} ORDER BY b.occurred_on DESC NULLS LAST,b.id LIMIT ${size} OFFSET ${(p-1)*size}`,['%'+q+'%'])).rows;
+  const t=(await this.query(`SELECT count(*)::int batches,coalesce(sum((SELECT count(*) FROM ledens.worker_payment_splits s WHERE s.batch_id=b.id AND s.worker_payment_id IS NULL)),0)::int lines
+   FROM ledens.worker_payment_batches b JOIN ledens.bank_movements m ON m.id=b.bank_movement_id WHERE ${where}`,['%'+q+'%'])).rows[0];
+  return {rows,total:t.batches,lines:t.lines,page:p,pageSize:size};
+ }
+ async employees(){
+  this.params();
+  return (await this.query(`SELECT e.id,e.name,po.name position FROM ledens.employees e LEFT JOIN ledens.positions po ON po.id=e.primary_position_id
+   WHERE coalesce(e.activo,true) AND coalesce(e.name,'')<>'' ORDER BY e.name,e.id`)).rows;
+ }
+ // Saving a line: create its ledens.worker_payments row (signed like the
+ // accounting import: a cost is negative there; 006's trigger registers the
+ // financial record) and allocate it entirely to the project through the
+ // canonical engine, which checks write permission and writes the audit event.
+ async saveWorkerSplits({items}){
+  await this.workerQueueAccess();
+  if(!Array.isArray(items)||!items.length||items.length>100||items.some(it=>!uuid(it?.splitId)||!uuid(it?.employeeId)||!uuid(it?.projectId)))
+   throw new FinError(400,'Cada pago necesita trabajador y proyecto (máximo 100 por vez)');
+  return this.finance.transaction(async c=>{
+   const results=[];
+   for(const [i,it] of items.entries()){
+    await c.query(`SAVEPOINT s${i}`);
+    try{
+     const s=(await c.query(`SELECT s.*,b.bank_movement_id,b.occurred_on,m.source_id FROM ledens.worker_payment_splits s
+      JOIN ledens.worker_payment_batches b ON b.id=s.batch_id JOIN ledens.bank_movements m ON m.id=b.bank_movement_id WHERE s.id=$1 FOR UPDATE OF s`,[it.splitId])).rows[0];
+     if(!s)throw new FinError(404,'Pago no encontrado');
+     if(s.worker_payment_id)throw new FinError(409,'Este pago ya está guardado');
+     const e=(await c.query('SELECT id,name FROM ledens.employees WHERE id=$1',[it.employeeId])).rows[0];
+     if(!e)throw new FinError(400,'Trabajador no encontrado');
+     const w=(await c.query(`INSERT INTO ledens.worker_payments(amount,occurred_on,bank_movement_id,employee_id,empleado)
+      VALUES($1,$2,$3,$4,$5) RETURNING id`,[decimal(-cents(s.amount)),s.occurred_on,s.bank_movement_id,e.id,e.name])).rows[0];
+     const rec=(await c.query('SELECT id,version,gross_amount FROM ledens.financial_records WHERE worker_payment_id=$1',[w.id])).rows[0];
+     if(!rec)throw new FinError(503,'No se pudo registrar el pago en la contabilidad');
+     await this.finance.replace(c,this.user,{record_id:rec.id,version:rec.version,allocations:[{project_id:it.projectId,amount:rec.gross_amount}]},
+      `Pago a ${s.role==='oficial'?'oficial':'ayudante'} segregado del movimiento ${s.source_id}`);
+     await c.query('UPDATE ledens.worker_payment_splits SET worker_payment_id=$2,saved_by=$3,saved_at=now() WHERE id=$1',[s.id,w.id,this.user.id]);
+     await c.query(`RELEASE SAVEPOINT s${i}`);results.push({splitId:it.splitId,ok:true,workerPaymentId:w.id});
+    }catch(err){await c.query(`ROLLBACK TO SAVEPOINT s${i}`);if(!(err instanceof FinanceError))throw err;results.push({splitId:it.splitId,ok:false,error:err.message});}
+   }
+   return {results,ok:results.filter(r=>r.ok).length,failed:results.filter(r=>!r.ok).length};
+  });
+ }
+ // Undo «Pago a trabajadores» while nothing of the movement has been saved yet.
+ async returnWorkerBatch({batchId}){
+  if(this.user.role!=='admin')throw new FinError(403,'Devolver a conciliación requiere administrador');
+  if(!uuid(batchId))throw new FinError(404,'Movimiento no encontrado');
+  return this.finance.transaction(async c=>{
+   const b=(await c.query('SELECT id FROM ledens.worker_payment_batches WHERE id=$1 FOR UPDATE',[batchId])).rows[0];
+   if(!b)throw new FinError(404,'Movimiento no encontrado');
+   if((await c.query('SELECT 1 FROM ledens.worker_payment_splits WHERE batch_id=$1 AND worker_payment_id IS NOT NULL LIMIT 1',[batchId])).rows.length)
+    throw new FinError(409,'Ya hay pagos guardados de este movimiento; no se puede devolver');
+   await c.query('DELETE FROM ledens.worker_payment_batches WHERE id=$1',[batchId]);return {returned:true};
+  });
  }
 }

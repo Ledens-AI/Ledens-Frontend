@@ -106,6 +106,30 @@ export function createFinanzasRouter({ service, authenticate, origin=process.env
     res.json(await svc(req).reconciliation({ view, page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), reason:req.query.motivo, from:req.query.desde, to:req.query.hasta }));
   }));
 
+  // Pago a trabajadores. { movementIds: [uuid] } → movements leave Pendiente de
+  // conciliación and are split into lines in Pendiente de trabajador.
+  router.post('/conciliacion/pago-trabajadores', handle(async (req, res) => {
+    res.json(await svc(req).classifyWorkerPayments({ movementIds: req.body?.movementIds }));
+  }));
+
+  router.get('/pendiente-trabajador', handle(async (req, res) => {
+    res.json(await svc(req).workerQueue({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100) }));
+  }));
+
+  router.get('/trabajadores', handle(async (req, res) => {
+    res.json({ employees: await svc(req).employees() });
+  }));
+
+  // { items: [{ splitId, employeeId, projectId }] } — one result per line.
+  router.post('/pendiente-trabajador/guardar', handle(async (req, res) => {
+    const items = Array.isArray(req.body?.items) ? req.body.items.map((i) => ({ splitId: i?.splitId, employeeId: i?.employeeId, projectId: i?.projectId })) : req.body?.items;
+    res.json(await svc(req).saveWorkerSplits({ items }));
+  }));
+
+  router.delete('/pendiente-trabajador/:batchId', handle(async (req, res) => {
+    res.json(await svc(req).returnWorkerBatch({ batchId: req.params.batchId }));
+  }));
+
   router.use((err, _req, res, next) => {
     if (err instanceof FinanceError) return res.status(err.status).json({ error: err.message, ...(err.extra || {}) });
     next(err);
