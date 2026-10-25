@@ -50,6 +50,12 @@ export const api = {
   projectOptions: () => request('GET', '/api/finanzas/gestion-proyectos/opciones'),
   createProject: (body) => request('POST', '/api/finanzas/gestion-proyectos', body),
   updateProject: (id, body) => request('PUT', `/api/finanzas/gestion-proyectos/${id}`, body),
+  // Trabajadores (backend: finanzas/workers.js). Writes are admin-only server-side.
+  workerList: (f) => request('GET', '/api/finanzas/gestion-trabajadores' + qs(f)),
+  workerOptions: () => request('GET', '/api/finanzas/gestion-trabajadores/opciones'),
+  createWorker: (body) => request('POST', '/api/finanzas/gestion-trabajadores', body),
+  updateWorker: (id, body) => request('PUT', `/api/finanzas/gestion-trabajadores/${id}`, body),
+  setWorkerActive: (id, body) => request('PUT', `/api/finanzas/gestion-trabajadores/${id}/estado`, body),
   saveWorkerSplits: (items) => request('POST', '/api/finanzas/pendiente-trabajador/guardar', { items }),
   returnWorkerBatch: (batchId) => request('DELETE', `/api/finanzas/pendiente-trabajador/${batchId}`),
 };

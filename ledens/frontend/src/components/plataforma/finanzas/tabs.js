@@ -12,4 +12,5 @@ export const FIN_TABS = [
   ['pendiente-trabajador', 'Pendiente de trabajador', 'ri-user-follow-line'],
   ['rentabilidad', 'Rentabilidad por proyecto', 'ri-line-chart-line'],
   ['proyectos', 'Proyectos', 'ri-building-2-line'],
+  ['trabajadores', 'Trabajadores', 'ri-team-line'],
 ];

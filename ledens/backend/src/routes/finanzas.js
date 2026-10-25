@@ -5,6 +5,7 @@ import { requireRole, checkRole } from '../auth/sessions.js';
 import {FinanceError} from '../finance/service.js';
 import { FinanzasService, FinError, TYPES, isUuid } from '../finanzas/service.js';
 import { ProjectsService } from '../finanzas/projects.js';
+import { WorkersService } from '../finanzas/workers.js';
 
 // Gestión financiera (/api/finanzas). Internal accounting data: admins and
 // jefes de obra only — a client never reaches any of it, whatever the
@@ -14,7 +15,7 @@ export const FINANZAS_ROLES = ['admin', 'jefe'];
 
 // `authenticate` replaces only the session lookup (tests); the role check is
 // always the real one.
-export function createFinanzasRouter({ service, projects, authenticate, origin=process.env.CORS_ORIGIN } = {}) {
+export function createFinanzasRouter({ service, projects, workers, authenticate, origin=process.env.CORS_ORIGIN } = {}) {
   const router = Router();
   router.use((_req, res, next) => {
     if (!service && !isDbConfigured()) return res.status(503).json({ error: 'Gestión financiera no disponible todavía' });
@@ -144,6 +145,27 @@ export function createFinanzasRouter({ service, projects, authenticate, origin=p
   }));
   router.put('/gestion-proyectos/:id', handle(async (req, res) => {
     res.json({ project: await projectsSvc(req).update(req.params.id, req.body || {}) });
+  }));
+
+  // Trabajadores: list for everyone with finance access (pay only for admins);
+  // alta, edición, baja and reactivación for admins.
+  const workersSvc = (req) => workers || new WorkersService(getPool(), req.user);
+  router.get('/gestion-trabajadores', handle(async (req, res) => {
+    res.json(await workersSvc(req).list({ q: req.query.q || '', estado: req.query.estado || 'activos', puesto: req.query.puesto || '', page: req.query.pagina, pageSize: req.query.tam }));
+  }));
+  router.get('/gestion-trabajadores/opciones', handle(async (req, res) => {
+    res.json(await workersSvc(req).options());
+  }));
+  router.post('/gestion-trabajadores', handle(async (req, res) => {
+    res.status(201).json({ worker: await workersSvc(req).create(req.body || {}) });
+  }));
+  router.put('/gestion-trabajadores/:id', handle(async (req, res) => {
+    res.json({ worker: await workersSvc(req).update(req.params.id, req.body || {}) });
+  }));
+  // { activo: boolean, version, reason? }
+  router.put('/gestion-trabajadores/:id/estado', handle(async (req, res) => {
+    const b = req.body || {};
+    res.json({ worker: await workersSvc(req).setActive(req.params.id, { activo: b.activo, version: b.version, reason: b.reason }) });
   }));
 
   router.use((err, _req, res, next) => {
