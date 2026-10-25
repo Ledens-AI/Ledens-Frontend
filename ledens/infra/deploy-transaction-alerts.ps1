@@ -25,7 +25,7 @@ if(-not ($taskAssignments.value | Where-Object {$_.properties.principalId -eq $t
  $null=Invoke-AlertsArm PUT ($taskSecret+'/providers/Microsoft.Authorization/roleAssignments/'+[guid]::NewGuid().ToString()+'?api-version=2022-04-01') @{properties=@{principalId=$taskWorkflow.identity.principalId;principalType='ServicePrincipal';roleDefinitionId=$taskRole}}
 }
 $taskGroupId=$taskRoot+'/providers/Microsoft.Insights/actionGroups/ledens-transaction-alerts'
-$null=Invoke-AlertsArm PUT ($taskGroupId+'?api-version=2023-01-01') @{location='global';properties=@{groupShortName='LedensTxn';enabled=$true;emailReceivers=@(@{name='Alvaro';emailAddress='alvaro.navarro@ledens.es';useCommonAlertSchema=$true})}}
+$null=Invoke-AlertsArm PUT ($taskGroupId+'?api-version=2023-01-01') @{location='global';properties=@{groupShortName='LedensTxn';enabled=$true;emailReceivers=@(@{name='Alvaro';emailAddress='alvaro.navarro@ledens.es';useCommonAlertSchema=$true},@{name='Alvaro Gmail';emailAddress='ajnavarrosilva@gmail.com';useCommonAlertSchema=$true})}}
 foreach($taskName in @('ledens-invoice-ingestion','ledens-bank-bridge','ledens-transaction-alerts')){
  $taskScope=$taskRoot+'/providers/Microsoft.Logic/workflows/'+$taskName
  $taskRule=@{location='global';properties=@{description=('Fallo técnico en '+$taskName+'. Revisar ejecución en Azure.');severity=2;enabled=$true;scopes=@($taskScope);evaluationFrequency='PT1M';windowSize='PT5M';autoMitigate=$true;criteria=@{'odata.type'='Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria';allOf=@(@{name='FailedRuns';metricName='RunsFailed';metricNamespace='Microsoft.Logic/workflows';operator='GreaterThan';threshold=0;timeAggregation='Total';criterionType='StaticThresholdCriterion'})};actions=@(@{actionGroupId=$taskGroupId})}}
