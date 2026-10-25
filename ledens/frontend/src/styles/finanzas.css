@@ -208,3 +208,9 @@
 .fin-batch-all { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
 .fin-table select { font: inherit; font-size: 14px; min-height: 38px; padding: 6px 8px; border: 1px solid #D9D9D9; border-radius: 8px; background: #fff; max-width: 260px; }
 
+
+/* Proyectos: two-column form in a wider dialog. */
+.fin-dialog.is-wide { max-width: 760px; }
+.fin-grid-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; }
+.fin-small { font-size: 12px; margin-top: 2px; }
+

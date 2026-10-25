@@ -11,4 +11,5 @@ export const FIN_TABS = [
   ['conciliacion', 'Pendiente de conciliación', 'ri-bank-line'],
   ['pendiente-trabajador', 'Pendiente de trabajador', 'ri-user-follow-line'],
   ['rentabilidad', 'Rentabilidad por proyecto', 'ri-line-chart-line'],
+  ['proyectos', 'Proyectos', 'ri-building-2-line'],
 ];

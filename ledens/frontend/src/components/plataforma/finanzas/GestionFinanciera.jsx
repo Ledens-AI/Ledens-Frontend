@@ -4,6 +4,7 @@ import RecordsView from './RecordsView.jsx';
 import Resumen from './Resumen.jsx';
 import Conciliacion from './Conciliacion.jsx';
 import PendienteTrabajador from './PendienteTrabajador.jsx';
+import Proyectos from './Proyectos.jsx';
 import Rentabilidad from './Rentabilidad.jsx';
 import { FIN_TABS } from './tabs.js';
 import '../../../styles/finanzas.css';
@@ -18,6 +19,7 @@ const INTRO = {
   conciliacion: 'Movimientos bancarios pendientes de conciliar con sus documentos. Selecciona los pagos de nóminas y pulsa «Pago a trabajadores» para segregarlos.',
   'pendiente-trabajador': 'Pagos a trabajadores segregados de un movimiento bancario: más de 450 € en pagos de 100 € (Oficial), 450 € o menos en pagos de 60 € (Ayudante). Asigna trabajador y proyecto a cada uno y guárdalo.',
   rentabilidad: 'Costes imputados, cobros y margen previsto de un proyecto.',
+  proyectos: 'Alta y edición de proyectos: código, cliente, dirección, estado y fechas. Los cambios quedan en la auditoría.',
 };
 
 /* Gestión financiera (/plataforma, admins and jefes de obra). Data comes from
@@ -58,6 +60,7 @@ export default function GestionFinanciera({ tab, go, toast, onPending }) {
       ) : null}
       {tab === 'conciliacion' ? <Conciliacion toast={toast} /> : null}
       {tab === 'pendiente-trabajador' ? <PendienteTrabajador toast={toast} onChanged={changed} /> : null}
+      {tab === 'proyectos' ? <Proyectos toast={toast} /> : null}
       {tab === 'rentabilidad' ? (
         <Rentabilidad project={rentProject} onProject={setRentProject} version={version}
           drill={(t) => { setDrill({ tab: t, project: rentProject }); go(t); }} />
