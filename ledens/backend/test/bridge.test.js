@@ -8,7 +8,7 @@ import {cents,eligibleBank,automaticBlock} from '../src/bridge/rules.js';
 let db,service,pool;
 before(async()=>{
  if(process.env.BRIDGE_TEST_DATABASE_URL){const real=new pg.Pool({connectionString:process.env.BRIDGE_TEST_DATABASE_URL});db={query:(...a)=>real.query(...a),exec:q=>real.query(q),close:()=>real.end()};pool=real;}else{db=new PGlite();}
- for(const path of ['finance-fixture.sql','../src/db/migrations/004_invoice_ingestion.sql','../src/db/migrations/005_bank_bridge.sql'])await db.exec(await fs.readFile(new URL(path,import.meta.url),'utf8'));
+ for(const path of ['finance-fixture.sql','../src/db/migrations/004_invoice_ingestion.sql','../src/db/migrations/005_bank_bridge.sql','../src/db/migrations/012_bridge_party_amount_date.sql'])await db.exec(await fs.readFile(new URL(path,import.meta.url),'utf8'));
  pool=pool||{query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};service=new BridgeService(pool);
 });after(()=>db?.close());
 const document=async(number,total='-121')=>{
@@ -85,4 +85,12 @@ test('new rule migration retries ingested pending cases while preserving confirm
 test('PostgreSQL competing evaluations cannot allocate one bank twice',{skip:!process.env.BRIDGE_TEST_DATABASE_URL},async()=>{
  const a=await document('CONCURRENT-001','-908'),b=await document('CONCURRENT-002','-908'),movement=await bank(null,'-908');
  const result=await Promise.all([service.evaluate(a,{force:true}),service.evaluate(b,{force:true})]);assert.ok(result.every(x=>x.status==='pending'));assert.equal((await db.query('SELECT count(*)::int n FROM ledens.bank_document_allocations WHERE bank_movement_id=$1',[movement])).rows[0].n,0);
+});
+
+test('corroborated supplier may match without inflating its low raw field confidence',async()=>{
+ const d=await document('SUPPORTED-001','-910'),b=await bank(null,'-910');
+ await db.query("UPDATE ledens.documents SET niftercero='B84406289' WHERE id=$1",[d]);await db.query('UPDATE ledens.invoice_ingestions SET party_confidence=.481,tax_id_confidence=.82 WHERE document_id=$1',[d]);assert.equal((await service.evaluate(d,{force:true})).status,'pending');
+ const evidence={rule:'party_name_span_and_tax_id',source:'azure-di',name:'PROVEEDOR EJEMPLO',tax_id:'B84406289',name_field_confidence:.481,word_confidence:.989,tax_id_confidence:.82};
+ await db.query('UPDATE ledens.invoice_ingestions SET party_evidence=$2 WHERE document_id=$1',[d,JSON.stringify({...evidence,tax_id:'B00000000'})]);assert.equal((await service.evaluate(d,{force:true})).status,'pending');
+ await db.query('UPDATE ledens.invoice_ingestions SET party_evidence=$2 WHERE document_id=$1',[d,JSON.stringify(evidence)]);assert.equal((await service.evaluate(d,{force:true})).status,'matched');assert.equal(Number((await db.query('SELECT party_confidence FROM ledens.invoice_ingestions WHERE document_id=$1',[d])).rows[0].party_confidence),.481);
 });

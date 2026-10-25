@@ -35,8 +35,10 @@ export function hasParty(doc,bank,{verified=false}={}){
   const nif=taxId(doc.niftercero);
   if((!verified||Number(doc.tax_id_confidence)>=INVOICE_MIN_CONFIDENCE)&&nif.length>=8 && (text.includes(' '+nif+' ') || text.includes(' ES'+nif+' ')))return true;
   const excluded=new Set(['SOCIEDAD','LIMITADA','ANONIMA','SL','SA','SLU','DE','DEL','LA','EL']);
+  const evidence=doc.party_evidence;
+  const supported=evidence?.rule==='party_name_span_and_tax_id'&&evidence.source==='azure-di'&&evidence.name===normalize(doc.tercero)&&evidence.tax_id===taxId(doc.niftercero)&&evidence.tax_id.length>=8&&[evidence.word_confidence,evidence.tax_id_confidence].every(n=>typeof n==='number'&&n>=INVOICE_MIN_CONFIDENCE&&n<=1)&&Number(doc.tax_id_confidence)>=INVOICE_MIN_CONFIDENCE;
   const words=normalize(doc.tercero).split(' ').filter(x=>x.length>=3&&!excluded.has(x));
-  return (!verified||Number(doc.party_confidence)>=INVOICE_MIN_CONFIDENCE)&&words.join('').length>=7 && words.length>0 && words.every(x=>text.includes(' '+x+' '));
+  return (!verified||Number(doc.party_confidence)>=INVOICE_MIN_CONFIDENCE||supported)&&words.join('').length>=7 && words.length>0 && words.every(x=>text.includes(' '+x+' '));
 }
 export function automaticBlock(doc){
   const total=cents(doc.total);

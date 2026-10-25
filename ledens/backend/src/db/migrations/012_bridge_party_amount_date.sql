@@ -1,3 +1,4 @@
+ALTER TABLE ledens.invoice_ingestions ADD COLUMN IF NOT EXISTS party_evidence jsonb NOT NULL DEFAULT '{}';
 -- Reconsider existing ingested invoices under the newly authorized global rule.
 -- Manual/dismissed cases and documents with existing Bridge allocations are preserved.
 INSERT INTO ledens.bridge_events(document_id,action,detail)
