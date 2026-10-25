@@ -200,3 +200,11 @@
 .fin-btn.is-small { min-height: 32px; padding: 5px 10px; font-size: 13px; }
 .fin-bulkbar.is-staged { background: #3E4D85; position: static; }
 
+
+/* Pendiente de trabajador: one card per bank movement. */
+.fin-batch-head { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; border-bottom: 1px solid #EDEDEA; }
+.fin-batch-title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 15px; }
+.fin-batch-title strong { font-size: 20px; color: #0C062B; }
+.fin-batch-all { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.fin-table select { font: inherit; font-size: 14px; min-height: 38px; padding: 6px 8px; border: 1px solid #D9D9D9; border-radius: 8px; background: #fff; max-width: 260px; }
+
