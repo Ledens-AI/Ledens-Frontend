@@ -77,15 +77,16 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
     const items = keys.map((k) => staged.get(k)).filter((x) => x && !x.saving);
     if (!items.length) return;
     patchStaged(items.map((x) => key(x.row)), { saving: true, error: '' });
-    let ok = 0;
+    let ok = 0, bulkOk = false;
     if (items.length === 1) {
       const { row, project } = items[0];
       try {
         const { record } = await api.assign(row.type, row.id, { projectId: project.id, version: row.version, expectedProjectId: null });
         unstage([key(row)]); settle(record); ok = 1;
       } catch (e) {
-        patchStaged([key(row)], { saving: false, error: e.message });
-        if (e.status === 409) setReload((n) => n + 1);
+        const stale = e.status === 409;
+        patchStaged([key(row)], { saving: false, error: stale ? 'El registro ha cambiado mientras tanto; se ha actualizado. Pulsa Guardar de nuevo.' : e.message });
+        if (stale) setReload((n) => n + 1);
       }
     } else {
       // One bulk request per chosen project; the server answers per record.
@@ -96,18 +97,41 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
           const res = await api.bulk({ action: 'assign', projectId, items: group.map(({ row }) => ({ type: row.type, id: row.id, version: row.version })) });
           for (const x of res.results) {
             const k = x.type + ':' + x.id, it = group.find((g) => key(g.row) === k);
-            if (x.ok) { unstage([k]); settle({ ...it.row, project_id: projectId, project_label: it.project.label, estado: 'asignado' }); ok++; }
+            if (x.ok) { unstage([k]); settle({ ...it.row, project_id: projectId, project_label: it.project.label, estado: 'asignado' }); ok++; bulkOk = true; }
             else patchStaged([k], { saving: false, error: x.error });
           }
         } catch (e) {
           patchStaged(group.map(({ row }) => key(row)), { saving: false, error: e.message });
         }
       }
+      // The bulk answer has no records, so a row that stays on screen still
+      // holds its pre-save version: fetch the page again (Pendientes already
+      // dropped the saved rows).
+      if (bulkOk && !pending) setReload((n) => n + 1);
     }
     if (ok) { onChanged?.(); toast(ok === 1 && items.length === 1 ? `Guardado: asignado a ${items[0].project.label}.` : `Guardadas ${ok} de ${items.length} asignaciones.`); }
     else if (items.length > 1) toast('No se ha guardado ninguna asignación. Revisa los avisos en cada fila.');
   };
   const stagedList = [...staged.values()];
+  // Whenever the page is fetched again (e.g. after a 409), staged choices take
+  // the record's current snapshot so «Guardar» sends its current version; a
+  // record that meanwhile got a project is no longer staged.
+  useEffect(() => {
+    if (!data) return;
+    setStaged((m) => {
+      if (!m.size) return m;
+      let changed = false;
+      const n = new Map(m);
+      for (const r of data.rows) {
+        const st = n.get(key(r));
+        if (!st || st.saving || st.row === r) continue;
+        changed = true;
+        if (r.project_id || r.parts > 0) n.delete(key(r));
+        else n.set(key(r), { ...st, row: r });
+      }
+      return changed ? n : m;
+    });
+  }, [data]);
 
   // Inline assignment. Changing an existing project asks for a reason first.
   const assign = async (row, project, reason) => {
