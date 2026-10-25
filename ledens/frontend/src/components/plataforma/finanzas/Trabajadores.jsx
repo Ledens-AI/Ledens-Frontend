@@ -37,7 +37,8 @@ export default function Trabajadores({ toast }) {
     return '';
   };
   // A stale version: reload the current row so the person can redo the change on top of it.
-  const fresh = async (w) => (await api.workerList({ q: w.code || w.name, estado: 'todos', tam: 100 }).catch(() => null))?.rows.find((r) => r.id === w.id);
+  // By id: the code or name may be exactly what the other person changed.
+  const fresh = async (w) => (await api.getWorker(w.id).catch(() => null))?.worker;
   const replace = (w) => setData((d) => d && ({ ...d, rows: d.rows.map((r) => (r.id === w.id ? w : r)) }));
   // After a baja/reactivación the row may no longer match the status filter.
   const fits = (w) => estado === 'todos' || (estado === 'activos') === w.activo;

@@ -105,4 +105,12 @@ test('HTTP: writes need the allowed origin and an admin',async()=>{
  }finally{server.close();}
 });
 
+test('a worker reloads by id, with the pay hidden from jefes',async()=>{
+ const w=await as(admin).create({name:'Recarga Trabajador',code:'RW-1',dailyPay:'70'});
+ await as(admin).update(w.id,{...form(w),code:'RW-2',version:w.version});
+ assert.equal((await as(admin).one(w.id)).code,'RW-2');assert.equal(Number((await as(admin).one(w.id)).daily_pay),70);
+ assert.equal((await as(jefe).one(w.id)).daily_pay,null);
+ await assert.rejects(as(client).one(w.id),{status:403});
+});
+
 function form(w){return {code:w.code,name:w.name,positionId:w.position_id,tipo:w.tipo,dailyPay:w.daily_pay,hours:w.hours};}

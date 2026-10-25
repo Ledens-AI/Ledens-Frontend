@@ -34,6 +34,14 @@ export class WorkersService {
   const total=(await this.pool.query(`SELECT count(*)::int n FROM ledens.employees e LEFT JOIN ledens.positions po ON po.id=e.primary_position_id${w}`,params)).rows[0].n;
   return {rows,total,page:p,pageSize:size,canEdit:this.canEdit()};
  }
+ // One worker by its immutable id (used to reload after a conflict).
+ async one(id){
+  this.access();
+  if(!uuid(id))throw new FinError(404,'Trabajador no encontrado');
+  const r=(await this.pool.query(`${SELECT} WHERE e.id=$1`,[id])).rows[0];
+  if(!r)throw new FinError(404,'Trabajador no encontrado');
+  return this.view(r);
+ }
  async options(){
   this.access();
   const positions=(await this.pool.query('SELECT id,name FROM ledens.positions WHERE coalesce(activo,true) ORDER BY name,id')).rows;

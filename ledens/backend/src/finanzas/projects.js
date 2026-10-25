@@ -32,6 +32,16 @@ export class ProjectsService {
   const total=(await this.pool.query(`SELECT count(*)::int n FROM ledens.projects p LEFT JOIN ledens.customers c ON c.id=p.customer_id${w}`,params)).rows[0].n;
   return {rows,total,page:p,pageSize:size,canEdit:this.canEdit()};
  }
+ // One project by its immutable id (used to reload after a conflict, when code
+ // or name may have changed). Same visibility rule as the list.
+ async one(id){
+  this.access();
+  if(!uuid(id))throw new FinError(404,'Proyecto no encontrado');
+  const r=(await this.pool.query(`${SELECT} WHERE p.id=$3 AND ($1 OR EXISTS(SELECT 1 FROM ledens.finance_project_permissions fp WHERE fp.user_id=$2 AND fp.project_id=p.id))`,
+   [this.user.role==='admin',this.user.id,id])).rows[0];
+  if(!r)throw new FinError(404,'Proyecto no encontrado');
+  return r;
+ }
  async options(){
   this.access();
   const [statuses,customers]=await Promise.all([
@@ -41,7 +51,8 @@ export class ProjectsService {
   return {statuses:statuses.rows,customers:customers.rows,canEdit:this.canEdit()};
  }
  // Validates and normalizes the form. Empty strings become NULL; name is required.
- async clean(c,body,id=null){
+ // `before` is the stored row when editing.
+ async clean(c,body,id=null,before=null){
   const v={};
   for(const f of FIELDS){const x=body?.[f];v[f]=typeof x==='string'?(x.trim()||null):(x??null);}
   if(!v.name)throw new FinError(400,'El nombre es obligatorio');
@@ -53,7 +64,9 @@ export class ProjectsService {
   if(v.customerId!==null){
    const cu=uuid(v.customerId)&&(await c.query('SELECT display_name FROM ledens.customers WHERE id=$1',[v.customerId])).rows[0];
    if(!cu)throw new FinError(400,'Cliente no válido');
-   v.customerName=v.customerName||cu.display_name;
+   // Choosing a registered client replaces any free text typed before; an
+   // unchanged client keeps its stored text (imported rows may differ).
+   if(!before||before.customer_id!==v.customerId||!v.customerName)v.customerName=cu.display_name;
   }
   // Project codes identify works in invoices and suggestions: never two alike.
   if(v.code){
@@ -89,7 +102,7 @@ export class ProjectsService {
    const before=(await c.query(`${SELECT} WHERE p.id=$1 FOR UPDATE OF p`,[id])).rows[0];
    if(!before)throw new FinError(404,'Proyecto no encontrado');
    if(body?.version!==before.version)throw new FinError(409,'Otra persona ha cambiado este proyecto. Se han recargado los datos: revísalos y vuelve a guardar.');
-   const v=await this.clean(c,body,id);
+   const v=await this.clean(c,body,id,before);
    const old={code:before.code,name:before.name,customerId:before.customer_id,customerName:before.customer_name_source,salesman:before.salesman,address:before.address,
     municipio:before.municipio,provincia:before.provincia,statusId:before.status_id,startDate:before.start_date,endDate:before.end_date};
    const changed=FIELDS.filter(f=>(old[f]??null)!==(v[f]??null));

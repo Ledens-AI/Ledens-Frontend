@@ -140,6 +140,9 @@ export function createFinanzasRouter({ service, projects, workers, authenticate,
   router.get('/gestion-proyectos/opciones', handle(async (req, res) => {
     res.json(await projectsSvc(req).options());
   }));
+  router.get('/gestion-proyectos/:id', handle(async (req, res) => {
+    res.json({ project: await projectsSvc(req).one(req.params.id) });
+  }));
   router.post('/gestion-proyectos', handle(async (req, res) => {
     res.status(201).json({ project: await projectsSvc(req).create(req.body || {}) });
   }));
@@ -155,6 +158,9 @@ export function createFinanzasRouter({ service, projects, workers, authenticate,
   }));
   router.get('/gestion-trabajadores/opciones', handle(async (req, res) => {
     res.json(await workersSvc(req).options());
+  }));
+  router.get('/gestion-trabajadores/:id', handle(async (req, res) => {
+    res.json({ worker: await workersSvc(req).one(req.params.id) });
   }));
   router.post('/gestion-trabajadores', handle(async (req, res) => {
     res.status(201).json({ worker: await workersSvc(req).create(req.body || {}) });
