@@ -204,3 +204,48 @@ test('an invoice held for date, total or low-confidence fields is read again on 
   const other=await resend('ocr_rejected_document','r-other-reason');
   assert.deepEqual([other.status,other.reason],['review','ocr_rejected_document'],'not an OCR field reason');
 });
+test('totals printed in the PDF text: one repeated amount, or the sum of base and VAT; «Total IVA» or two different totals are not',async()=>{
+  const {textTotals}=await import('../src/ingestion/ocr.js');
+  assert.deepEqual(textTotals('Total TTI (EUR)  21.00   333.43   70.02   403,45'),[40345],'OBRAMAT store ticket: 21.00 is the VAT rate');
+  assert.deepEqual(textTotals('Total a pagar (€)   15,25  Gestiona tu línea:  1471'),[1525],'Orange');
+  assert.deepEqual(textTotals('Total   €18.00  Amount due   €18.00'),[1800],'Anthropic');
+  assert.deepEqual(textTotals('Total factura 1.234,56 €'),[123456]);
+  assert.deepEqual(textTotals('Subtotal 10,00 Total IVA 2,10'),[]);
+  assert.deepEqual(textTotals('Total factura 10,00 € … Total a pagar 12,00 €').sort(),[1000,1200],'two different totals are both returned (ambiguous)');
+});
+test('the PDF text confirms a low-confidence OCR total and direction, or supplies a missing total; it never decides alone',async()=>{
+  const {archiveIssue}=await import('../src/ingestion/completeness.js');
+  const issue=(x)=>archiveIssue({document_on:x.date,total:x.total,tipo:x.direction,invoice_currency:x.currency,date_confidence:x.confidence,total_confidence:x.totalConfidence,direction_confidence:x.directionConfidence});
+  const inv=(fields)=>({analyzeResult:{documents:[{fields:{InvoiceDate:{valueDate:'2026-10-05',confidence:.945},InvoiceId:{valueString:'A1',confidence:.9},...fields}}]}});
+  // Orange: total .462 and direction .369 → review without text, ready with it.
+  const orange=inv({InvoiceTotal:{valueCurrency:{amount:15.25,currencyCode:'EUR'},confidence:.462},CustomerTaxId:{valueString:'B19753805',confidence:.369}});
+  const orangeText='Titular: SOCIEDAD INVERSORA NAVARRO-ROBINSON CIF: B19753805 Este mes tu factura es de 15,25 € Total a pagar (€) 15,25 CIF A-82009812';
+  assert.equal(issue(extractInvoice(orange)),'invoice_fields_require_review');
+  const o=extractInvoice(orange,{pdfText:orangeText});
+  assert.deepEqual([o.direction,o.total,o.totalConfidence,o.directionConfidence,o.corroborated],['Pagar',-15.25,.9,.9,{total:'ocr_total_in_text',direction:'CustomerTaxId'}]);
+  assert.equal(issue(o),null);
+  // OBRAMAT store ticket: no OCR total; the text gives 403,45 = 333.43 + 70.02.
+  const obramat=inv({CustomerTaxId:{valueString:'B19753805',confidence:.8},VendorTaxId:{valueString:'B-84406289',confidence:.7}});
+  const ticketText='FACTURA 008-0010-453160 Numero NIF : B19753805 Total TTI (EUR)  21.00   333.43   70.02   403,45 C.I.F. B-84406289';
+  assert.equal(issue(extractInvoice(obramat)),'invoice_total_requires_review');
+  const t=extractInvoice(obramat,{pdfText:ticketText});
+  assert.deepEqual([t.total,t.currency,t.totalConfidence,t.directionConfidence,t.corroborated],[-403.45,'EUR',.9,.8,{total:'text_total'}]);
+  assert.equal(issue(t),null);
+  // The text never overrides or invents.
+  assert.equal(extractInvoice(orange,{pdfText:'Total a pagar (€) 99,00 CIF: B19753805'}).totalConfidence,.462,'a different total does not confirm');
+  assert.equal(extractInvoice(obramat,{pdfText:'Total factura 10,00 € Total a pagar 12,00 € B19753805'}).total,null,'two different totals: none');
+  assert.equal(extractInvoice(orange,{pdfText:'Total a pagar (€) 15,25'}).directionConfidence,.369,'our NIF not printed: direction not confirmed');
+  assert.equal(extractInvoice(inv({InvoiceTotal:{valueCurrency:{amount:15.25,currencyCode:'EUR'},confidence:.9}}),{pdfText:orangeText}).direction,null,'no tax id read: no direction from the text');
+});
+test('process reads the text layer of the PDF sent to the OCR and archives an Orange-like invoice',async()=>{
+  const fields={InvoiceDate:{valueDate:'2026-10-05',confidence:.945},InvoiceId:{valueString:'A10020920606-1026',confidence:.9},
+    InvoiceTotal:{valueCurrency:{amount:15.25,currencyCode:'EUR'},confidence:.462},CustomerTaxId:{valueString:'B19753805',confidence:.369}};
+  const svc=new IngestionService({connect:async()=>({query:(q,p)=>db.query(q,p),release(){}})},{...ocr,poll:async()=>({status:'succeeded',analyzeResult:{documents:[{fields}]}})},config);
+  const pdf=await pagesPdf(1,['CIF: B19753805 Total a pagar (EUR) 15,25 Orange Espagne CIF A-82009812']);
+  const row=await svc.receive(await validateInvoice(payload('orange-text',{content_base64:pdf.toString('base64'),filename:'orange.pdf'}),config));
+  await svc.process(row.ingestion_id);
+  const done=await svc.process(row.ingestion_id);
+  assert.deepEqual([done.status,done.reason??null],['ready',null]);
+  const i=(await db.query('SELECT total_confidence::float t,direction_confidence::float d FROM ledens.invoice_ingestions WHERE id=$1',[row.ingestion_id])).rows[0];
+  assert.deepEqual(i,{t:.9,d:.9});
+});

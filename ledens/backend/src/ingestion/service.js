@@ -1,6 +1,6 @@
 import {registerPurchaseDocument,hasPurchases,PurchaseReviewError} from '../finance/purchases.js';
 import {extractLines,storeInvoiceLines} from '../finance/ingestion.js';
-import { IngestError } from './validation.js';
+import { IngestError, pageTexts } from './validation.js';
 import {archiveIssue} from './completeness.js';
 import {cents,decimal} from '../bridge/rules.js';
 import { extractInvoice } from './ocr.js';
@@ -136,7 +136,9 @@ export class IngestionService {
         }
         const result=await this.ocr.poll(row.operation_url);
         if(['running','notStarted'].includes(result.status)) return this.response(row);
-        const extracted=result.status==='succeeded'?extractInvoice(result):{reason:'ocr_failed'};
+        // The text layer of what the OCR read (PDFs only) corroborates total and direction.
+        const pdfText=result.status==='succeeded'&&row.content_type==='application/pdf'&&row.content?(await pageTexts(row.content,3)).join('\n'):'';
+        const extracted=result.status==='succeeded'?extractInvoice(result,{pdfText}):{reason:'ocr_failed'};
         if(!extracted.reason)extracted.reason=archiveIssue({document_on:extracted.date,total:extracted.total,tipo:extracted.direction,invoice_currency:extracted.currency,date_confidence:extracted.confidence,total_confidence:extracted.totalConfidence,direction_confidence:extracted.directionConfidence});
         if(extracted.reason) {
           row.status='review';row.reason=extracted.reason;
