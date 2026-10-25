@@ -2,6 +2,7 @@ import {normalize,cents,decimal} from '../bridge/rules.js';
 
 // Extracted lines are evidence, never approved accounting entries by themselves.
 export function extractLines(result){
+ if(/DEPOSITO PREVIO ICIO/i.test(result.analyzeResult?.content||'')&&/PRESUPUESTO EJECUCI[ÓO]N DE OBRAS/i.test(result.analyzeResult?.content||''))return [];
  const items=result.analyzeResult?.documents?.[0]?.fields?.Items?.valueArray;
  if(!Array.isArray(items))return [];
  return items.slice(0,500).map((item,index)=>{

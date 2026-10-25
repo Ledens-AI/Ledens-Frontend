@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 
+export const INVOICE_MIN_CONFIDENCE=0.5;
 export const RULE_VERSION='exact-reference-party-v1';
 export const LOCK_ID=727032;
 export const normalize=s=>String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();
@@ -30,10 +31,10 @@ export function hasReference(number,bank){
 export function hasParty(doc,bank,{verified=false}={}){
   const text=' '+normalize([bank.reference,bank.description,bank.beneficiary_name,bank.payer].join(' '))+' ';
   const nif=taxId(doc.niftercero);
-  if((!verified||Number(doc.tax_id_confidence)>=0.9)&&nif.length>=8 && (text.includes(' '+nif+' ') || text.includes(' ES'+nif+' ')))return true;
+  if((!verified||Number(doc.tax_id_confidence)>=INVOICE_MIN_CONFIDENCE)&&nif.length>=8 && (text.includes(' '+nif+' ') || text.includes(' ES'+nif+' ')))return true;
   const excluded=new Set(['SOCIEDAD','LIMITADA','ANONIMA','SL','SA','SLU','DE','DEL','LA','EL']);
   const words=normalize(doc.tercero).split(' ').filter(x=>x.length>=3&&!excluded.has(x));
-  return (!verified||Number(doc.party_confidence)>=0.9)&&words.join('').length>=7 && words.length>0 && words.every(x=>text.includes(' '+x+' '));
+  return (!verified||Number(doc.party_confidence)>=INVOICE_MIN_CONFIDENCE)&&words.join('').length>=7 && words.length>0 && words.every(x=>text.includes(' '+x+' '));
 }
 export function automaticBlock(doc){
   const total=cents(doc.total);
@@ -41,7 +42,7 @@ export function automaticBlock(doc){
   if(!['Pagar','Cobrar'].includes(doc.tipo)||(doc.tipo==='Pagar')!==(total<0n))return 'unknown_direction';
   if(doc.review_state==='Incidencia')return 'invoice_issue';
   if(doc.invoice_currency!=='EUR')return 'unverified_currency';
-  for(const [key,threshold] of [['total_confidence',0.95],['date_confidence',0.9],['number_confidence',0.9],['direction_confidence',0.9]]){
+  for(const [key,threshold] of [['total_confidence',INVOICE_MIN_CONFIDENCE],['date_confidence',INVOICE_MIN_CONFIDENCE],['number_confidence',INVOICE_MIN_CONFIDENCE],['direction_confidence',INVOICE_MIN_CONFIDENCE]]){
     const value=Number(doc[key]);if(!Number.isFinite(value)||value<threshold||value>1)return 'unverified_invoice_fields';
   }
   return null;

@@ -1,0 +1,41 @@
+import {test,before,after} from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import {PGlite} from '@electric-sql/pglite';
+import {municipalAssessment} from '../src/ingestion/municipal.js';
+import {recoverMunicipalAssessment} from '../src/ingestion/municipal-recovery.js';
+import {extractLines} from '../src/finance/ingestion.js';
+import {extractInvoice} from '../src/ingestion/ocr.js';
+import {FinanzasService} from '../src/finanzas/service.js';
+const result={status:'succeeded',analyzeResult:{content:'AYUNTAMIENTO DE MIJAS (MALAGA)\nFecha expedición\n6540277\n2026-01969-DR\nDeposito Previo ICIO\n22-sep-26\nBASE IMPONIBLE (PRESUPUESTO EJECUCIÓN DE OBRAS) .....\n8.472,15\nTIPO IMPOSITIVO\n3,20\nCUOTA A PAGAR\n271,11\nMijas, martes, 22 de septiembre de 2026',documents:[{fields:{InvoiceDate:{valueDate:'2026-09-22',confidence:.669},InvoiceTotal:{valueCurrency:{amount:271.11,currencyCode:'EUR'},confidence:.656},SubTotal:{valueCurrency:{amount:8472.15}},Items:{valueArray:[{valueObject:{Amount:{valueCurrency:{amount:8472.15}}}}]}}}]}};
+let db,pool,actor,ingestion,doc,bank,oldRecord,project;
+before(async()=>{
+ db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
+ for(const p of ['finance-fixture.sql','../src/db/migrations/004_invoice_ingestion.sql','../src/db/migrations/005_bank_bridge.sql','../src/db/migrations/006_project_finance.sql','../src/db/migrations/010_finanzas_imputacion.sql'])await db.exec(await fs.readFile(new URL(p,import.meta.url),'utf8'));
+ await db.exec('ALTER TABLE users ADD COLUMN name text');
+ actor=(await db.query("INSERT INTO users(email,role) VALUES('operator@test.example','admin') RETURNING id,email,role")).rows[0];
+ project=(await db.query("INSERT INTO ledens.projects(name) VALUES('Obra previa') RETURNING id")).rows[0].id;
+ bank=(await db.query("INSERT INTO ledens.bank_movements(amount,total_amount,bank_fee,currency,state,type,completed_on,reference,beneficiary_name) VALUES(-271.11,-271.31,.2,'EUR','COMPLETED','TRANSFER','2026-10-07','ICIO 2026-01969-DR','Ayuntamiento de Mijas') RETURNING id")).rows[0].id;
+ const legacy=(await db.query("INSERT INTO ledens.documents(total,tipo,document_on,observaciones) VALUES(-271.31,'Pagar','2026-10-07','Registro creado automáticamente desde FactMovimientosBancarios. Soporte pendiente') RETURNING id")).rows[0].id;
+ const material=(await db.query("INSERT INTO ledens.material_expenses(total,document_id,bank_movement_id,project_id) VALUES(-271.11,$1,$2,$3) RETURNING id",[legacy,bank,project])).rows[0].id;
+ oldRecord=(await db.query('SELECT id FROM ledens.financial_records WHERE material_id=$1',[material])).rows[0].id;
+ doc=(await db.query("INSERT INTO ledens.documents(review_state) VALUES('pendiente_revision') RETURNING id")).rows[0].id;
+ ingestion=(await db.query("INSERT INTO ledens.invoice_ingestions(document_id,content_hash,filename,content_type,status,reason) VALUES($1,'municipal-recovery','tax.pdf','application/pdf','review','invoice_date_requires_review') RETURNING id",[doc])).rows[0].id;
+ await db.query("INSERT INTO ledens.invoice_lines(document_id,line_number,description,net_amount) VALUES($1,1,'BASE IMPONIBLE PRESUPUESTO',8472.15)",[doc]);
+});after(()=>db?.close());
+test('municipal profile corroborates the issue date and tax calculation without treating the budget as cost',()=>{
+ const p=municipalAssessment(result);assert.equal(p.date,'2026-09-22');assert.equal(p.total,'271.11');assert.equal(p.reference,'2026-01969-DR');assert.equal(p.evidence.base_for_tax_calculation,'8472.15');assert.deepEqual(extractLines(result),[]);assert.equal(extractInvoice(result).reason,'municipal_assessment_requires_review');
+ const bad=structuredClone(result);bad.analyzeResult.documents[0].fields.InvoiceDate.confidence=.499;assert.equal(municipalAssessment(bad),null);
+ const mismatch=structuredClone(result);mismatch.analyzeResult.content=mismatch.analyzeResult.content.replace('271,11','272,11');assert.equal(municipalAssessment(mismatch),null);
+ const date=structuredClone(result);date.analyzeResult.documents[0].fields.InvoiceDate.valueDate='2026-10-06';assert.equal(municipalAssessment(date),null);
+});
+test('recovery creates one unassigned tax concept, preserves previous assignment history and confirms only the principal',async()=>{
+ const args={ingestionId:ingestion,actorId:actor.id,result};const preview=await recoverMunicipalAssessment(pool,args);assert.equal(preview.fee,'0.20');assert.equal((await db.query('SELECT total FROM ledens.documents WHERE id=$1',[doc])).rows[0].total,null);
+ const first=await recoverMunicipalAssessment(pool,{...args,apply:true});assert.equal(first.bridge,'confirmed');const again=await recoverMunicipalAssessment(pool,{...args,apply:true});assert.equal(again.replay,true);
+ const d=(await db.query('SELECT * FROM ledens.documents WHERE id=$1',[doc])).rows[0];assert.equal(d.total,'-271.11');assert.equal(d.trimestre,'3T-2026');assert.equal(d.base_amount,null);
+ const records=(await db.query('SELECT * FROM ledens.financial_records WHERE document_id=$1',[doc])).rows;assert.equal(records.length,1);assert.equal(records[0].gross_amount,'271.11');assert.equal(records[0].category,'other_direct');assert.equal(records[0].status,'pending');
+ const ui=await new FinanzasService(pool,actor).listRecords({pending:true});assert.ok(ui.rows.some(r=>r.record_id===first.record_id&&r.type==='concepto'));assert.ok(!(await new FinanzasService(pool,actor).listRecords()).rows.some(r=>r.record_id===oldRecord));
+ const old=(await db.query('SELECT status,source_valid FROM ledens.financial_records WHERE id=$1',[oldRecord])).rows[0];assert.equal(old.status,'excluded');assert.equal(old.source_valid,false);assert.equal((await db.query('SELECT project_id FROM ledens.project_financial_allocations WHERE record_id=$1',[oldRecord])).rows[0].project_id,project);
+ const bridge=(await db.query('SELECT allocated_amount,state FROM ledens.bank_document_allocations WHERE document_id=$1',[doc])).rows;assert.equal(bridge.length,1);assert.equal(bridge[0].allocated_amount,'-271.11');assert.equal(bridge[0].state,'Confirmado');assert.equal((await db.query('SELECT bank_fee FROM ledens.bank_movements WHERE id=$1',[bank])).rows[0].bank_fee,'0.2');
+ assert.ok((await db.query("SELECT 1 FROM ledens.finance_events WHERE record_id=$1 AND action='municipal_document_recovered'",[first.record_id])).rows.length);
+});

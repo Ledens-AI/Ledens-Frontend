@@ -69,7 +69,7 @@ test('OCR start/poll retries do not repeat extraction and archive requires a val
   assert.equal(doc.trimestre,'3T-2025');assert.equal(doc.total,'121');assert.equal(doc.review_state,'pendiente_revision');
 });
 test('missing, impossible and low confidence dates never permit a move',()=>{
-  for(const date of [undefined,{valueDate:'2025-02-30',confidence:1},{valueDate:'2025-09-30',confidence:0.89}]) {
+  for(const date of [undefined,{valueDate:'2025-02-30',confidence:1},{valueDate:'2025-09-30',confidence:0.49}]) {
     assert.ok(extractInvoice({analyzeResult:{documents:[{fields:{InvoiceDate:date}}]}}).reason);
   }
   assert.ok(extractInvoice({analyzeResult:{documents:[{},{}]}}).reason);
@@ -86,4 +86,9 @@ test('endpoint authenticates before body parsing and rejects invalid ids',async(
     const res=await fetch(base,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(payload('original'))});
     assert.equal(res.status,200);assert.equal((await res.json()).replay,true);
   } finally {await new Promise(r=>server.close(r));}
+});
+
+test('invoice date minimum confidence is inclusive at 50 percent',()=>{
+ for(const confidence of [0.5,0.669,0.89,1])assert.equal(extractInvoice({analyzeResult:{documents:[{fields:{InvoiceDate:{valueDate:'2026-09-22',confidence}}}]}}).date,'2026-09-22');
+ for(const confidence of [0.499,1.01])assert.equal(extractInvoice({analyzeResult:{documents:[{fields:{InvoiceDate:{valueDate:'2026-09-22',confidence}}}]}}).reason,'invoice_date_requires_review');
 });

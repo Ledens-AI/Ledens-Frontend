@@ -1,5 +1,6 @@
+import {municipalAssessment} from './municipal.js';
 import { invoiceQuarter } from './validation.js';
-import {taxId} from '../bridge/rules.js';
+import {taxId,INVOICE_MIN_CONFIDENCE} from '../bridge/rules.js';
 
 export function trustedOperation(url, endpoint) {
   const value = new URL(url);
@@ -30,13 +31,14 @@ export class InvoiceOcr {
   }
 }
 export function extractInvoice(result, {businessTaxId=process.env.BRIDGE_BUSINESS_TAX_ID||'B19753805'}={}) {
+  if(municipalAssessment(result))return {reason:'municipal_assessment_requires_review'};
   const docs = result.analyzeResult?.documents;
   if (!Array.isArray(docs) || docs.length !== 1) return { reason:'invoice_count_requires_review' };
   const f = docs[0].fields || {};
   const date = f.InvoiceDate?.valueDate;
   const confidence = f.InvoiceDate?.confidence || 0;
   const quarter = invoiceQuarter(date);
-  if (!quarter || confidence < 0.9) return {reason:'invoice_date_requires_review'};
+  if (!quarter || confidence < INVOICE_MIN_CONFIDENCE || confidence > 1) return {reason:'invoice_date_requires_review'};
   const text = name => typeof f[name]?.valueString === 'string' ? f[name].valueString.slice(0,1000) : null;
   const money = name => Number.isFinite(f[name]?.valueCurrency?.amount) ? f[name].valueCurrency.amount : null;
   const own=taxId(businessTaxId);
