@@ -1,0 +1,11 @@
+# Justificantes de Revolut y archivo completo
+
+Los PDF «Transaction statement» se leen como justificantes bancarios, sin exigir campos de factura que no contienen. El lector nativo verifica la marca Revolut Bank UAB, una sola página y transacción, estado Completed, fecha «Transaction of», moneda EUR e IBAN con dígitos de control. La posición bajo Money out / Money in determina el signo; no se deduce del texto del beneficiario. Los casos ambiguos, incompletos, de varias operaciones, otro estado o moneda quedan en revisión.
+
+La evidencia verificada se guarda en `invoice_ingestions.document_evidence` (migración 018), ligada al hash del original y a fecha, tercero, signo, moneda e importe actuales. No se inventan probabilidades OCR. Se registra una única partida por el importe bruto, pendiente de revisión y asignación, sin asumir base imponible ni IVA.
+
+Antes de marcar una extracción OCR como lista, responder con un documento listo o confirmar su archivo, se comprueban fecha, importe, moneda, sentido y confianza de los campos esenciales. Los incompletos pasan a revisión y el flujo existente no los mueve. La compensación de una factura a cero solo se admite mediante la evidencia OBRAMAT ya verificada. Un documento completo no tiene por qué estar conciliado para archivarse.
+
+`src/scripts/recover-revolut-statement.js` permite recuperar un documento existente con el PDF original, banco esperado y actor administrador. Vista previa por defecto; `--apply` exige hash idéntico, candidato bancario único y protege asignaciones aprobadas/existentes. Actualiza el mismo documento y usa el Bridge habitual, conservando el archivo y sus fuentes. El reintento de una conciliación ya completada no crea registros nuevos. Conserva el actor y valores anteriores en la auditoría.
+
+Pruebas: columnas de pago y cobro, documento incompleto, estado distinto de Completed, moneda ajena, varias operaciones, carga manipulada, recuperación del archivado existente, un único enlace con el CHARGE original y una partida sin neto/IVA ficticios, reenvío idempotente y rechazo del archivo incluso si se intenta forzar ready. CI repite la recuperación en PostgreSQL 16 aislado mediante `STATEMENT_TEST_DATABASE_URL`. Sin nuevas variables de producción.
