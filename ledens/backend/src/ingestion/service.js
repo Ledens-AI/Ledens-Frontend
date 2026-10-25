@@ -140,8 +140,11 @@ export class IngestionService {
         if(!extracted.reason)extracted.reason=archiveIssue({document_on:extracted.date,total:extracted.total,tipo:extracted.direction,invoice_currency:extracted.currency,date_confidence:extracted.confidence,total_confidence:extracted.totalConfidence,direction_confidence:extracted.directionConfidence});
         if(extracted.reason) {
           row.status='review';row.reason=extracted.reason;
+          // Keep what the OCR read (confidences, currency) so a review can be diagnosed.
           await c.query(`UPDATE ledens.invoice_ingestions SET status='review',reason=$2,content=NULL,
-            updated_at=now() WHERE id=$1`,[id,row.reason]);
+            date_confidence=$3,total_confidence=$4,direction_confidence=$5,invoice_currency=$6,
+            updated_at=now() WHERE id=$1`,[id,row.reason,extracted.confidence??null,extracted.totalConfidence??null,
+              extracted.directionConfidence??null,extracted.currency??null]);
         } else {
           row.status='ready';row.invoice_date=extracted.date;
           row.destination_folder=`/Shared Documents/${this.config.archiveRoot}/${extracted.quarter}`;
