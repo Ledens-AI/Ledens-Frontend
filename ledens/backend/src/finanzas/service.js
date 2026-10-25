@@ -41,7 +41,23 @@ const BASE=`WITH base AS (
   (array_agg(pa.project_id))[1] project_id,(array_agg(pr.name))[1] project_label FROM ledens.project_financial_allocations pa
   JOIN ledens.projects pr ON pr.id=pa.project_id WHERE pa.record_id=f.id) a ON true WHERE ${SCOPE} AND f.source_valid AND f.status<>'excluded'
 ), listed AS(SELECT b.*,CASE WHEN needs_review THEN 'revision' WHEN NOT sin_proyecto THEN 'asignado' WHEN allocation_count>0 THEN 'parcial' ELSE 'pendiente' END estado FROM base b)`;
-const labels={replace_allocations:'Asignación a proyecto',recognition:'Validación contable',review_flag:'Revisión',source_changed:'Origen actualizado',document_changed:'Factura actualizada'};
+// «Movimientos conciliados»: the three business classes map onto canonical
+// categories; a reclassification changes financial_records.category only, never
+// moves a row between the imported source tables.
+export const CLASES={materiales:'materials',trabajadores:'labor',clientes:'revenue'};
+const CLASE_SQL=`CASE WHEN l.category IN ('materials','overhead') THEN 'materiales' WHEN l.category='labor' THEN 'trabajadores'
+ WHEN l.category IN ('revenue','advance') THEN 'clientes' WHEN l.category='unclassified' THEN 'sin_clasificar' ELSE 'otros' END`;
+// A record is a payment or a receipt by its document, else its source, else its bank movement.
+const direction=r=>r.doc_tipo==='Cobrar'||r.customer_payment_id?'cobro':r.doc_tipo==='Pagar'||r.material_id||r.worker_payment_id?'pago':
+ r.bank_total!==null&&r.bank_total!==undefined?(Number(r.bank_total)<0?'pago':'cobro'):null;
+// Materiales / Pagos a trabajadores follow the category, so a reclassified
+// record moves tab; an imported source keeps its tab until reclassified.
+const TYPE_FILTER={
+ material:t=>`((l.type=${t} AND l.category<>'labor') OR (l.type<>${t} AND l.type<>'cliente' AND l.category='materials'))`,
+ trabajador:t=>`((l.type=${t} AND l.category NOT IN ('materials','overhead')) OR (l.type<>${t} AND l.type<>'cliente' AND l.category='labor'))`,
+ cliente:t=>`(l.type=${t} OR (l.type='concepto' AND l.category='revenue'))`,
+};
+const labels={reclassified:'Cambio de clasificación',replace_allocations:'Asignación a proyecto',recognition:'Validación contable',review_flag:'Revisión',source_changed:'Origen actualizado',document_changed:'Factura actualizada'};
 const requestFor=(seed,key)=>{const h=createHash('sha256').update(seed+'|'+key).digest('hex').slice(0,32);return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;};
 // Pago a trabajadores: how a paid amount (absolute, in cents) is split.
 // Above 450 € → Oficial lines of 100 €; 450 € or less → Ayudante lines of 60 €.
@@ -69,7 +85,7 @@ export class FinanzasService {
  }
  filters(f){
   const params=this.params(),where=[];const bind=v=>{params.push(v);return '$'+params.length;};
-  if(f.type){if(!TYPES[f.type])throw new FinError(400,'Tipo no válido');const t=bind(f.type);const category={material:'materials',trabajador:'labor',cliente:'revenue'}[f.type];where.push(category?`(l.type=${t} OR (l.type='concepto' AND l.category=${bind(category)}))`:'l.type='+t);}
+  if(f.type){if(!TYPES[f.type])throw new FinError(400,'Tipo no válido');const t=bind(f.type);where.push(TYPE_FILTER[f.type]?.(t)??'l.type='+t);}
   if(f.pending)where.push('l.sin_proyecto');
   if(f.estado){if(!STATES.includes(f.estado))throw new FinError(400,'Estado no válido');where.push('l.estado='+bind(f.estado));}
   if(f.project){if(!uuid(f.project))throw new FinError(400,'Proyecto no válido');where.push(`EXISTS(SELECT 1 FROM ledens.project_financial_allocations pa WHERE pa.record_id=l.record_id AND pa.project_id=${bind(f.project)})`);}
@@ -145,6 +161,52 @@ export class FinanzasService {
    presupuestoVsCoste:s.budget===null?[]:[{categoria:'Total directo',presupuesto:s.budget,coste:s.direct_cost}],
    evolucion:monthly.flatMap(m=>{const mes=String(m.month instanceof Date?m.month.toISOString():m.month).slice(0,7);return [{mes,type:'material',importe:m.direct_cost},{mes,type:'cliente',importe:m.revenue}];}),
    noDisponibles:[{kpi:'Validación pendiente',motivo:`${s.pending_review} registros aún no forman parte del resultado económico`},{kpi:'Beneficio neto',motivo:'El resultado directo no incluye gastos generales, amortización, financiación ni impuesto sobre sociedades.'}]};
+ }
+ // ------------------------------------------------------------- movimientos conciliados
+ // Every record behind a reconciled movement (confirmed Bridge link of its
+ // document, or the movement itself), with how it is classified. Admin, like the inbox.
+ async reconciled({page=1,pageSize=25,q='',clase='',from='',to=''}={}){
+  if(this.user.role!=='admin')throw new FinError(403,'Los movimientos conciliados requieren administrador');
+  const size=Math.min(100,Math.max(1,Number(pageSize)||25)),p=Math.max(1,Math.min(4000,Number(page)||1));
+  const params=[...this.params(),'%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',tercero,concepto,numerodocumento,movimiento) ILIKE $3"];
+  if(clase){if(![...Object.keys(CLASES),'sin_clasificar','otros'].includes(clase))throw new FinError(400,'Clasificación no válida');params.push(clase);where.push('clase=$'+params.length);}
+  for(const [v,op] of [[from,'>='],[to,'<=']])if(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v)))throw new FinError(400,'Fecha no válida');params.push(v);where.push('fecha_movimiento '+op+' $'+params.length+'::date');}
+  const sql=BASE+`, rec AS(SELECT l.*,${CLASE_SQL} clase,mv.fecha_movimiento,mv.movimiento,mv.pago,
+    CASE WHEN l.type='cliente' OR l.doc_tipo='Cobrar' THEN 'cobro' WHEN l.doc_tipo='Pagar' OR l.type IN ('material','trabajador') THEN 'pago'
+     WHEN mv.pago THEN 'pago' ELSE 'cobro' END sentido
+    FROM listed l JOIN LATERAL(SELECT count(*)::int n,max(b.completed_on) fecha_movimiento,bool_or(b.total_amount<0) pago,
+     string_agg(DISTINCT coalesce(nullif(b.description,''),b.reference,b.source_id),' · ') movimiento FROM ledens.bank_movements b
+     WHERE b.id=l.bank_movement_id OR b.id IN(SELECT a.bank_movement_id FROM ledens.bank_document_allocations a WHERE a.document_id=l.document_id AND a.state='Confirmado')) mv ON mv.n>0)
+   SELECT record_id,type,version,category,clase,sentido,accounting_status,fecha,importe,tercero,concepto,numerodocumento,line_number,project_label,parts,estado,
+    fecha_movimiento::text fecha_movimiento,movimiento FROM rec WHERE `+where.join(' AND ');
+  const rows=(await this.query(sql+` ORDER BY fecha_movimiento DESC NULLS LAST,numerodocumento,line_number NULLS FIRST,record_id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows;
+  const total=(await this.query('SELECT count(*)::int n FROM ('+sql+') x',params)).rows[0].n;
+  return {rows,total,page:p,pageSize:size};
+ }
+ async reclassify({recordId,clase,version,reason}={}){
+  if(this.user.role!=='admin')throw new FinError(403,'Cambiar la clasificación requiere administrador');
+  if(!uuid(recordId))throw new FinError(404,'Registro no encontrado');
+  if(!CLASES[clase])throw new FinError(400,'Clasificación no válida');
+  if(!Number.isInteger(version))throw new FinError(400,'Versión no válida');
+  const why=typeof reason==='string'?reason.trim():'';
+  if(why.length<5||why.length>500)throw new FinError(400,'Indica el motivo del cambio (entre 5 y 500 caracteres)');
+  return this.finance.transaction(async c=>{
+   const r=(await c.query('SELECT * FROM ledens.financial_records WHERE id=$1 FOR UPDATE',[recordId])).rows[0];
+   if(!r)throw new FinError(404,'Registro no encontrado');
+   if(r.version!==version)throw new FinError(409,'El registro ha cambiado. Actualiza la lista.');
+   if(!r.source_valid)throw new FinError(409,'El origen del registro necesita corrección');
+   const ctx=(await c.query(`SELECT d.tipo doc_tipo,b.total_amount bank_total FROM ledens.financial_records f LEFT JOIN ledens.documents d ON d.id=f.document_id
+    LEFT JOIN ledens.bank_movements b ON b.id=f.bank_movement_id WHERE f.id=$1`,[recordId])).rows[0];
+   const sentido=direction({...r,...ctx});
+   if(r.customer_payment_id)throw new FinError(409,'Un cobro de cliente siempre es de clientes');
+   if(sentido==='pago'&&clase==='clientes')throw new FinError(409,'Un pago no puede clasificarse como cobro de clientes');
+   if(sentido==='cobro'&&clase!=='clientes')throw new FinError(409,'Un cobro solo puede clasificarse como de clientes');
+   const target=CLASES[clase];
+   if(r.category===target||(target==='materials'&&r.category==='overhead'))throw new FinError(409,'Ya está clasificado así');
+   const after=(await c.query('UPDATE ledens.financial_records SET category=$2,version=version+1,updated_at=now() WHERE id=$1 RETURNING *',[recordId,target])).rows[0];
+   await this.finance.audit(c,r,this.user,'reclassified',why,after);
+   return {record_id:after.id,category:after.category,clase,version:after.version};
+  });
  }
  async reconciliation({view='movimientos',page=1,pageSize=25,q='',reason='',from='',to=''}={}){
   if(this.user.role!=='admin')throw new FinError(403,'La conciliación global requiere administrador');

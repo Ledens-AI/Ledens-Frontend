@@ -30,3 +30,16 @@ Los pagos y cobros en efectivo no tienen banco detrás, así que viven en su pro
 - DELETE /api/finanzas/conciliacion/efectivo/:id solo mientras no está asignado.
 
 En rentabilidad, los registros aprobados que vienen de efectivo (`ledens.v_cash_records`) cuentan como cobro o pago de tesorería, porque ningún movimiento bancario ni enlace Bridge los cubrirá. Todas las operaciones quedan en Logs de transacciones (proceso «Efectivo»).
+
+## Movimientos conciliados
+
+Pantalla solo para administrador. Lista cada registro financiero cuyo movimiento bancario ya está conciliado: el documento tiene un enlace Bridge `Confirmado` o el registro está unido directamente al movimiento. Muestra el movimiento, el documento y la línea, el tercero, el importe, la clasificación y el proyecto.
+
+La clasificación sale de `financial_records.category`: Materiales (`materials`/`overhead`), Pagos a trabajadores (`labor`), Cobro de clientes (`revenue`/`advance`), Sin clasificar (`unclassified`) u Otros costes.
+
+- GET /api/finanzas/conciliados: q, clase=materiales|trabajadores|clientes|sin_clasificar|otros, desde, hasta (fecha del movimiento), pagina, tam.
+- PUT /api/finanzas/conciliados/:recordId/clasificacion `{clase, version, reason}`: cambia solo la categoría del registro y nunca mueve filas entre las tablas importadas (`material_expenses`, `worker_payments`, `customer_payments`).
+  - **Sentido:** un pago solo puede ser de materiales o de trabajadores, y un cobro solo de clientes. El sentido se toma de `documents.tipo`, del origen o del signo bancario. Un `customer_payment` no se reclasifica.
+  - **Control:** exige la versión vigente y un motivo, y queda en `finance_events` (`reclassified`) y en Logs de transacciones.
+- Las pestañas Materiales y Pagos a trabajadores siguen la categoría, así que un registro reclasificado cambia de pestaña.
+- La validación contable acepta la categoría reclasificada de un origen importado.
