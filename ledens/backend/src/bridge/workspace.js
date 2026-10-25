@@ -29,7 +29,12 @@ export class BridgeWorkspace {
    ORDER BY b.completed_on DESC NULLS LAST,b.id LIMIT $5 OFFSET $6`,[...params,f.limit,f.offset])).rows;
   return {rows:rows.map(b=>({...b,bank_fingerprint:bankFingerprint(b)})),total,limit:f.limit,offset:f.offset};
  }
- async counts(){return {pending:(await this.movements({limit:1})).total};}
+ async counts(){
+  const pending=(await this.movements({limit:1})).total;
+  const cash=Boolean((await this.pool.query("SELECT to_regclass('ledens.cash_movements') name")).rows[0].name);
+  const cashPending=cash?(await this.pool.query('SELECT count(*)::int n FROM ledens.cash_movements WHERE assigned_to IS NULL')).rows[0].n:0;
+  return {pending,reconciliation:pending+cashPending};
+ }
  async allocations(filters={}){
   const f=page(filters),params=[f.q,f.from,f.to];
   const from=`FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id JOIN ledens.bank_movements b ON b.id=a.bank_movement_id

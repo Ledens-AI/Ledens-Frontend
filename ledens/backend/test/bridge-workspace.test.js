@@ -12,7 +12,7 @@ let db,pool,service,workspace,server,base,actor;
 before(async()=>{
  if(process.env.BRIDGE_WORKSPACE_TEST_DATABASE_URL){pool=new pg.Pool({connectionString:process.env.BRIDGE_WORKSPACE_TEST_DATABASE_URL});db={query:(...a)=>pool.query(...a),exec:q=>pool.query(q),close:()=>pool.end()};}
  else{const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};}
- for(const path of ['finance-fixture.sql','../src/db/migrations/004_invoice_ingestion.sql','../src/db/migrations/005_bank_bridge.sql','../src/db/migrations/012_bridge_party_amount_date.sql','../src/db/migrations/016_bridge_amount_near_date.sql'])await db.exec(await fs.readFile(new URL(path,import.meta.url),'utf8'));
+ for(const path of ['finance-fixture.sql','../src/db/migrations/004_invoice_ingestion.sql','../src/db/migrations/005_bank_bridge.sql','../src/db/migrations/012_bridge_party_amount_date.sql','../src/db/migrations/017_bridge_amount_near_date.sql'])await db.exec(await fs.readFile(new URL(path,import.meta.url),'utf8'));
  actor=(await db.query("INSERT INTO users(email,role) VALUES('reviewer@bridge.test','admin') RETURNING id")).rows[0].id;
  service=new BridgeService(pool);workspace=new BridgeWorkspace(pool);
  const app=express();app.use(express.json());process.env.CORS_ORIGIN='https://ledens.test';
@@ -76,7 +76,7 @@ test('the new rule queues pending verified invoices without changing dismissed o
  const d=await doc('RETRY-RULE','88');await db.query("INSERT INTO ledens.invoice_ingestions(document_id,content_hash,filename,content_type,status,invoice_currency,date_confidence,total_confidence,direction_confidence) VALUES($1,$2,'retry.pdf','application/pdf','archived','EUR',.9,.9,.9)",[d,randomUUID()]);
  await db.query("UPDATE ledens.bridge_cases SET next_attempt_at='infinity' WHERE document_id=$1",[d]);
  const dismissed=await doc('DISMISSED','99');await db.query("UPDATE ledens.bridge_cases SET status='dismissed',next_attempt_at='infinity' WHERE document_id=$1",[dismissed]);
- await db.exec(await fs.readFile(new URL('../src/db/migrations/016_bridge_amount_near_date.sql',import.meta.url),'utf8'));
+ await db.exec(await fs.readFile(new URL('../src/db/migrations/017_bridge_amount_near_date.sql',import.meta.url),'utf8'));
  assert.ok(Number.isFinite(+new Date((await db.query('SELECT next_attempt_at FROM ledens.bridge_cases WHERE document_id=$1',[d])).rows[0].next_attempt_at)));
  assert.equal((await db.query('SELECT status FROM ledens.bridge_cases WHERE document_id=$1',[dismissed])).rows[0].status,'dismissed');
 });

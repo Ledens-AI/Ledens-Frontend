@@ -19,3 +19,14 @@ El despliegue normal aplica la migración 010 después de las 005/006 ya despleg
 La pantalla Pendiente de conciliación muestra exclusivamente movimientos bancarios sin enlaces Bridge, con enlaces en revisión o con diferencias entre su total firmado y las imputaciones confirmadas. Cada movimiento aparece una sola vez, con los números de documentos relacionados. Los materiales y conceptos se gestionan en Pendientes de asignación. Las vistas de registros financieros y documentos se conservan solo como consultas compatibles de API. Solo administrador puede consultar la bandeja global. Es una consulta de revisión; no crea ni confirma conciliaciones desde la pantalla.
 
 GET /api/finanzas/conciliacion: vista=registros|movimientos|documentos (por defecto movimientos), motivo=sin_documento|sin_bridge|revision|parcial, q, desde, hasta, pagina, tam (máximo 100). Respuesta: rows, total, page, pageSize. Cada fila incluye id,type,fecha,tercero,concepto,numerodocumento,referencia,importe,document_id,enlaces,conciliado,por_conciliar,motivos. Los importes mantienen el signo original; conciliado es el total confirmado del documento o movimiento, no un coste adicional. Los registros financieros comparten el estado de su documento. Las transferencias internas se excluyen de la vista bancaria. No se modifica el esquema ni el Bridge.
+
+## Efectivo
+
+Los pagos y cobros en efectivo no tienen banco detrás, así que viven en su propia tabla `ledens.cash_movements` (migración 016), no en `ledens.bank_movements`. Solo administrador. Mientras no se asignan aparecen en Pendiente de conciliación (vista movimientos) con `type=efectivo`, importe firmado como un movimiento (pago negativo, cobro positivo) y motivo `efectivo`.
+
+- POST /api/finanzas/conciliacion/efectivo `{kind: pago|cobro, amount, date, concept, counterparty?}` → 201.
+- POST /api/finanzas/conciliacion/efectivo/:id/asignar `{target: materiales|clientes, projectId?, description?}`: un pago crea una fila de `material_expenses` (total negativo, como la importación); un cobro crea una de `customer_payments` (`id_pago='Efectivo'`). Los triggers de 006 registran el `financial_record`; con proyecto se imputa con FinanceService, sin proyecto queda en Pendientes de asignación.
+- Un pago a trabajadores se envía con POST /conciliacion/pago-trabajadores, igual que un movimiento bancario: el lote de 013 lleva `cash_movement_id` y los pagos guardados no tienen `bank_movement_id`. Devolver el lote a conciliación libera el efectivo.
+- DELETE /api/finanzas/conciliacion/efectivo/:id solo mientras no está asignado.
+
+En rentabilidad, los registros aprobados que vienen de efectivo (`ledens.v_cash_records`) cuentan como cobro o pago de tesorería, porque ningún movimiento bancario ni enlace Bridge los cubrirá. Todas las operaciones quedan en Logs de transacciones (proceso «Efectivo»).

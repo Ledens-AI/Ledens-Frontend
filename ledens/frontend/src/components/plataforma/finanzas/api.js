@@ -48,6 +48,10 @@ export const api = {
   reconciliation: (f) => request('GET', '/api/finanzas/conciliacion' + qs(f)),
   // Pago a trabajadores (backend: FinanzasService.classifyWorkerPayments …).
   classifyWorkerPayments: (movementIds) => request('POST', '/api/finanzas/conciliacion/pago-trabajadores', { movementIds }),
+  // Efectivo (backend: FinanzasService.createCash …; admins only).
+  createCash: (body) => request('POST', '/api/finanzas/conciliacion/efectivo', body),
+  assignCash: (id, body) => request('POST', `/api/finanzas/conciliacion/efectivo/${id}/asignar`, body),
+  deleteCash: (id) => request('DELETE', `/api/finanzas/conciliacion/efectivo/${id}`),
   workerQueue: (f) => request('GET', '/api/finanzas/pendiente-trabajador' + qs(f)),
   employees: () => request('GET', '/api/finanzas/trabajadores'),
   // Proyectos (backend: finanzas/projects.js). Writes are admin-only server-side.
@@ -56,6 +60,7 @@ export const api = {
   projectOptions: () => request('GET', '/api/finanzas/gestion-proyectos/opciones'),
   createProject: (body) => request('POST', '/api/finanzas/gestion-proyectos', body),
   updateProject: (id, body) => request('PUT', `/api/finanzas/gestion-proyectos/${id}`, body),
+  // Logs de transacciones (backend: logs/runs.js; admins only).
   logs: (f) => request('GET', '/api/finanzas/logs' + qs(f)),
   logsSummary: () => request('GET', '/api/finanzas/logs/resumen'),
   // Trabajadores (backend: finanzas/workers.js). Writes are admin-only server-side.

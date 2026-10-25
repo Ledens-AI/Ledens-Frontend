@@ -13,7 +13,7 @@ before(async()=>{
  else {const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};}
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
  await db.exec('ALTER TABLE users ADD COLUMN name text');
- for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql'])await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
+ for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql'])await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
  const users=(await db.query("INSERT INTO users(email,role) VALUES('admin@ui.test','admin'),('jefe@ui.test','jefe') RETURNING id,role")).rows;[admin,jefe]=users;
  [p1,p2]=(await db.query("INSERT INTO ledens.projects(name,project_id) VALUES('Marbella','OBRA-001'),('Velez','OBRA-002') RETURNING id")).rows.map(x=>x.id);
  svc=new FinanzasService(pool,admin);

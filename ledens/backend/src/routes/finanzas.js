@@ -115,6 +115,20 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     res.json(await svc(req).classifyWorkerPayments({ movementIds: req.body?.movementIds }));
   }));
 
+  // Pagos y cobros en efectivo (admins). They wait in Pendiente de conciliación;
+  // a pago goes to trabajadores through /conciliacion/pago-trabajadores above.
+  router.post('/conciliacion/efectivo', traced('efectivo', 'Alta de efectivo', { summary: b=>({ message: `${b.kind==='pago'?'Pago':'Cobro'} de ${b.amount} €`, detail: { tipo: b.kind, importe: b.amount, fecha: b.fecha } }) })(async (req, res) => {
+    const b = req.body || {};
+    res.status(201).json(await svc(req).createCash({ kind: b.kind, amount: b.amount, date: b.date, concept: b.concept, counterparty: b.counterparty }));
+  }));
+  router.post('/conciliacion/efectivo/:id/asignar', traced('efectivo', 'Asignación de efectivo', { entity: (req) => ({ type: 'efectivo', id: req.params.id }), summary: b=>({ message: b.assigned==='materiales'?'Asignado a Pagos de materiales':'Asignado a Pagos de clientes', detail: { destino: b.assigned } }) })(async (req, res) => {
+    const b = req.body || {};
+    res.json(await svc(req).assignCash({ id: req.params.id, target: b.target, projectId: b.projectId || null, description: b.description }));
+  }));
+  router.delete('/conciliacion/efectivo/:id', traced('efectivo', 'Eliminación de efectivo', { entity: (req) => ({ type: 'efectivo', id: req.params.id }), summary: () => ({ message: 'Efectivo eliminado' }) })(async (req, res) => {
+    res.json(await svc(req).deleteCash(req.params.id));
+  }));
+
   router.get('/pendiente-trabajador', handle(async (req, res) => {
     res.json(await svc(req).workerQueue({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100) }));
   }));

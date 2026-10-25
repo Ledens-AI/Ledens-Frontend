@@ -43,7 +43,7 @@ export default function GestionFinanciera({ tab, go, toast, onPending, onBridgeP
   const pendingRef = useRef(onPending);
   pendingRef.current = onPending;
   const bridgeRef=useRef(onBridgePending);bridgeRef.current=onBridgePending;
-  const loadBridge=useCallback(()=>api.bridgeCounts().then(d=>bridgeRef.current?.(d.pending),()=>{}),[]);
+  const loadBridge=useCallback(()=>api.bridgeCounts().then(d=>bridgeRef.current?.(d.pending,d.reconciliation??d.pending),()=>{}),[]);
   const loadSummary = useCallback(() => api.summary().then(
     (s) => { setSummary(s); setSummaryError(''); pendingRef.current?.(s.pendientes); },
     (e) => setSummaryError(e.message),

@@ -16,7 +16,7 @@ Versión `amount-near-date-v3`: importe exacto con el mismo signo, fecha ±7 dí
 
 Se conservan las validaciones de confianza del 50 % en importe, fecha y sentido, EUR, estado COMPLETED, ausencia de comisión o cambio de moneda, y saldo disponible. Se incorpora TOPUP únicamente para cobros positivos; CARD_REFUND mantiene el requisito de rectificativa de anticipo validada. Las transferencias internas siguen excluidas. Las conciliaciones antiguas conservan su regla de origen y su monitorización.
 
-La migración incremental **016_bridge_amount_near_date.sql** vuelve a poner en cola los documentos de ingesta verificados pendientes sin enlaces. No crea conciliaciones durante la migración, no cambia documentos ni toca enlaces confirmados o casos descartados. No afecta a costes, ingresos, asignaciones a proyecto ni a los originales de SharePoint.
+La migración incremental **017_bridge_amount_near_date.sql** vuelve a poner en cola los documentos de ingesta verificados pendientes sin enlaces. No crea conciliaciones durante la migración, no cambia documentos ni toca enlaces confirmados o casos descartados. No afecta a costes, ingresos, asignaciones a proyecto ni a los originales de SharePoint.
 
 ## API y permisos
 
