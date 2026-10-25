@@ -125,3 +125,21 @@ test('HTTP: clients are refused and writes need the allowed origin',async()=>{
   const emps=await (await fetch(base+'/trabajadores')).json();assert.ok(emps.employees.some(e=>e.name==='Trabajador Uno'&&e.position==='Oficial 1ª'));
  }finally{server.close();}
 });
+
+test('segregated payroll is approved without a document, enters profitability and never exceeds its bank movement',async()=>{
+ const p3=(await db.query("INSERT INTO ledens.projects(name,project_id) VALUES('Nerja','OBRA-003') RETURNING id")).rows[0].id;
+ const m=await movement('-120.00',{date:'2026-09-10'});await asAdmin().classifyWorkerPayments({movementIds:[m]});
+ const lines=(await asAdmin().workerQueue()).rows.find(r=>r.bank_movement_id===m).lines;
+ await asAdmin().saveWorkerSplits({items:lines.map(l=>({splitId:l.id,employeeId:emp2,projectId:p3}))});
+ const recs=(await db.query('SELECT r.id,r.version FROM ledens.financial_records r JOIN ledens.worker_payments w ON w.id=r.worker_payment_id WHERE w.bank_movement_id=$1',[m])).rows;
+ assert.equal(recs.length,2);
+ const fin=asAdmin().finance;
+ const approve=(r,category='labor')=>fin.approve(admin,r.id,{version:r.version,category,status:'approved',currency:'EUR',net_amount:'60',vat_amount:'0',nondeductible_vat:'0',withholding_amount:'0',recognized_on:'2026-09-10',reason:'Nómina segregada del banco'});
+ await assert.rejects(approve(recs[0],'materials'),{status:409},'still only as labor');
+ for(const r of recs)assert.equal((await approve(r)).status,'approved');
+ assert.equal(Number((await fin.summary(admin,p3)).labor_cost),120,'the approved payroll counts in profitability');
+ // A third payment forged on the same movement would exceed it.
+ const w=(await db.query("INSERT INTO ledens.worker_payments(amount,occurred_on,bank_movement_id,empleado) VALUES(-60,'2026-09-10',$1,'Extra') RETURNING id",[m])).rows[0].id;
+ const extra=(await db.query('SELECT id,version FROM ledens.financial_records WHERE worker_payment_id=$1',[w])).rows[0];
+ await assert.rejects(approve(extra),{message:'bank_amount_exceeded'});
+});
