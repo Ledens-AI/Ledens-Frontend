@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import express from 'express';
 import pg from 'pg';
+import {storeInvoiceLines,extractLines} from '../src/finance/ingestion.js';
 import {FinanzasService,safeDocumentUrl} from '../src/finanzas/service.js';
 import {createFinanzasRouter} from '../src/routes/finanzas.js';
 let db,pool,svc,admin,jefe,p1,p2;
@@ -96,4 +97,11 @@ test('default reconciliation inbox contains only bank movements and deduplicates
  await db.query("INSERT INTO ledens.bank_document_allocations(document_id,bank_movement_id,allocated_amount,state) VALUES($1,$3,-40,'Confirmado'),($2,$3,-30,'Confirmado')",[d1,d2,bank]);
  const inbox=await svc.reconciliation({q:'BANK-ONLY'});assert.equal(inbox.total,1);assert.equal(inbox.rows.length,1);assert.equal(inbox.rows[0].type,'movimiento');assert.equal(Number(inbox.rows[0].por_conciliar),-30);assert.equal(inbox.rows[0].enlaces,2);assert.ok(inbox.rows[0].numerodocumento.includes('BANK-ONLY-A'));
  await db.query("UPDATE ledens.bank_document_allocations SET allocated_amount=-60 WHERE document_id=$1",[d2]);assert.equal((await svc.reconciliation({q:'BANK-ONLY'})).total,0);
+});
+
+
+test('pending invoice items expose their shared document number, line number, SKU and quantity',async()=>{
+ const d=(await db.query("INSERT INTO ledens.documents(total,tipo,numerodocumento,tercero) VALUES(-121,'Pagar','ITEMS-DOC-01','Proveedor') RETURNING id")).rows[0].id;
+ await svc.finance.transaction(c=>storeInvoiceLines(c,d,[{line_number:1,description:'Cemento',quantity:2,product_code:'CEM-01',net_amount:50,vat_amount:10.5},{line_number:2,description:'Pintura',quantity:1,product_code:'PIN-02',net_amount:50,vat_amount:10.5}],{direction:'Pagar',currency:'EUR'}));
+ const rows=(await svc.listRecords({pending:true,q:'ITEMS-DOC-01'})).rows;assert.equal(rows.length,2);assert.deepEqual(rows.map(r=>r.line_number).sort(),[1,2]);assert.ok(rows.every(r=>r.numerodocumento==='ITEMS-DOC-01'&&r.project_id===null));assert.equal(rows.find(r=>r.concepto==='Cemento').quantity,'2');assert.equal(rows.find(r=>r.concepto==='Pintura').product_code,'PIN-02');
 });

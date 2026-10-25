@@ -14,6 +14,7 @@ const EMPTY_FILTERS = { q: '', tipo: '', estado: '', proyecto: null, desde: '', 
  * Filtering, sorting and paging all happen on the server. */
 export default function RecordsView({ mode, summary, initialProject, onChanged, toast }) {
   const pending = mode === 'pendientes';
+  const showQuantity = ['pendientes','material','concepto'].includes(mode);
   const [filters, setFilters] = useState({ ...EMPTY_FILTERS, proyecto: initialProject || null });
   const [draftQ, setDraftQ] = useState('');
   const [sort, setSort] = useState({ by: 'fecha', dir: 'desc' });
@@ -268,10 +269,10 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
                   <th className="fin-col-check"><input type="checkbox" aria-label="Seleccionar todos los de esta página" checked={allOnPage} onChange={toggleAll} /></th>
                   {pending ? th('Tipo', 'tipo') : null}
                   {th('Fecha', 'fecha')}
-                  <th>Documento</th>
+                  <th>Nº de documento / línea</th>
                   {th(terceroLabel, 'tercero')}
                   {th('Concepto', 'concepto')}
-                  {mode === 'material' ? <th className="fin-num">Cantidad</th> : null}
+                  {showQuantity ? <th className="fin-num">Cantidad</th> : null}
                   {th('Importe', 'importe', 'fin-num')}
                   <th className="fin-col-project">Proyecto</th>
                   {th('Estado', 'estado')}
@@ -288,10 +289,10 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
                       <td className="fin-col-check"><input type="checkbox" aria-label="Seleccionar registro" checked={selected.has(k)} onChange={() => toggle(r)} /></td>
                       {pending ? <td><Badge {...TIPO[r.type]} icon={TIPO[r.type].icon}>{TIPO[r.type].label}</Badge></td> : null}
                       <td className="fin-nowrap">{fecha(r.fecha)}</td>
-                      <td className="fin-nowrap">{r.numerodocumento || (r.document_id ? 'Sin número' : <span className="fin-muted">Sin documento</span>)}</td>
+                      <td className="fin-nowrap">{r.numerodocumento || (r.document_id ? 'Sin número' : <span className="fin-muted">Sin documento</span>)}{r.line_number&&r.line_number<10000?<div className="fin-muted">Línea {r.line_number}{r.product_code?' · Ref. '+r.product_code:''}</div>:null}</td>
                       <td className="fin-ellipsis" title={r.tercero || ''}>{r.tercero || <span className="fin-muted">—</span>}</td>
                       <td className="fin-ellipsis is-wide" title={r.concepto || ''}>{r.concepto || <span className="fin-muted">—</span>}</td>
-                      {mode === 'material' ? <td className="fin-num fin-nowrap">{r.quantity != null ? `${num(r.quantity)} ${r.unidad || ''}` : '—'}</td> : null}
+                      {showQuantity ? <td className="fin-num fin-nowrap">{r.quantity != null ? `${num(r.quantity)} ${r.unidad || ''}` : '—'}</td> : null}
                       <td className="fin-num fin-nowrap"><strong>{eur(r.importe)}</strong></td>
                       <td className="fin-col-project">
                         {split ? (
