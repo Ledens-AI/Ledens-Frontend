@@ -107,3 +107,7 @@ PDF limits, authentication, OCR decisions and source/content replay. Existing au
 integration tests additionally require a real `DATABASE_URL` and otherwise skip.
 Test actual OCR, two identical arrivals and the final moved file in SharePoint
 before processing real invoices. No automatic bank allocation is implemented here.
+
+Store tickets (e.g. OBRAMAT in-store sales, «DUPLICADO»): page 1 is only a header, date and items are on page 2 and the totals on page 3 under «Total TTI (EUR)». `Total TTI`/`Total TTC` count as the invoice total («Total IVA» alone does not), and when the total is on page 3 behind a page 1 with under 300 characters of text, pages 2 and 3 are sent instead of 1 and 3.
+
+An explicit resend (Logic App resubmission or re-upload) of an invoice held in review reads it again when its reason came from the OCR reading (`invoice_direction_requires_review`, `invoice_date_requires_review`, `invoice_total_requires_review`, `invoice_currency_requires_review`, `invoice_fields_require_review`) and no bank movement is linked to its document; `f0_page_limit` too. Other reasons stay in review.
