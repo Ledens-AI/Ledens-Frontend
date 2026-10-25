@@ -235,3 +235,13 @@
 .fin-log-json { margin: 0; padding: 10px 12px; background: #fff; border: 1px solid #EDEDEA; border-radius: 8px; font-size: 12px; overflow-x: auto; max-height: 260px; }
 .fin-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #3A3A38; white-space: nowrap; }
 
+
+/* Efectivo (Pendiente de conciliación) */
+.fin-span-all { grid-column: 1 / -1; }
+.fin-seg { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.fin-choices { border: 0; padding: 0; margin: 0 0 16px; display: grid; gap: 8px; }
+.fin-choices legend { font-size: 13px; font-weight: 600; color: #3A3A38; margin-bottom: 6px; }
+.fin-choice { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid #E3E3DE; border-radius: 10px; cursor: pointer; }
+.fin-choice:has(input:checked) { border-color: #3E4D85; background: #F2F4FA; }
+.fin-choice input { margin-top: 3px; }
+.fin-cash-actions { display: flex; gap: 4px; align-items: center; white-space: nowrap; }

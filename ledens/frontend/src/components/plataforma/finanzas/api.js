@@ -43,6 +43,10 @@ export const api = {
   reconciliation: (f) => request('GET', '/api/finanzas/conciliacion' + qs(f)),
   // Pago a trabajadores (backend: FinanzasService.classifyWorkerPayments …).
   classifyWorkerPayments: (movementIds) => request('POST', '/api/finanzas/conciliacion/pago-trabajadores', { movementIds }),
+  // Efectivo (backend: FinanzasService.createCash …; admins only).
+  createCash: (body) => request('POST', '/api/finanzas/conciliacion/efectivo', body),
+  assignCash: (id, body) => request('POST', `/api/finanzas/conciliacion/efectivo/${id}/asignar`, body),
+  deleteCash: (id) => request('DELETE', `/api/finanzas/conciliacion/efectivo/${id}`),
   workerQueue: (f) => request('GET', '/api/finanzas/pendiente-trabajador' + qs(f)),
   employees: () => request('GET', '/api/finanzas/trabajadores'),
   // Proyectos (backend: finanzas/projects.js). Writes are admin-only server-side.

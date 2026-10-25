@@ -7,6 +7,11 @@ export class FinError extends FinanceError {constructor(status,message,extra){su
 export const isUuid=uuid;
 export const TYPES={material:{label:'Material'},trabajador:{label:'Trabajador'},cliente:{label:'Cliente'},concepto:{label:'Concepto de factura'}};
 export const STATES=['pendiente','asignado','parcial','revision'];
+// Unassigned cash (016) shares the «movimientos» inbox: signed like a bank movement.
+const CASH_CANDIDATES=` UNION ALL SELECT k.id,'efectivo',k.occurred_on,k.counterparty,k.concept,NULL,'Efectivo',
+  CASE WHEN k.kind='pago' THEN -k.amount ELSE k.amount END,NULL::uuid,0,'0',ARRAY['efectivo'],true
+  FROM ledens.cash_movements k WHERE k.assigned_to IS NULL AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=k.id)`;
+const CASH_TARGETS={trabajadores:'pago',materiales:'pago',clientes:'cobro'};
 const SCOPE=`($1 OR (NOT EXISTS(SELECT 1 FROM ledens.project_financial_allocations ax WHERE ax.record_id=f.id AND NOT EXISTS
  (SELECT 1 FROM ledens.finance_project_permissions fp WHERE fp.user_id=$2 AND fp.project_id=ax.project_id)) AND
  (EXISTS(SELECT 1 FROM ledens.project_financial_allocations ax WHERE ax.record_id=f.id) OR
@@ -144,7 +149,7 @@ export class FinanzasService {
  async reconciliation({view='movimientos',page=1,pageSize=25,q='',reason='',from='',to=''}={}){
   if(this.user.role!=='admin')throw new FinError(403,'La conciliación global requiere administrador');
   if(!['registros','movimientos','documentos'].includes(view))throw new FinError(400,'Vista no válida');
-  if(reason&&!['sin_documento','sin_bridge','revision','parcial'].includes(reason))throw new FinError(400,'Motivo no válido');
+  if(reason&&!['sin_documento','sin_bridge','revision','parcial','efectivo'].includes(reason))throw new FinError(400,'Motivo no válido');
   const size=Math.min(100,Math.max(1,Number(pageSize)||25)),p=Math.max(1,Math.min(4000,Number(page)||1));
   if(!Number.isInteger(size)||!Number.isInteger(p))throw new FinError(400,'Paginación no válida');
   const params=[...this.params(),'%'+q+'%'];const where=['$1::boolean AND $2::uuid IS NOT NULL','pendiente',"concat_ws(' ',tercero,concepto,numerodocumento,referencia) ILIKE $3"];
@@ -164,7 +169,7 @@ export class FinanzasService {
   else {const bank=view==='movimientos';base='WITH '+bridge+`, candidates AS(SELECT x.id,'`+(bank?'movimiento':'documento')+`'::text type,`+(bank?'x.completed_on':'x.document_on')+` fecha,`+(bank?"coalesce(x.beneficiary_name,x.payer)":"x.tercero")+` tercero,`+(bank?'x.description':"to_jsonb(x)->>'descripcion'")+` concepto,`+(bank?'a.documentos':'x.numerodocumento')+` numerodocumento,`+(bank?'x.source_id':'x.id::text')+` referencia,`+(bank?'x.total_amount':'x.total')+` importe,`+(bank?'NULL::uuid':'x.id')+` document_id,coalesce(a.enlaces,0) enlaces,coalesce(a.confirmado,0)::text conciliado,
     array_remove(ARRAY[CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_bridge' END,`+(bank?"CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_documento' END,":"")+`CASE WHEN a.revision>0 THEN 'revision' END,CASE WHEN a.enlaces>0 AND coalesce(a.confirmado,0)<>`+(bank?'x.total_amount':'x.total')+` THEN 'parcial' END],NULL) motivos,
     (coalesce(a.enlaces,0)=0 OR a.revision>0 OR coalesce(a.confirmado,0)<>`+(bank?'x.total_amount':'x.total')+`) pendiente
-    FROM ledens.`+(bank?'bank_movements':'documents')+` x LEFT JOIN `+(bank?'bridge_bank a ON a.bank_movement_id':'bridge_doc a ON a.document_id')+`=x.id `+(bank?'WHERE NOT coalesce(x.is_internal_transfer,false) AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=x.id)':'WHERE '+hideCovered)+`)`;}
+    FROM ledens.`+(bank?'bank_movements':'documents')+` x LEFT JOIN `+(bank?'bridge_bank a ON a.bank_movement_id':'bridge_doc a ON a.document_id')+`=x.id `+(bank?'WHERE NOT coalesce(x.is_internal_transfer,false) AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=x.id)'+CASH_CANDIDATES:'WHERE '+hideCovered)+`)`;}
   const filtered=base+' SELECT *, (importe-coalesce(conciliado::numeric,0))::text por_conciliar FROM candidates WHERE '+where.join(' AND ');
   const rows=(await this.query(filtered+' ORDER BY fecha DESC NULLS LAST,id LIMIT '+size+' OFFSET '+((p-1)*size),params)).rows;
   const total=(await this.query('SELECT count(*)::int n FROM ('+filtered+') matching',params)).rows[0].n;
@@ -190,7 +195,7 @@ export class FinanzasService {
  }
  async classifyOne(c,id){
   const m=(await c.query('SELECT id,source_id,total_amount,currency,completed_on,is_internal_transfer FROM ledens.bank_movements WHERE id=$1 FOR UPDATE',[id])).rows[0];
-  if(!m)throw new FinError(404,'Movimiento no encontrado');
+  if(!m)return this.classifyCash(c,id);
   if(m.is_internal_transfer)throw new FinError(409,'Es un traspaso interno');
   if(m.currency&&m.currency!=='EUR')throw new FinError(409,'Solo movimientos en euros');
   const total=cents(m.total_amount);
@@ -201,8 +206,83 @@ export class FinanzasService {
   const plan=splitWorkerPayment(-total);
   const b=(await c.query(`INSERT INTO ledens.worker_payment_batches(bank_movement_id,role,unit_amount,total_amount,occurred_on,created_by)
    VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,[id,plan.role,decimal(plan.unit),decimal(-total),m.completed_on,this.user.id])).rows[0];
-  for(const [i,amount] of plan.lines.entries())await c.query('INSERT INTO ledens.worker_payment_splits(batch_id,line_number,amount,role) VALUES($1,$2,$3,$4)',[b.id,i+1,decimal(amount),plan.role]);
-  return {batchId:b.id,role:plan.role,lines:plan.lines.length};
+  return this.splitBatch(c,b.id,plan);
+ }
+ async splitBatch(c,batchId,plan){
+  for(const [i,amount] of plan.lines.entries())await c.query('INSERT INTO ledens.worker_payment_splits(batch_id,line_number,amount,role) VALUES($1,$2,$3,$4)',[batchId,i+1,decimal(amount),plan.role]);
+  return {batchId,role:plan.role,lines:plan.lines.length};
+ }
+ // A cash payment sent to «Pago a trabajadores»: same split as a bank movement.
+ async classifyCash(c,id){
+  const k=(await this.cashForUpdate(c,id));
+  if(k.kind!=='pago')throw new FinError(409,'Solo se segregan pagos salientes');
+  const plan=splitWorkerPayment(cents(k.amount));
+  await c.query("UPDATE ledens.cash_movements SET assigned_to='trabajadores',assigned_by=$2,assigned_at=now() WHERE id=$1",[id,this.user.id]);
+  const b=(await c.query(`INSERT INTO ledens.worker_payment_batches(cash_movement_id,role,unit_amount,total_amount,occurred_on,created_by)
+   VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,[id,plan.role,decimal(plan.unit),k.amount,k.occurred_on,this.user.id])).rows[0];
+  return this.splitBatch(c,b.id,plan);
+ }
+ // ------------------------------------------------------------- efectivo
+ // Pagos y cobros en efectivo (016), admin only like the inbox they live in.
+ async cashForUpdate(c,id){
+  if(!uuid(id))throw new FinError(404,'Movimiento no encontrado');
+  const k=(await c.query('SELECT id,kind,amount::text amount,occurred_on::text occurred_on,concept,counterparty,assigned_to FROM ledens.cash_movements WHERE id=$1 FOR UPDATE',[id])).rows[0];
+  if(!k)throw new FinError(404,'Movimiento no encontrado');
+  if(k.assigned_to)throw new FinError(409,'Este efectivo ya está asignado');
+  return k;
+ }
+ cashAdmin(){if(this.user.role!=='admin')throw new FinError(403,'El efectivo requiere administrador');}
+ async createCash(body={}){
+  this.cashAdmin();
+  const kind=body.kind,amount=cents(body.amount),concept=String(body.concept??'').trim(),counterparty=String(body.counterparty??'').trim()||null;
+  if(!['pago','cobro'].includes(kind))throw new FinError(400,'Indica si es un pago o un cobro');
+  if(amount===null||amount<=0n)throw new FinError(400,'El importe debe ser positivo y con 2 decimales como máximo');
+  if(amount>100000000n)throw new FinError(400,'El importe es demasiado alto para efectivo');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(body.date||'')||!Number.isFinite(Date.parse(body.date)))throw new FinError(400,'Fecha no válida');
+  if(!concept||concept.length>300)throw new FinError(400,'El concepto es obligatorio (máximo 300 caracteres)');
+  if(counterparty&&counterparty.length>200)throw new FinError(400,'El tercero admite 200 caracteres como máximo');
+  return (await this.pool.query(`INSERT INTO ledens.cash_movements(kind,amount,occurred_on,concept,counterparty,created_by)
+   VALUES($1,$2,$3,$4,$5,$6) RETURNING id,kind,amount::text,occurred_on::text fecha,concept,counterparty`,[kind,decimal(amount),body.date,concept,counterparty,this.user.id])).rows[0];
+ }
+ // Only while unassigned: a mistyped entry is removed, not kept as a fake movement.
+ async deleteCash(id){
+  this.cashAdmin();
+  return this.finance.transaction(async c=>{
+   await this.cashForUpdate(c,id);
+   if((await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE cash_movement_id=$1',[id])).rows.length)throw new FinError(409,'Este efectivo ya está en Pendiente de trabajador');
+   await c.query('DELETE FROM ledens.cash_movements WHERE id=$1',[id]);return {deleted:true};
+  });
+ }
+ // Pago → «Pagos de materiales» or cobro → «Pagos de clientes». The source row is
+ // signed like the accounting import (a material cost is negative there); 006's
+ // trigger registers it, and a project, if given, is allocated through the engine.
+ async assignCash({id,target,projectId,description}={}){
+  this.cashAdmin();
+  if(!['materiales','clientes'].includes(target))throw new FinError(400,'Destino no válido');
+  if(projectId&&!uuid(projectId))throw new FinError(400,'Obra no válida');
+  const text=String(description??'').trim();
+  if(text.length>300)throw new FinError(400,'La descripción admite 300 caracteres como máximo');
+  return this.finance.transaction(async c=>{
+   const k=await this.cashForUpdate(c,id);
+   if(CASH_TARGETS[target]!==k.kind)throw new FinError(409,target==='clientes'?'Solo un cobro puede ir a Pagos de clientes':'Solo un pago puede ir a Pagos de materiales');
+   if(projectId&&!(await c.query('SELECT 1 FROM ledens.projects WHERE id=$1',[projectId])).rows.length)throw new FinError(400,'Obra no encontrada');
+   let source;
+   if(target==='materiales'){
+    const m=(await c.query(`INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on)
+     VALUES('ud',$1,1,$2,$2,$3) RETURNING id`,[text||k.concept,decimal(-cents(k.amount)),k.occurred_on])).rows[0];
+    await c.query("UPDATE ledens.cash_movements SET assigned_to='materiales',material_id=$2,assigned_by=$3,assigned_at=now() WHERE id=$1",[id,m.id,this.user.id]);
+    source=(await c.query('SELECT id,version,gross_amount FROM ledens.financial_records WHERE material_id=$1',[m.id])).rows[0];
+   }else{
+    const p=(await c.query(`INSERT INTO ledens.customer_payments(occurred_on,id_pago,cliente,total)
+     VALUES($1,'Efectivo',$2,$3) RETURNING id`,[k.occurred_on,k.counterparty,k.amount])).rows[0];
+    await c.query("UPDATE ledens.cash_movements SET assigned_to='clientes',customer_payment_id=$2,assigned_by=$3,assigned_at=now() WHERE id=$1",[id,p.id,this.user.id]);
+    source=(await c.query('SELECT id,version,gross_amount FROM ledens.financial_records WHERE customer_payment_id=$1',[p.id])).rows[0];
+   }
+   if(!source)throw new FinError(503,'No se pudo registrar el efectivo en la contabilidad');
+   if(projectId)await this.finance.replace(c,this.user,{record_id:source.id,version:source.version,allocations:[{project_id:projectId,amount:source.gross_amount}]},
+    `${k.kind==='pago'?'Pago':'Cobro'} en efectivo del ${k.occurred_on}`);
+   return {assigned:target,recordId:source.id};
+  });
  }
  // The pending lines are unassigned money: admins, or whoever an admin gave the
  // global «bandeja de pendientes» grant (same rule as unassigned records).
@@ -215,16 +295,16 @@ export class FinanzasService {
   await this.workerQueueAccess();
   const size=Math.min(50,Math.max(1,Number(pageSize)||20)),p=Math.max(1,Math.min(4000,Number(page)||1));
   const where=`EXISTS(SELECT 1 FROM ledens.worker_payment_splits s WHERE s.batch_id=b.id AND s.worker_payment_id IS NULL)
-   AND concat_ws(' ',m.beneficiary_name,m.payer,m.description,m.reference,m.source_id) ILIKE $1`;
-  const rows=(await this.query(`SELECT b.id,b.role,b.unit_amount,b.total_amount,b.occurred_on fecha,m.id bank_movement_id,m.source_id,
-    coalesce(m.beneficiary_name,m.payer) tercero,m.description concepto,
+   AND concat_ws(' ',m.beneficiary_name,m.payer,m.description,m.reference,m.source_id,k.concept,k.counterparty) ILIKE $1`;
+  const rows=(await this.query(`SELECT b.id,b.role,b.unit_amount,b.total_amount,b.occurred_on fecha,m.id bank_movement_id,b.cash_movement_id,coalesce(m.source_id,'Efectivo') source_id,
+    coalesce(m.beneficiary_name,m.payer,k.counterparty) tercero,coalesce(m.description,k.concept) concepto,
     (SELECT json_agg(json_build_object('id',s.id,'line',s.line_number,'amount',s.amount::text,'role',s.role) ORDER BY s.line_number)
       FROM ledens.worker_payment_splits s WHERE s.batch_id=b.id AND s.worker_payment_id IS NULL) lines,
     (SELECT count(*)::int FROM ledens.worker_payment_splits s WHERE s.batch_id=b.id AND s.worker_payment_id IS NOT NULL) saved
-   FROM ledens.worker_payment_batches b JOIN ledens.bank_movements m ON m.id=b.bank_movement_id
+   FROM ledens.worker_payment_batches b LEFT JOIN ledens.bank_movements m ON m.id=b.bank_movement_id LEFT JOIN ledens.cash_movements k ON k.id=b.cash_movement_id
    WHERE ${where} ORDER BY b.occurred_on DESC NULLS LAST,b.id LIMIT ${size} OFFSET ${(p-1)*size}`,['%'+q+'%'])).rows;
   const t=(await this.query(`SELECT count(*)::int batches,coalesce(sum((SELECT count(*) FROM ledens.worker_payment_splits s WHERE s.batch_id=b.id AND s.worker_payment_id IS NULL)),0)::int lines
-   FROM ledens.worker_payment_batches b JOIN ledens.bank_movements m ON m.id=b.bank_movement_id WHERE ${where}`,['%'+q+'%'])).rows[0];
+   FROM ledens.worker_payment_batches b LEFT JOIN ledens.bank_movements m ON m.id=b.bank_movement_id LEFT JOIN ledens.cash_movements k ON k.id=b.cash_movement_id WHERE ${where}`,['%'+q+'%'])).rows[0];
   return {rows,total:t.batches,lines:t.lines,page:p,pageSize:size};
  }
  async employees(){
@@ -245,8 +325,8 @@ export class FinanzasService {
    for(const [i,it] of items.entries()){
     await c.query(`SAVEPOINT s${i}`);
     try{
-     const s=(await c.query(`SELECT s.*,b.bank_movement_id,b.occurred_on,m.source_id FROM ledens.worker_payment_splits s
-      JOIN ledens.worker_payment_batches b ON b.id=s.batch_id JOIN ledens.bank_movements m ON m.id=b.bank_movement_id WHERE s.id=$1 FOR UPDATE OF s`,[it.splitId])).rows[0];
+     const s=(await c.query(`SELECT s.*,b.bank_movement_id,b.cash_movement_id,b.occurred_on,m.source_id FROM ledens.worker_payment_splits s
+      JOIN ledens.worker_payment_batches b ON b.id=s.batch_id LEFT JOIN ledens.bank_movements m ON m.id=b.bank_movement_id WHERE s.id=$1 FOR UPDATE OF s`,[it.splitId])).rows[0];
      if(!s)throw new FinError(404,'Pago no encontrado');
      if(s.worker_payment_id)throw new FinError(409,'Este pago ya está guardado');
      const e=(await c.query('SELECT id,name FROM ledens.employees WHERE id=$1',[it.employeeId])).rows[0];
@@ -256,7 +336,7 @@ export class FinanzasService {
      const rec=(await c.query('SELECT id,version,gross_amount FROM ledens.financial_records WHERE worker_payment_id=$1',[w.id])).rows[0];
      if(!rec)throw new FinError(503,'No se pudo registrar el pago en la contabilidad');
      await this.finance.replace(c,this.user,{record_id:rec.id,version:rec.version,allocations:[{project_id:it.projectId,amount:rec.gross_amount}]},
-      `Pago a ${s.role==='oficial'?'oficial':'ayudante'} segregado del movimiento ${s.source_id}`);
+      `Pago a ${s.role==='oficial'?'oficial':'ayudante'} segregado ${s.cash_movement_id?'de un pago en efectivo':'del movimiento '+s.source_id}`);
      await c.query('UPDATE ledens.worker_payment_splits SET worker_payment_id=$2,saved_by=$3,saved_at=now() WHERE id=$1',[s.id,w.id,this.user.id]);
      await c.query(`RELEASE SAVEPOINT s${i}`);results.push({splitId:it.splitId,ok:true,workerPaymentId:w.id});
     }catch(err){await c.query(`ROLLBACK TO SAVEPOINT s${i}`);if(!(err instanceof FinanceError))throw err;results.push({splitId:it.splitId,ok:false,error:err.message});}
@@ -273,6 +353,8 @@ export class FinanzasService {
    if(!b)throw new FinError(404,'Movimiento no encontrado');
    if((await c.query('SELECT 1 FROM ledens.worker_payment_splits WHERE batch_id=$1 AND worker_payment_id IS NOT NULL LIMIT 1',[batchId])).rows.length)
     throw new FinError(409,'Ya hay pagos guardados de este movimiento; no se puede devolver');
+   await c.query(`UPDATE ledens.cash_movements SET assigned_to=NULL,assigned_by=NULL,assigned_at=NULL
+    WHERE id=(SELECT cash_movement_id FROM ledens.worker_payment_batches WHERE id=$1)`,[batchId]);
    await c.query('DELETE FROM ledens.worker_payment_batches WHERE id=$1',[batchId]);return {returned:true};
   });
  }
