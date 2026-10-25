@@ -128,3 +128,37 @@ test('a PDF held as f0_page_limit is analysed when it arrives again, also re-upl
     assert.deepEqual(await widths(sent.at(-1)),[101]);
   }
 });
+test('a supplier invoice without our tax id is to pay when the seller has a valid other tax id; ambiguous cases stay in review',async()=>{
+  const {archiveIssue}=await import('../src/ingestion/completeness.js');
+  const inv=(fields)=>({analyzeResult:{documents:[{fields:{InvoiceDate:{valueDate:'2026-10-20',confidence:.99},InvoiceId:{valueString:'FT-1',confidence:.95},
+    InvoiceTotal:{valueCurrency:{amount:15.25,currencyCode:'EUR'},confidence:.98},SubTotal:{valueCurrency:{amount:12.6}},TotalTax:{valueCurrency:{amount:2.65}},...fields}}]}});
+  const issue=(x)=>archiveIssue({document_on:x.date,total:x.total,tipo:x.direction,invoice_currency:x.currency,date_confidence:x.confidence,total_confidence:x.totalConfidence,direction_confidence:x.directionConfidence});
+  const telecom=extractInvoice(inv({VendorTaxId:{valueString:'ES A82009812',confidence:.95},VendorName:{valueString:'Operador Telecom SA',confidence:.9}}));
+  assert.deepEqual([telecom.direction,telecom.total,telecom.subtotal,telecom.directionConfidence,telecom.taxId],['Pagar',-15.25,-12.6,.95,'ES A82009812']);
+  assert.equal(issue(telecom),null,'accepted and processed');
+  // The seller's tax id is what makes it a supplier invoice: without it, or with a doubtful one, review.
+  assert.equal(issue(extractInvoice(inv({VendorName:{valueString:'Sin NIF',confidence:.9}}))),'invoice_direction_requires_review');
+  assert.equal(issue(extractInvoice(inv({VendorTaxId:{valueString:'A82009812',confidence:.3}}))),'invoice_fields_require_review');
+  assert.equal(extractInvoice(inv({VendorTaxId:{valueString:'123',confidence:.95}})).direction,null,'not a tax id');
+  // Existing rules are unchanged.
+  assert.equal(extractInvoice(inv({VendorTaxId:{valueString:'B19753805',confidence:.95}})).direction,'Cobrar');
+  assert.equal(extractInvoice(inv({VendorTaxId:{valueString:'A82009812',confidence:.95},CustomerTaxId:{valueString:'B19753805',confidence:.9}})).directionConfidence,.9);
+  assert.equal(extractInvoice(inv({VendorTaxId:{valueString:'B19753805',confidence:.95},CustomerTaxId:{valueString:'B19753805',confidence:.9}})).direction,null,'ours on both sides');
+});
+test('a supplier invoice held on direction is analysed again when it arrives again, unless it already has bank links',async()=>{
+  const sent=[];const svc=new IngestionService({connect:async()=>({query:(q,p)=>db.query(q,p),release(){}})},{...ocr,start:async(content)=>{sent.push(content);return ocr.start();}},config);
+  const hold=async(id)=>{const pdf=await PDFDocument.create();pdf.addPage([300+sent.length+id.length,100]);const content_base64=Buffer.from(await pdf.save()).toString('base64');
+    const row=await svc.receive(await validateInvoice(payload(id,{content_base64}),config));
+    await db.query("UPDATE ledens.invoice_ingestions SET status='review',reason='invoice_direction_requires_review',content=NULL WHERE id=$1",[row.ingestion_id]);
+    return {row,content_base64};};
+  const a=await hold('dir-a');
+  const back=await svc.receive(await validateInvoice(payload('dir-a-again',{content_base64:a.content_base64,filename:'otra.pdf'}),config));
+  assert.deepEqual([back.status,back.reason,back.duplicate],['received',null,false]);
+  assert.equal((await svc.process(back.ingestion_id)).status,'analyzing');
+  // Already linked to a bank movement: not reopened.
+  const b=await hold('dir-b');
+  await db.exec('CREATE TABLE IF NOT EXISTS ledens.bank_document_allocations(document_id uuid)');
+  await db.query('INSERT INTO ledens.bank_document_allocations(document_id) VALUES($1)',[b.row.document_id]);
+  const again=await svc.receive(await validateInvoice(payload('dir-b-again',{content_base64:b.content_base64,filename:'otra-b.pdf'}),config));
+  assert.deepEqual([again.status,again.reason,again.duplicate],['review','invoice_direction_requires_review',true]);
+});

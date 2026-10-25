@@ -56,7 +56,14 @@ export function extractInvoice(result, {businessTaxId=process.env.BRIDGE_BUSINES
   const own=taxId(businessTaxId);
   const sellerOwn=taxId(text('VendorTaxId'))===own;
   const buyerOwn=taxId(text('CustomerTaxId'))===own;
-  const direction=sellerOwn===buyerOwn?null:sellerOwn?'Cobrar':'Pagar';
+  // Our tax id as seller → Cobrar; as buyer → Pagar. A supplier invoice where the
+  // OCR does not find ours (utilities, telecoms…) is still Pagar when the seller
+  // has a valid tax id that is not ours; its confidence is the direction's.
+  // Ours on both sides stays ambiguous.
+  const vendorTax=taxId(text('VendorTaxId'));
+  const supplier=!sellerOwn&&!buyerOwn&&vendorTax.length>=8&&vendorTax!==own;
+  const direction=supplier?'Pagar':sellerOwn===buyerOwn?null:sellerOwn?'Cobrar':'Pagar';
+  const directionField=sellerOwn||supplier?'VendorTaxId':'CustomerTaxId';
   const party=direction==='Cobrar'?'Customer':'Vendor';
   const multiplier=direction==='Pagar'?-1:1;
   const signed=name=>money(name)==null?null:multiplier*money(name);
@@ -65,5 +72,5 @@ export function extractInvoice(result, {businessTaxId=process.env.BRIDGE_BUSINES
     direction,currency:f.InvoiceTotal?.valueCurrency?.currencyCode||null,
     totalConfidence:f.InvoiceTotal?.confidence||0,numberConfidence:f.InvoiceId?.confidence||0,
     partyConfidence:f[party+'Name']?.confidence||0,taxIdConfidence:f[party+'TaxId']?.confidence||0,partyEvidence:partyNameEvidence(result,party),
-    directionConfidence:direction&&money('InvoiceTotal')>0?(f[sellerOwn?'VendorTaxId':'CustomerTaxId']?.confidence||0):0 };
+    directionConfidence:direction&&money('InvoiceTotal')>0?(f[directionField]?.confidence||0):0 };
 }
