@@ -1,8 +1,8 @@
 import {createHash} from 'node:crypto';
 
 export const INVOICE_MIN_CONFIDENCE=0.5;
-export const RULE_VERSION='party-amount-date-v2';
-export const OWNED_RULE_VERSIONS=['exact-reference-party-v1',RULE_VERSION];
+export const RULE_VERSION='amount-near-date-v3';
+export const OWNED_RULE_VERSIONS=['exact-reference-party-v1','party-amount-date-v2',RULE_VERSION];
 export const NEAR_DATE_DAYS=7;
 export const LOCK_ID=727032;
 export const normalize=s=>String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();
@@ -61,15 +61,16 @@ export function bankMatchRule(doc,bank){
   if(dt===null||dt===0n||amount===null||total===null||dt!==amount||dt!==total)return false;
   if(bank.state!=='COMPLETED'||bank.currency!=='EUR'||bank.is_internal_transfer===true)return false;
   const verifiedRefund=bank.type==='CARD_REFUND'&&dt>0n&&doc.tipo==='Cobrar'&&doc.purchase_proof?.kind==='advance_refund'&&nativePurchaseVerified(doc);
-  if(!['TRANSFER','CARD_PAYMENT','CHARGE'].includes(bank.type)&&!verifiedRefund)return false;
+  const incomingTopup=bank.type==='TOPUP'&&dt>0n&&doc.tipo==='Cobrar';
+  if(!['TRANSFER','CARD_PAYMENT','CHARGE'].includes(bank.type)&&!verifiedRefund&&!incomingTopup)return false;
   if(bank.type==='TRANSFER'&&bank.is_internal_transfer!==false)return false;
   if(bank.bank_fee!=null&&cents(bank.bank_fee)!==0n)return false;
   if(bank.bill_currency&&bank.bill_currency!==bank.currency)return false;
   if(bank.bill_amount!=null&&abs(cents(bank.bill_amount)??0n)!==abs(amount))return false;
   const a=day(doc.document_on),b=day(bank.completed_on);
-  if(a===null||b===null||!hasParty(doc,bank,{verified:true}))return false;
-  if((nativePurchaseVerified(doc)||(Number(doc.number_confidence)>=INVOICE_MIN_CONFIDENCE&&Number(doc.number_confidence)<=1))&&b>=a-7&&b<=a+90&&hasReference(doc.numerodocumento,bank))return 'exact_reference';
-  return Math.abs(b-a)<=NEAR_DATE_DAYS?'party_amount_near_date':false;
+  if(a===null||b===null)return false;
+  if(hasParty(doc,bank,{verified:true})&&(nativePurchaseVerified(doc)||(Number(doc.number_confidence)>=INVOICE_MIN_CONFIDENCE&&Number(doc.number_confidence)<=1))&&b>=a-7&&b<=a+90&&hasReference(doc.numerodocumento,bank))return 'exact_reference';
+  return Math.abs(b-a)<=NEAR_DATE_DAYS?'amount_near_date':false;
 }
 
 export const eligibleBank=(doc,bank)=>Boolean(bankMatchRule(doc,bank));

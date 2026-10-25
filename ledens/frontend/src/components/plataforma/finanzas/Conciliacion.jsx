@@ -6,7 +6,7 @@ const MOTIVOS = {sin_documento:'Sin documento',sin_bridge:'Sin registros en el B
 const TIPOS = {material:'Material',trabajador:'Trabajador',cliente:'Cliente',concepto:'Concepto de factura',movimiento:'Movimiento bancario',documento:'Documento'};
 // Only outgoing bank movements can be sent to «Pago a trabajadores».
 const payable=(r)=>r.type==='movimiento'&&Number(r.importe)<0;
-export default function Conciliacion({ toast }) {
+export default function Conciliacion({ toast,go,onChanged }) {
   const vista='movimientos';
   const [q,setQ]=useState(''),[query,setQuery]=useState('');
   const [motivo,setMotivo]=useState(''),[desde,setDesde]=useState(''),[hasta,setHasta]=useState('');
@@ -34,6 +34,7 @@ export default function Conciliacion({ toast }) {
       setSelected(new Set(res.results.filter(r=>!r.ok).map(r=>r.id)));
       setFailures(res.results.filter(r=>!r.ok));
       if(moved.size)toast?.(moved.size===1?'Movimiento enviado a Pendiente de trabajador.':moved.size+' movimientos enviados a Pendiente de trabajador.');
+      if(moved.size)onChanged?.();
     }catch(e){toast?.(e.message);}finally{setMoving(false);}
   };
   return <div className="fin-stack">
@@ -43,6 +44,7 @@ export default function Conciliacion({ toast }) {
       <label className="fin-field"><span>Desde</span><input type="date" value={desde} onChange={filter(setDesde)} /></label>
       <label className="fin-field"><span>Hasta</span><input type="date" value={hasta} onChange={filter(setHasta)} /></label>
       <button className="fin-btn" type="button" onClick={()=>setReload(n=>n+1)}>Actualizar</button>
+      <button className="fin-btn is-primary" type="button" onClick={()=>go?.('pendiente-bridge')}>Resolver Bridge</button>
     </div>
     {selected.size?<div className="fin-bulkbar" role="region" aria-label="Acciones sobre la selección">
       <strong>{selected.size===1?'1 movimiento seleccionado':selected.size+' movimientos seleccionados'}</strong>

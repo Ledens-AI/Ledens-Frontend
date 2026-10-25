@@ -31,6 +31,11 @@ const qs = (params) => {
 };
 
 export const api = {
+  bridgeCounts: () => request('GET', '/api/bridge/workspace/counts'),
+  bridgeMovements: (f) => request('GET', '/api/bridge/workspace/movements' + qs(f)),
+  bridgeAllocations: (f) => request('GET', '/api/bridge/workspace/allocations' + qs(f)),
+  bridgeDocuments: (id,f) => request('GET', `/api/bridge/workspace/movements/${id}/documents` + qs(f)),
+  bridgeConfirm: (id,body) => request('POST', `/api/bridge/${id}/confirm`, body),
   projects: (q) => request('GET', '/api/finanzas/proyectos' + qs({ q, limit: 30 })),
   summary: () => request('GET', '/api/finanzas/resumen'),
   records: (f) => request('GET', '/api/finanzas/registros' + qs(f)),
@@ -51,7 +56,6 @@ export const api = {
   projectOptions: () => request('GET', '/api/finanzas/gestion-proyectos/opciones'),
   createProject: (body) => request('POST', '/api/finanzas/gestion-proyectos', body),
   updateProject: (id, body) => request('PUT', `/api/finanzas/gestion-proyectos/${id}`, body),
-  // Logs de transacciones (backend: logs/runs.js; admins only).
   logs: (f) => request('GET', '/api/finanzas/logs' + qs(f)),
   logsSummary: () => request('GET', '/api/finanzas/logs/resumen'),
   // Trabajadores (backend: finanzas/workers.js). Writes are admin-only server-side.

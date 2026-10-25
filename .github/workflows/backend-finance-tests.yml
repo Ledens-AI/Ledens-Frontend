@@ -66,6 +66,10 @@ jobs:
         env:
           PURCHASE_TEST_DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_purchase_test
         run: node --test test/purchases.test.js
+      - name: Manual Bridge workspace on PostgreSQL 16
+        env:
+          BRIDGE_WORKSPACE_TEST_DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_bridge_workspace_test
+        run: node --test test/bridge-workspace.test.js
       - name: Frontend dependency installation
         working-directory: ledens/frontend
         run: npm ci
