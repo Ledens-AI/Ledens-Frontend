@@ -50,6 +50,7 @@ export function createFinanceRouter({service,authorize=requireAuth,origin=proces
     records:[{record_id:r.id,version:b.version,allocations:b.project_id===null?[]:[{project_id:b.project_id,amount:r.gross_amount}]}]}));
  }));
  router.patch('/finance/records/:id/recognition',traced('validacion','Validación contable',{entity:req=>({type:'registro',id:req.params.id}),summary:b=>({message:'Estado contable: '+b.status,detail:{estado:b.status,categoria:b.category}})})(async(req,res)=>res.json(await get().approve(req.user,req.params.id,req.body||{}))));
+ router.get('/finance/documents/:id/purchase-settlement',handle(async(req,res)=>res.json(await get().purchase(req.user,req.params.id))));
  router.get('/finance/documents/:id/lines',handle(async(req,res)=>{const p=pagination(req);res.json(page(await get().lines(req.user,req.params.id,p),p));}));
  router.post('/finance/documents/:id/lines',traced('ingesta','Alta de línea de factura',{entity:req=>({type:'documento',id:req.params.id})})(async(req,res)=>res.status(201).json(await get().createLine(req.user,req.params.id,req.body||{}))));
  router.put('/finance/budget-versions/:id/basis',traced('validacion','Verificación de presupuesto',{entity:req=>({type:'version_presupuesto',id:req.params.id})})(async(req,res)=>res.json(await get().verifyBudget(req.user,req.params.id,req.body||{}))));

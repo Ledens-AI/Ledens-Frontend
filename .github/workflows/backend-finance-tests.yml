@@ -62,6 +62,10 @@ jobs:
         env:
           BRIDGE_TEST_DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_bridge_test
         run: node --test test/bridge.test.js
+      - name: Purchase advance, zero invoice, refund and concurrency on PostgreSQL 16
+        env:
+          PURCHASE_TEST_DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_purchase_test
+        run: node --test test/purchases.test.js
       - name: Frontend dependency installation
         working-directory: ledens/frontend
         run: npm ci

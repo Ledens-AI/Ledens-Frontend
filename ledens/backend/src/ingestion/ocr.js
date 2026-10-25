@@ -46,6 +46,7 @@ export function extractInvoice(result, {businessTaxId=process.env.BRIDGE_BUSINES
   const docs = result.analyzeResult?.documents;
   if (!Array.isArray(docs) || docs.length !== 1) return { reason:'invoice_count_requires_review' };
   const f = docs[0].fields || {};
+  if(f.InvoiceTotal?.valueCurrency?.amount===0&&/YA PAGADO DEL PEDIDO/i.test(result.analyzeResult?.content||''))return {reason:'purchase_zero_requires_native_or_review'};
   const date = f.InvoiceDate?.valueDate;
   const confidence = f.InvoiceDate?.confidence || 0;
   const quarter = invoiceQuarter(date);

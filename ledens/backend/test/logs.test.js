@@ -14,7 +14,7 @@ const settle=()=>new Promise((r)=>setTimeout(r,60)); // finish is written after 
 before(async()=>{
  db=new PGlite();pool={query:(...a)=>db.query(...a)};
  await db.exec("CREATE TABLE users(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),email text,name text,role text); CREATE SCHEMA ledens;");
- await db.exec(await fs.readFile(new URL('../src/db/migrations/014_process_runs.sql',import.meta.url),'utf8'));
+ await db.exec(await fs.readFile(new URL('../src/db/migrations/015_process_runs.sql',import.meta.url),'utf8'));
  admin=(await db.query("INSERT INTO users(email,name,role) VALUES('admin@lg.test','Admin Logs','admin') RETURNING id,name,role")).rows[0];
  setRunLogPool(pool);
  const app=express();app.use(express.json());

@@ -1,0 +1,37 @@
+{
+  "kind": "advance_refund",
+  "issuer_tax_id": "B84406289",
+  "buyer_tax_id": "B19753805",
+  "document_number": "008-0010-R280230",
+  "order_reference": "302957",
+  "currency": "EUR",
+  "issued_on": "2026-10-22",
+  "nominal_gross": "-6.44",
+  "nominal_net": "-5.32",
+  "nominal_vat": "-1.12",
+  "goods_gross": "0.00",
+  "goods_net": "0.00",
+  "goods_vat": "0.00",
+  "applied_gross": "0.00",
+  "lines": [],
+  "settlement_lines": [
+    {
+      "line_number": 1,
+      "description": "YA PAGADO DEL PEDIDO 302957",
+      "product_code": "99999991",
+      "quantity": 1,
+      "gross_amount": "-6.44",
+      "evidence": {
+        "origin": "native-pdf-obramat-v1",
+        "product_code": "99999991",
+        "unit_price": "-5.32",
+        "unit_gross": "-6.44",
+        "unit": "UNID.",
+        "line_kind": "advance_refund"
+      }
+    }
+  ],
+  "financial_pages": 1,
+  "original_pages": 2,
+  "fingerprint": "e9c9272109f27b0112f5bf35b007cd5a41c8f07a3adc9b1dea49d553b1f0e541"
+}
