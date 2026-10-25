@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
 import express from 'express';
 import { createHash } from 'node:crypto';
 import { invoiceQuarter, validateInvoice } from '../src/ingestion/validation.js';
@@ -96,14 +96,15 @@ test('supplier corroboration uses only high-confidence words inside the vendor f
  const lowWord=structuredClone(result);lowWord.analyzeResult.pages[0].words[0].confidence=.499;assert.equal(partyNameEvidence(lowWord,'Vendor'),null);
  const customer=structuredClone(result);customer.analyzeResult.documents[0].fields.CustomerName.valueString='OBRAMAT';assert.equal(partyNameEvidence(customer,'Vendor'),null);
 });
-// Pages of different widths (101, 102, …) tell which page reached the OCR.
-const pagesPdf=async(n)=>{const pdf=await PDFDocument.create();for(let i=1;i<=n;i++)pdf.addPage([100+i,100]);return Buffer.from(await pdf.save());};
+// Pages of different widths (301, 302, …) tell which pages reached the OCR.
+// texts[i] is written on page i+1 (empty: no text layer, like a scan).
+const pagesPdf=async(n,texts=[])=>{const pdf=await PDFDocument.create(),font=await pdf.embedFont(StandardFonts.Helvetica);for(let i=1;i<=n;i++){const p=pdf.addPage([300+i,400]);if(texts[i-1])p.drawText(texts[i-1],{x:20,y:200,size:10,font});}return Buffer.from(await pdf.save());};
 const widths=async(bytes)=>(await PDFDocument.load(bytes)).getPages().map(p=>p.getWidth());
-test('a PDF over two pages sends only its first page to the OCR; the original and its hash stay whole',async()=>{
+test('a PDF over two pages sends pages 1 and 2 to the OCR when no total is found on page 3; the original and its hash stay whole',async()=>{
   const original=await pagesPdf(6);
   const file=await validateInvoice(payload('long',{content_base64:original.toString('base64')}),config);
   assert.equal(file.reason,null);assert.equal(file.pageCount,6);
-  assert.deepEqual(await widths(file.ocrContent),[101]);
+  assert.deepEqual(await widths(file.ocrContent),[301,302]);
   assert.ok(file.content.equals(original));assert.equal(file.hash,createHash('sha256').update(original).digest('hex'));
   const two=await validateInvoice(payload('two',{content_base64:(await pagesPdf(2)).toString('base64')}),config);
   assert.equal(two.ocrContent,null,'up to two pages the whole file goes to the OCR');assert.equal(two.reason,null);
@@ -111,7 +112,7 @@ test('a PDF over two pages sends only its first page to the OCR; the original an
   const sent=[];const svc=new IngestionService({connect:async()=>({query:(q,p)=>db.query(q,p),release(){}})},{...ocr,start:async(content)=>{sent.push(content);return ocr.start();}},config);
   const row=await svc.receive(file);assert.equal(row.status,'received');
   assert.equal((await svc.process(row.ingestion_id)).status,'analyzing');
-  assert.deepEqual(await widths(sent[0]),[101]);
+  assert.deepEqual(await widths(sent[0]),[301,302]);
   assert.equal((await db.query('SELECT content_hash FROM ledens.invoice_ingestions WHERE id=$1',[row.ingestion_id])).rows[0].content_hash,file.hash);
 });
 test('a PDF held as f0_page_limit is analysed when it arrives again, also re-uploaded under another name',async()=>{
@@ -125,7 +126,7 @@ test('a PDF held as f0_page_limit is analysed when it arrives again, also re-upl
     const back=await svc.receive(await validateInvoice({...again,content_base64},config));
     assert.deepEqual([back.status,back.reason,back.duplicate],['received',null,false],'the Logic App only processes non-duplicates');
     assert.equal((await svc.process(back.ingestion_id)).status,'analyzing');
-    assert.deepEqual(await widths(sent.at(-1)),[101]);
+    assert.deepEqual(await widths(sent.at(-1)),[301,302]);
   }
 });
 test('a supplier invoice without our tax id is to pay when the seller has a valid other tax id; ambiguous cases stay in review',async()=>{
@@ -161,4 +162,12 @@ test('a supplier invoice held on direction is analysed again when it arrives aga
   await db.query('INSERT INTO ledens.bank_document_allocations(document_id) VALUES($1)',[b.row.document_id]);
   const again=await svc.receive(await validateInvoice(payload('dir-b-again',{content_base64:b.content_base64,filename:'otra-b.pdf'}),config));
   assert.deepEqual([again.status,again.reason,again.duplicate],['review','invoice_direction_requires_review',true]);
+});
+test('the total is looked for in the first three pages: page 3 replaces page 2 only when the total is there',async()=>{
+  const sent=async(texts,n=6)=>{const file=await validateInvoice(payload('t'+Math.random(),{content_base64:(await pagesPdf(n,texts)).toString('base64')}),config);return [file.ocrPageNumbers,await widths(file.ocrContent)];};
+  assert.deepEqual(await sent(['Factura FA-1 Fecha 01/10/2026','Detalle de consumos','Total factura 15,25 €']),[[1,3],[301,303]]);
+  assert.deepEqual(await sent(['Factura FA-2','Importe total 99,00 EUR','Total factura 99,00 €']),[[1,2],[301,302]],'the first total wins');
+  assert.deepEqual(await sent(['Factura FA-3 TOTAL: 15,25 €','Detalle','Total a pagar 15,25']),[[1,2],[301,302]],'total on page 1 keeps 1 and 2');
+  assert.deepEqual(await sent(['Factura FA-4','Subtotal 10,00','Detalle de llamadas']),[[1,2],[301,302]],'a subtotal is not the total');
+  assert.deepEqual(await sent(['Factura FA-5','Detalle','Total factura 3,00 €'],3),[[1,3],[301,303]],'also with exactly three pages');
 });
