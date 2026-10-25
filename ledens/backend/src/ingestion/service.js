@@ -3,7 +3,7 @@ import {extractLines,storeInvoiceLines} from '../finance/ingestion.js';
 import { IngestError } from './validation.js';
 import {archiveIssue} from './completeness.js';
 import {cents,decimal} from '../bridge/rules.js';
-import { extractInvoice } from './ocr.js';
+import { extractInvoice,prepareOcrInput } from './ocr.js';
 
 export class IngestionService {
   constructor(pool, ocr, config) { this.pool=pool; this.ocr=ocr; this.config=config; }
@@ -36,6 +36,11 @@ export class IngestionService {
     row.status='review';row.reason=reason;
     await c.query("UPDATE ledens.invoice_ingestions SET status='review',reason=$2,updated_at=now() WHERE id=$1",[row.id,reason]);
   }
+  async resumePageLimited(c,row,file){
+    if(row.status!=='review'||row.reason!=='f0_page_limit'||file.reason||file.hash!==row.content_hash)return;
+    row.status='received';row.reason=null;
+    await c.query("UPDATE ledens.invoice_ingestions SET status='received',reason=NULL,content=$2,operation_url=NULL,updated_at=now() WHERE id=$1",[row.id,file.content]);
+  }
   async readyStatement(c,row,p,{actorId=null}={}){
     await c.query('SELECT pg_advisory_xact_lock(727032)');
     const old=(await c.query('SELECT document_evidence FROM ledens.invoice_ingestions WHERE id=$1',[row.id])).rows[0]?.document_evidence;
@@ -64,6 +69,7 @@ export class IngestionService {
         JOIN ledens.invoice_ingestions i ON i.id=s.ingestion_id WHERE s.source_key=$1`,[file.sourceKey])).rows[0];
       if(previous) {
         if((previous.source_content_hash||previous.content_hash)!==file.hash) throw new IngestError(409,'source_content_changed');
+        await this.resumePageLimited(c,previous,file);
         if(file.nativePurchase)await this.readyNative(c,previous,file.nativePurchase);
         if(file.nativeStatement)await this.readyStatement(c,previous,file.nativeStatement);
         await this.checkComplete(c,previous);
@@ -90,6 +96,7 @@ export class IngestionService {
           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
           [document.id,file.hash,file.filename,file.type,file.reason?null:file.content,file.reason?'review':'received',file.reason])).rows[0];
       }
+      await this.resumePageLimited(c,row,file);
       if(file.nativePurchase)await this.readyNative(c,row,file.nativePurchase);
       if(file.nativeStatement)await this.readyStatement(c,row,file.nativeStatement);
       await this.checkComplete(c,row);
@@ -108,7 +115,9 @@ export class IngestionService {
       if(!this.ocr) throw new IngestError(503,'ocr_not_configured');
       try {
         if(row.status==='received') {
-          row.operation_url=await this.ocr.start(row.content,row.content_type);
+          const input=await prepareOcrInput(row.content,row.content_type);
+          row.operation_url=await this.ocr.start(input.content,row.content_type,{prepared:true});
+          if(input.scope)await c.query('UPDATE ledens.invoice_ingestions SET document_evidence=$2 WHERE id=$1',[id,JSON.stringify({...input.scope,content_hash:row.content_hash})]);
           row.status='analyzing';
           await c.query(`UPDATE ledens.invoice_ingestions SET operation_url=$2,status='analyzing',
             updated_at=now() WHERE id=$1`,[id,row.operation_url]);
@@ -138,7 +147,8 @@ export class IngestionService {
               extracted.taxIdConfidence,extracted.directionConfidence]);
         }
         if(extracted.partyEvidence && (await c.query("SELECT 1 FROM information_schema.columns WHERE table_schema='ledens' AND table_name='invoice_ingestions' AND column_name='party_evidence'")).rows.length)await c.query('UPDATE ledens.invoice_ingestions SET party_evidence=$2 WHERE id=$1',[id,JSON.stringify(extracted.partyEvidence)]);
-        await storeInvoiceLines(c,row.document_id,extractLines(result),extracted);
+        const lines=extractLines(result).map(l=>row.document_evidence?.first_page_only?{...l,evidence:{...l.evidence,ocr_pages:[1],original_pages:row.document_evidence.original_pages,first_page_only:true}}:l);
+        await storeInvoiceLines(c,row.document_id,lines,extracted);
         return this.response(row);
       } catch(e) {
         if(e instanceof IngestError) throw e;

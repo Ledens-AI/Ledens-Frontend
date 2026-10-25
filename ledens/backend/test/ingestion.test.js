@@ -6,7 +6,7 @@ import { PDFDocument } from 'pdf-lib';
 import express from 'express';
 import { createHash } from 'node:crypto';
 import { invoiceQuarter, validateInvoice } from '../src/ingestion/validation.js';
-import { extractInvoice, trustedOperation, partyNameEvidence } from '../src/ingestion/ocr.js';
+import { extractInvoice, trustedOperation, partyNameEvidence,prepareOcrInput,InvoiceOcr } from '../src/ingestion/ocr.js';
 import { IngestionService } from '../src/ingestion/service.js';
 import { createIngestionRouter } from '../src/routes/ingestion.js';
 
@@ -22,7 +22,7 @@ before(async()=>{
     observaciones text,document_on date,trimestre text,numerodocumento text,tercero text,niftercero text,
     base_amount numeric,vat_amount numeric,total numeric,tipo text);`);
   await db.exec(await fs.readFile(new URL('../src/db/migrations/004_invoice_ingestion.sql',import.meta.url),'utf8'));
-  await db.exec('ALTER TABLE ledens.invoice_ingestions ADD COLUMN invoice_currency text,ADD COLUMN total_confidence numeric,ADD COLUMN number_confidence numeric,ADD COLUMN party_confidence numeric,ADD COLUMN tax_id_confidence numeric,ADD COLUMN direction_confidence numeric');
+  await db.exec('ALTER TABLE ledens.invoice_ingestions ADD COLUMN invoice_currency text,ADD COLUMN total_confidence numeric,ADD COLUMN number_confidence numeric,ADD COLUMN party_confidence numeric,ADD COLUMN tax_id_confidence numeric,ADD COLUMN direction_confidence numeric,ADD COLUMN document_evidence jsonb');
   const pool={connect:async()=>({query:(q,p)=>db.query(q,p),release(){}})};
   service=new IngestionService(pool,ocr,config);
   const pdf=await PDFDocument.create();pdf.addPage();pdf64=Buffer.from(await pdf.save()).toString('base64');
@@ -40,10 +40,14 @@ test('untrusted folder, path traversal and mismatching signature are rejected',a
   await assert.rejects(validateInvoice(payload('1',{content_base64:Buffer.from('fake').toString('base64')}),config),{status:415});
   await assert.rejects(validateInvoice(payload('1',{content_base64:'%%%'}),config),{code:'invalid_base64'});
 });
-test('F0 long PDFs require review instead of processing a truncated document',async()=>{
+test('long PDFs send only page one to OCR and preserve original bytes and hash',async()=>{
   const pdf=await PDFDocument.create();for(let i=0;i<3;i++)pdf.addPage();
   const file=await validateInvoice(payload('long',{content_base64:Buffer.from(await pdf.save()).toString('base64')}),config);
-  assert.equal(file.reason,'f0_page_limit');
+  assert.equal(file.reason,null);assert.equal((await PDFDocument.load(file.content)).getPageCount(),3);
+  const prepared=await prepareOcrInput(file.content,file.type);assert.equal((await PDFDocument.load(prepared.content)).getPageCount(),1);assert.deepEqual(prepared.scope.pages,[1]);assert.equal(prepared.scope.original_pages,3);
+  assert.equal(file.hash,createHash('sha256').update(file.content).digest('hex'));
+  let sent;const reader=new InvoiceOcr('https://test.cognitiveservices.azure.com','test',async(_url,options)=>{sent=options.body;return {ok:true,headers:{get:()=> 'https://test.cognitiveservices.azure.com/documentintelligence/documentModels/prebuilt-invoice/analyzeResults/one'}};});
+  await reader.start(file.content,file.type);assert.equal((await PDFDocument.load(sent)).getPageCount(),1);
 });
 test('deduplicates source replay and identical bytes uploaded under a different name',async()=>{
   const first=await service.receive(await validateInvoice(payload('original'),config));
@@ -100,4 +104,15 @@ test('supplier corroboration uses only high-confidence words inside the vendor f
  const poor=structuredClone(result);poor.analyzeResult.documents[0].fields.VendorTaxId.confidence=.499;assert.equal(partyNameEvidence(poor,'Vendor'),null);
  const lowWord=structuredClone(result);lowWord.analyzeResult.pages[0].words[0].confidence=.499;assert.equal(partyNameEvidence(lowWord,'Vendor'),null);
  const customer=structuredClone(result);customer.analyzeResult.documents[0].fields.CustomerName.valueString='OBRAMAT';assert.equal(partyNameEvidence(customer,'Vendor'),null);
+});
+test('previous F0 page rejection resumes the same ingestion and records first-page scope',async()=>{
+ const pdf=await PDFDocument.create();for(let i=0;i<6;i++)pdf.addPage();const original=Buffer.from(await pdf.save()),file=await validateInvoice(payload('retry-long',{content_base64:original.toString('base64')}),config);
+ const first=await service.receive(file);await db.query("UPDATE ledens.invoice_ingestions SET status='review',reason='f0_page_limit',content=NULL WHERE id=$1",[first.ingestion_id]);
+ const resumed=await service.receive(file);assert.equal(resumed.ingestion_id,first.ingestion_id);assert.equal(resumed.document_id,first.document_id);assert.equal(resumed.status,'received');
+ assert.equal((await service.process(resumed.ingestion_id)).status,'analyzing');
+ const row=(await db.query('SELECT content,content_hash,document_evidence FROM ledens.invoice_ingestions WHERE id=$1',[resumed.ingestion_id])).rows[0];
+ assert.equal(row.content_hash,createHash('sha256').update(original).digest('hex'));assert.equal(row.content.length,original.length);assert.equal(row.document_evidence.original_pages,6);assert.deepEqual(row.document_evidence.pages,[1]);
+ assert.equal((await service.process(resumed.ingestion_id)).status,'ready');
+ assert.equal((await db.query('SELECT count(*)::int n FROM ledens.invoice_sources WHERE ingestion_id=$1',[resumed.ingestion_id])).rows[0].n,1);
+ const short=await PDFDocument.create();short.addPage();short.addPage();const two=Buffer.from(await short.save());assert.equal((await prepareOcrInput(two,'application/pdf')).content,two);
 });

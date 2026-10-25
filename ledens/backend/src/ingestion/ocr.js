@@ -1,4 +1,5 @@
 import {municipalAssessment} from './municipal.js';
+import {PDFDocument} from 'pdf-lib';
 import { invoiceQuarter } from './validation.js';
 import {taxId,normalize,INVOICE_MIN_CONFIDENCE} from '../bridge/rules.js';
 
@@ -11,6 +12,13 @@ export function trustedOperation(url, endpoint) {
   }
   return value.href;
 }
+export async function prepareOcrInput(content,type){
+ if(type!=='application/pdf')return {content,scope:null};
+ const pdf=await PDFDocument.load(content,{updateMetadata:false}),count=pdf.getPageCount();
+ if(count<=2)return {content,scope:null};
+ const first=await PDFDocument.create(),[page]=await first.copyPages(pdf,[0]);first.addPage(page);
+ return {content:Buffer.from(await first.save()),scope:{source:'azure-di',original_pages:count,pages:[1],first_page_only:true}};
+}
 export class InvoiceOcr {
   constructor(endpoint, key, fetcher = fetch) {
     this.endpoint = endpoint?.replace(/\/$/,''); this.key = key; this.fetch = fetcher;
@@ -21,7 +29,8 @@ export class InvoiceOcr {
     if (!r.ok) { const e = new Error('ocr_request_failed'); e.transient = r.status === 429 || r.status >= 500; throw e; }
     return r;
   }
-  async start(content, type) {
+  async start(content, type,{prepared=false}={}) {
+    if(!prepared)content=(await prepareOcrInput(content,type)).content;
     const r = await this.request(`${this.endpoint}/documentintelligence/documentModels/prebuilt-invoice:analyze?api-version=2024-11-30&locale=es-ES`, {
       method:'POST', headers:{'Content-Type':type}, body:content });
     return trustedOperation(r.headers.get('operation-location'), this.endpoint);
