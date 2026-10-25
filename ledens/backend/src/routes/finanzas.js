@@ -4,6 +4,7 @@ import { getPool, isDbConfigured } from '../db/pool.js';
 import { requireRole, checkRole } from '../auth/sessions.js';
 import {FinanceError} from '../finance/service.js';
 import { FinanzasService, FinError, TYPES, isUuid } from '../finanzas/service.js';
+import { ProjectsService } from '../finanzas/projects.js';
 
 // Gestión financiera (/api/finanzas). Internal accounting data: admins and
 // jefes de obra only — a client never reaches any of it, whatever the
@@ -13,7 +14,7 @@ export const FINANZAS_ROLES = ['admin', 'jefe'];
 
 // `authenticate` replaces only the session lookup (tests); the role check is
 // always the real one.
-export function createFinanzasRouter({ service, authenticate, origin=process.env.CORS_ORIGIN } = {}) {
+export function createFinanzasRouter({ service, projects, authenticate, origin=process.env.CORS_ORIGIN } = {}) {
   const router = Router();
   router.use((_req, res, next) => {
     if (!service && !isDbConfigured()) return res.status(503).json({ error: 'Gestión financiera no disponible todavía' });
@@ -104,6 +105,45 @@ export function createFinanzasRouter({ service, authenticate, origin=process.env
   router.get('/conciliacion', handle(async (req, res) => {
     const view = req.query.vista || 'movimientos';
     res.json(await svc(req).reconciliation({ view, page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), reason:req.query.motivo, from:req.query.desde, to:req.query.hasta }));
+  }));
+
+  // Pago a trabajadores. { movementIds: [uuid] } → movements leave Pendiente de
+  // conciliación and are split into lines in Pendiente de trabajador.
+  router.post('/conciliacion/pago-trabajadores', handle(async (req, res) => {
+    res.json(await svc(req).classifyWorkerPayments({ movementIds: req.body?.movementIds }));
+  }));
+
+  router.get('/pendiente-trabajador', handle(async (req, res) => {
+    res.json(await svc(req).workerQueue({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100) }));
+  }));
+
+  router.get('/trabajadores', handle(async (req, res) => {
+    res.json({ employees: await svc(req).employees() });
+  }));
+
+  // { items: [{ splitId, employeeId, projectId }] } — one result per line.
+  router.post('/pendiente-trabajador/guardar', handle(async (req, res) => {
+    const items = Array.isArray(req.body?.items) ? req.body.items.map((i) => ({ splitId: i?.splitId, employeeId: i?.employeeId, projectId: i?.projectId })) : req.body?.items;
+    res.json(await svc(req).saveWorkerSplits({ items }));
+  }));
+
+  router.delete('/pendiente-trabajador/:batchId', handle(async (req, res) => {
+    res.json(await svc(req).returnWorkerBatch({ batchId: req.params.batchId }));
+  }));
+
+  // Proyectos: list for everyone with finance access, create/edit for admins.
+  const projectsSvc = (req) => projects || new ProjectsService(getPool(), req.user);
+  router.get('/gestion-proyectos', handle(async (req, res) => {
+    res.json(await projectsSvc(req).list({ q: req.query.q || '', estado: req.query.estado || '', page: req.query.pagina, pageSize: req.query.tam }));
+  }));
+  router.get('/gestion-proyectos/opciones', handle(async (req, res) => {
+    res.json(await projectsSvc(req).options());
+  }));
+  router.post('/gestion-proyectos', handle(async (req, res) => {
+    res.status(201).json({ project: await projectsSvc(req).create(req.body || {}) });
+  }));
+  router.put('/gestion-proyectos/:id', handle(async (req, res) => {
+    res.json({ project: await projectsSvc(req).update(req.params.id, req.body || {}) });
   }));
 
   router.use((err, _req, res, next) => {

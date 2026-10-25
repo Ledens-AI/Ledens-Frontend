@@ -11,7 +11,7 @@ const result={status:'succeeded',analyzeResult:{content:'AYUNTAMIENTO DE MIJAS (
 let db,pool,actor,ingestion,doc,bank,oldRecord,project;
 before(async()=>{
  db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
- for(const p of ['finance-fixture.sql','../src/db/migrations/004_invoice_ingestion.sql','../src/db/migrations/005_bank_bridge.sql','../src/db/migrations/006_project_finance.sql','../src/db/migrations/010_finanzas_imputacion.sql'])await db.exec(await fs.readFile(new URL(p,import.meta.url),'utf8'));
+ for(const p of ['finance-fixture.sql','../src/db/migrations/004_invoice_ingestion.sql','../src/db/migrations/005_bank_bridge.sql','../src/db/migrations/006_project_finance.sql','../src/db/migrations/010_finanzas_imputacion.sql','../src/db/migrations/013_pago_trabajadores.sql'])await db.exec(await fs.readFile(new URL(p,import.meta.url),'utf8'));
  await db.exec('ALTER TABLE users ADD COLUMN name text');
  actor=(await db.query("INSERT INTO users(email,role) VALUES('operator@test.example','admin') RETURNING id,email,role")).rows[0];
  project=(await db.query("INSERT INTO ledens.projects(name) VALUES('Obra previa') RETURNING id")).rows[0].id;

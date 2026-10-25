@@ -3,6 +3,8 @@ import { api } from './api.js';
 import RecordsView from './RecordsView.jsx';
 import Resumen from './Resumen.jsx';
 import Conciliacion from './Conciliacion.jsx';
+import PendienteTrabajador from './PendienteTrabajador.jsx';
+import Proyectos from './Proyectos.jsx';
 import Rentabilidad from './Rentabilidad.jsx';
 import { FIN_TABS } from './tabs.js';
 import '../../../styles/finanzas.css';
@@ -11,11 +13,13 @@ const INTRO = {
   resumen: 'Estado de la imputación de materiales, pagos a trabajadores y cobros a proyectos.',
   pendientes: 'Registros sin proyecto. Elige el proyecto en cada fila o selecciona varios para asignarlos juntos.',
   material: 'Cada concepto de factura se imputa por separado: una misma factura puede repartirse entre obras.',
-  trabajador: 'Un pago que cubre varias obras se distribuye por importes, sin duplicarlo.',
+  trabajador: 'Vista de consulta de los pagos a trabajadores, con su rol y proyecto. Los pagos nuevos se preparan en «Pendiente de trabajador».',
   cliente: 'Cobros recibidos de clientes. Son cobros, no ingresos reconocidos: un anticipo no es facturación.',
   concepto:'Líneas de facturas y documentos pendientes de clasificar, sin duplicar el original.',
-  conciliacion: 'Movimientos bancarios pendientes de conciliar con sus documentos.',
+  conciliacion: 'Movimientos bancarios pendientes de conciliar con sus documentos. Selecciona los pagos de nóminas y pulsa «Pago a trabajadores» para segregarlos.',
+  'pendiente-trabajador': 'Pagos a trabajadores segregados de un movimiento bancario: más de 450 € en pagos de 100 € (Oficial), 450 € o menos en pagos de 60 € (Ayudante). Asigna trabajador y proyecto a cada uno y guárdalo.',
   rentabilidad: 'Costes imputados, cobros y margen previsto de un proyecto.',
+  proyectos: 'Alta y edición de proyectos: código, cliente, dirección, estado y fechas. Los cambios quedan en la auditoría.',
 };
 
 /* Gestión financiera (/plataforma, admins and jefes de obra). Data comes from
@@ -54,7 +58,9 @@ export default function GestionFinanciera({ tab, go, toast, onPending }) {
       {isRecords ? (
         <RecordsView mode={tab} summary={summary} initialProject={project} onChanged={changed} toast={toast} />
       ) : null}
-      {tab === 'conciliacion' ? <Conciliacion /> : null}
+      {tab === 'conciliacion' ? <Conciliacion toast={toast} /> : null}
+      {tab === 'pendiente-trabajador' ? <PendienteTrabajador toast={toast} onChanged={changed} /> : null}
+      {tab === 'proyectos' ? <Proyectos toast={toast} /> : null}
       {tab === 'rentabilidad' ? (
         <Rentabilidad project={rentProject} onProject={setRentProject} version={version}
           drill={(t) => { setDrill({ tab: t, project: rentProject }); go(t); }} />

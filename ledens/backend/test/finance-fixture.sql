@@ -21,3 +21,7 @@ CREATE TABLE ledens.worker_payments(id uuid PRIMARY KEY DEFAULT gen_random_uuid(
  bank_movement_id uuid REFERENCES ledens.bank_movements(id),occurred_on date,empleado text,amount numeric,project_id uuid REFERENCES ledens.projects(id));
 CREATE TABLE ledens.customer_payments(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),document_id uuid REFERENCES ledens.documents(id),
  bank_movement_id uuid REFERENCES ledens.bank_movements(id),occurred_on date,cliente text,total numeric,project_id uuid REFERENCES ledens.projects(id));
+-- Production columns used by Pago a trabajadores (employees, their position, worker_payments.employee_id).
+CREATE TABLE ledens.positions(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text,activo boolean);
+CREATE TABLE ledens.employees(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text,primary_position_id uuid REFERENCES ledens.positions(id),activo boolean);
+ALTER TABLE ledens.worker_payments ADD COLUMN employee_id uuid REFERENCES ledens.employees(id);

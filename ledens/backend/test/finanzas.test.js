@@ -1,10 +1,10 @@
+import {storeInvoiceLines,extractLines} from '../src/finance/ingestion.js';
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import express from 'express';
 import pg from 'pg';
-import {storeInvoiceLines,extractLines} from '../src/finance/ingestion.js';
 import {FinanzasService,safeDocumentUrl} from '../src/finanzas/service.js';
 import {createFinanzasRouter} from '../src/routes/finanzas.js';
 let db,pool,svc,admin,jefe,p1,p2;
@@ -13,7 +13,7 @@ before(async()=>{
  else {const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};}
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
  await db.exec('ALTER TABLE users ADD COLUMN name text');
- for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql'])await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
+ for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql'])await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
  const users=(await db.query("INSERT INTO users(email,role) VALUES('admin@ui.test','admin'),('jefe@ui.test','jefe') RETURNING id,role")).rows;[admin,jefe]=users;
  [p1,p2]=(await db.query("INSERT INTO ledens.projects(name,project_id) VALUES('Marbella','OBRA-001'),('Velez','OBRA-002') RETURNING id")).rows.map(x=>x.id);
  svc=new FinanzasService(pool,admin);
@@ -98,7 +98,6 @@ test('default reconciliation inbox contains only bank movements and deduplicates
  const inbox=await svc.reconciliation({q:'BANK-ONLY'});assert.equal(inbox.total,1);assert.equal(inbox.rows.length,1);assert.equal(inbox.rows[0].type,'movimiento');assert.equal(Number(inbox.rows[0].por_conciliar),-30);assert.equal(inbox.rows[0].enlaces,2);assert.ok(inbox.rows[0].numerodocumento.includes('BANK-ONLY-A'));
  await db.query("UPDATE ledens.bank_document_allocations SET allocated_amount=-60 WHERE document_id=$1",[d2]);assert.equal((await svc.reconciliation({q:'BANK-ONLY'})).total,0);
 });
-
 
 test('pending invoice items expose their shared document number, line number, SKU and quantity',async()=>{
  const d=(await db.query("INSERT INTO ledens.documents(total,tipo,numerodocumento,tercero) VALUES(-121,'Pagar','ITEMS-DOC-01','Proveedor') RETURNING id")).rows[0].id;
