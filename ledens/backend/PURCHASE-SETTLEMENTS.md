@@ -49,3 +49,7 @@ Sin nuevas variables obligatorias. Se reutiliza BRIDGE_BUSINESS_TAX_ID, acceso P
 ## Verificación
 
 Fixture económica derivada de las dos facturas adjuntas, sin domicilios, teléfonos ni PDFs originales en Git. Pruebas nativas e integración PostgreSQL 16 dedicadas: 21 partidas, IVA/redondeos, orden de llegada, duplicados, fuente cambiada, recuperación F0, anticipo asignado, capacidad, permisos, devolución pendiente/conciliada, cobertura sin dinero ficticio, reversión e inserciones concurrentes. Regresión de trabajadores/proyectos y frontend.
+
+## Diagnóstico de reembolso Revolut (25/10/2026)
+
+El documento 008-0010-R280230 estaba archivado por la ingesta anterior con total +6,44 pero tipo Pagar y confianza de dirección 0; el Bridge indicó unknown_direction. El movimiento real de +6,44 del 24/10 es CARD_REFUND. Esta ampliación admite ese tipo únicamente para una rectificativa de anticipo validada mediante el PDF nativo, con sentido Cobrar, importe exacto, proveedor verificado y candidato único dentro de la ventana existente. No basta con que un movimiento sea positivo. La recuperación del documento archivado sigue siendo una operación posterior al despliegue, no ejecutada por este diagnóstico.

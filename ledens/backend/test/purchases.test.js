@@ -11,7 +11,7 @@ import {FinanceService} from '../src/finance/service.js';
 import {FinanzasService} from '../src/finanzas/service.js';
 import {BridgeService} from '../src/bridge/service.js';
 import {purchaseDetails,registerPurchaseDocument} from '../src/finance/purchases.js';
-import {cents} from '../src/bridge/rules.js';
+import {cents,bankMatchRule} from '../src/bridge/rules.js';
 let db,pool,service,finance,bridge,admin,project,delivery,refund,documents;
 const config={site:'https://ledenses.sharepoint.com/sites/ledens.es',folder:'datasource/Landing facturas',archiveRoot:'datasource'};
 const read=p=>fs.readFile(new URL(p,import.meta.url),'utf8');
@@ -51,7 +51,7 @@ test('copies marked DUPLICADO and source replays reuse the same fiscal document'
 test('the same Bridge covers the paid advance, the zero invoice and a real positive refund',async()=>{
  const pay=(await db.query("INSERT INTO ledens.bank_movements(amount,total_amount,state,type,currency,completed_on,description) VALUES(-772.56,-772.56,'COMPLETED','CARD_PAYMENT','EUR','2026-10-23','OBRAMAT') RETURNING id")).rows[0].id;
  assert.equal((await bridge.evaluate(documents.a,{force:true})).status,'matched');assert.equal((await bridge.evaluate(documents.d,{force:true})).reason,'covered_by_advance');
- const incoming=(await db.query("INSERT INTO ledens.bank_movements(amount,total_amount,state,type,currency,completed_on,description) VALUES(6.44,6.44,'COMPLETED','CARD_PAYMENT','EUR','2026-10-23','OBRAMAT') RETURNING id")).rows[0].id;
+ const incoming=(await db.query("INSERT INTO ledens.bank_movements(amount,total_amount,state,type,currency,completed_on,description) VALUES(6.44,6.44,'COMPLETED','CARD_REFUND','EUR','2026-10-24','Refund from Adeo Obramat Spain') RETURNING id")).rows[0].id;
  assert.equal((await bridge.evaluate(documents.r,{force:true})).status,'matched');assert.equal((await purchaseDetails(pool,documents.d)).refunds[0].status,'matched');
  const list=await finance.list(admin,{unassigned:true});assert.ok(list.filter(r=>r.document_id===documents.d).every(r=>r.reconciled&&r.reconciliation_status==='covered_by_advance'));
  const rows=(await db.query('SELECT document_id,allocated_amount FROM ledens.bank_document_allocations')).rows;assert.equal(rows.length,2);assert.ok(!rows.some(r=>r.document_id===documents.d));assert.equal(rows.reduce((n,r)=>n+cents(r.allocated_amount),0n),-76612n);
@@ -105,4 +105,16 @@ test('a different item under the same fiscal identity is a conflict, not another
  const pages=deliveryPages().map(p=>p.replaceAll('IMPRIMACIÓN DE ADHERENCIA PUENTE DE UNIÓ','OTRO PRODUCTO VALIDADO'));
  await assert.rejects(ingest(pages,'changed-copy.pdf'),{status:409,code:'purchase_identity_conflict'});
  assert.equal((await db.query('SELECT count(*)::int n FROM ledens.purchase_documents WHERE document_number=$1',[delivery.document_number])).rows[0].n,1);
+});
+
+test('CARD_REFUND requires a verified refund source, exact amount, party and nearby date',async()=>{
+ const d=await bridge.load(pool,documents.r);
+ const bank=(await db.query("SELECT * FROM ledens.bank_movements WHERE type='CARD_REFUND' AND total_amount=6.44")).rows[0];
+ assert.equal(bankMatchRule(d,bank),'party_amount_near_date');
+ assert.equal(bankMatchRule({...d,purchase_proof:null},bank),false);
+ assert.equal(bankMatchRule({...d,tipo:'Pagar'},bank),false);
+ assert.equal(bankMatchRule(d,{...bank,description:'OTHER MERCHANT'}),false);
+ assert.equal(bankMatchRule(d,{...bank,amount:'10.00',total_amount:'10.00'}),false);
+ assert.equal(bankMatchRule(d,{...bank,completed_on:'2026-11-30'}),false);
+ assert.equal(bankMatchRule(d,{...bank,state:'PENDING'}),false);
 });

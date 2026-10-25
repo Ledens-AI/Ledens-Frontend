@@ -60,7 +60,8 @@ export function bankMatchRule(doc,bank){
   const dt=cents(doc.total),amount=cents(bank.amount),total=cents(bank.total_amount);
   if(dt===null||dt===0n||amount===null||total===null||dt!==amount||dt!==total)return false;
   if(bank.state!=='COMPLETED'||bank.currency!=='EUR'||bank.is_internal_transfer===true)return false;
-  if(!['TRANSFER','CARD_PAYMENT','CHARGE'].includes(bank.type))return false;
+  const verifiedRefund=bank.type==='CARD_REFUND'&&dt>0n&&doc.tipo==='Cobrar'&&doc.purchase_proof?.kind==='advance_refund'&&nativePurchaseVerified(doc);
+  if(!['TRANSFER','CARD_PAYMENT','CHARGE'].includes(bank.type)&&!verifiedRefund)return false;
   if(bank.type==='TRANSFER'&&bank.is_internal_transfer!==false)return false;
   if(bank.bank_fee!=null&&cents(bank.bank_fee)!==0n)return false;
   if(bank.bill_currency&&bank.bill_currency!==bank.currency)return false;
