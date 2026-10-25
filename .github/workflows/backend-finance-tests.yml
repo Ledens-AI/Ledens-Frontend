@@ -70,6 +70,10 @@ jobs:
         env:
           BRIDGE_WORKSPACE_TEST_DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_bridge_workspace_test
         run: node --test test/bridge-workspace.test.js
+      - name: Legacy cash schema adoption on PostgreSQL 16
+        env:
+          LEGACY_CASH_TEST_DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_legacy_cash_test
+        run: node --test test/legacy-cash.test.js
       - name: Frontend dependency installation
         working-directory: ledens/frontend
         run: npm ci
