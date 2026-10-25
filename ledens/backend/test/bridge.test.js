@@ -43,3 +43,11 @@ test('fees, currency mismatch, internal transfer and missing confidence cannot a
  assert.ok(eligibleBank(d,b));for(const bad of [{bank_fee:'1'},{currency:'USD'},{is_internal_transfer:true},{is_internal_transfer:null}])assert.equal(eligibleBank(d,{...b,...bad}),false);
  assert.equal(automaticBlock({...d,total_confidence:null}),'unverified_invoice_fields');assert.equal(cents('0.001'),null);
 });
+
+test('all invoice confidence checks use inclusive 50 percent threshold',()=>{
+ const d={total:'-121',tipo:'Pagar',document_on:'2025-09-01',invoice_currency:'EUR',date_confidence:.5,total_confidence:.5,number_confidence:.5,direction_confidence:.5,numerodocumento:'TEST-000050',tercero:'Proveedor Ejemplo',party_confidence:.5};
+ const bank={amount:'-121',total_amount:'-121',state:'COMPLETED',currency:'EUR',type:'TRANSFER',completed_on:'2025-09-02',is_internal_transfer:false,reference:'TEST-000050',beneficiary_name:'Proveedor Ejemplo'};
+ assert.equal(automaticBlock(d),null);assert.equal(eligibleBank(d,bank),true);
+ for(const key of ['date_confidence','total_confidence','number_confidence','direction_confidence'])assert.equal(automaticBlock({...d,[key]:.499}),'unverified_invoice_fields');
+ assert.equal(eligibleBank({...d,party_confidence:.499},bank),false);
+});
