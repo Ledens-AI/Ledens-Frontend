@@ -1,9 +1,10 @@
 import {AlertService} from '../notifications/service.js';
 import {createHash} from 'node:crypto';
-import {LOCK_ID,RULE_VERSION,cents,abs,decimal,day,automaticBlock,eligibleBank,hasParty,hasReference,documentFingerprint,bankFingerprint} from './rules.js';
+import {LOCK_ID,RULE_VERSION,OWNED_RULE_VERSIONS,NEAR_DATE_DAYS,bankMatchRule,cents,abs,decimal,day,automaticBlock,eligibleBank,hasParty,hasReference,documentFingerprint,bankFingerprint} from './rules.js';
 
 export class BridgeError extends Error{constructor(status,code){super(code);this.status=status;this.code=code;}}
 const DOC=`SELECT d.*,to_jsonb(i)->>'invoice_currency' invoice_currency,i.date_confidence,
+  to_jsonb(i)->'party_evidence' party_evidence,
   (to_jsonb(i)->>'total_confidence')::numeric total_confidence,(to_jsonb(i)->>'number_confidence')::numeric number_confidence,
   (to_jsonb(i)->>'party_confidence')::numeric party_confidence,(to_jsonb(i)->>'tax_id_confidence')::numeric tax_id_confidence,
   (to_jsonb(i)->>'direction_confidence')::numeric direction_confidence FROM ledens.documents d
@@ -78,7 +79,9 @@ export class BridgeService{
       const result=await this.candidates(c,d);
       const snapshot=result.rows.slice(0,20).map(b=>this.summarize(d,b));
       if(result.overflow)return this.updateCase(c,id,'pending','too_many_candidates',snapshot);
-      const eligible=result.rows.filter(b=>b.links===0&&eligibleBank(d,b));
+      const compatible=result.rows.filter(b=>b.links===0&&eligibleBank(d,b));
+      const referenced=compatible.filter(b=>bankMatchRule(d,b)==='exact_reference');
+      const eligible=referenced.length?referenced:compatible;
       if(eligible.length!==1)return this.updateCase(c,id,'pending',eligible.length>1?'ambiguous_match':result.rows.length?'insufficient_evidence':'no_match',snapshot);
       const bank=eligible[0];
       await c.query('SELECT id FROM ledens.bank_movements WHERE id=$1 FOR UPDATE',[bank.id]);
@@ -95,7 +98,7 @@ export class BridgeService{
         (document_id,bank_movement_id,allocated_amount,reconciled_on,state,observaciones)
         VALUES($1,$2,$3,CURRENT_DATE,'Confirmado',$4) RETURNING id`,[id,bank.id,d.total,'AUTO_BRIDGE:'+RULE_VERSION])).rows[0];
       await c.query(`UPDATE ledens.documents SET estadopagocobro=$2 WHERE id=$1`,[id,d.tipo==='Pagar'?'Pagado':'Cobrado']);
-      await this.event(c,id,'auto_confirmed',{rule:RULE_VERSION,amount:String(d.total),reference:true,party:true}, {bankId:bank.id,allocationId:allocation.id});
+      await this.event(c,id,'auto_confirmed',{rule:RULE_VERSION,evidence_mode:bankMatchRule(d,bank),amount:String(d.total),reference:hasReference(d.numerodocumento,bank),party:true,near_date_days:bankMatchRule(d,bank)==='party_amount_near_date'?NEAR_DATE_DAYS:null}, {bankId:bank.id,allocationId:allocation.id});
       return this.updateCase(c,id,'matched','auto_confirmed',[],{terminal:true,mode:'automatic',allocationId:allocation.id,documentFingerprint:documentFingerprint(d),bankFingerprint:bankFingerprint(bank)});
     });
   }
@@ -109,7 +112,7 @@ export class BridgeService{
       if(!a||!b||a.state!=='Confirmado'||documentFingerprint(d)!==x.document_fingerprint||bankFingerprint(b)!==x.bank_fingerprint){
         // Only invalidate the allocation owned by this rule. Imported/manual rows
         // are never rewritten. Review states cease to contribute to ledger views.
-        if(a&&a.observaciones==='AUTO_BRIDGE:'+RULE_VERSION)await c.query(`UPDATE ledens.bank_document_allocations SET state='Revisar' WHERE id=$1`,[a.id]);
+        if(a&&OWNED_RULE_VERSIONS.some(v=>a.observaciones==='AUTO_BRIDGE:'+v))await c.query(`UPDATE ledens.bank_document_allocations SET state='Revisar' WHERE id=$1`,[a.id]);
         await this.event(c,id,'source_changed',{}, {allocationId:a?.id,bankId:b?.id});
         await c.query(`UPDATE ledens.documents SET estadopagocobro='Revisar' WHERE id=$1`,[id]);
         return this.updateCase(c,id,'pending','source_changed',[],{terminal:true});

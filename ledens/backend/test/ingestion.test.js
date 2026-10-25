@@ -6,7 +6,7 @@ import { PDFDocument } from 'pdf-lib';
 import express from 'express';
 import { createHash } from 'node:crypto';
 import { invoiceQuarter, validateInvoice } from '../src/ingestion/validation.js';
-import { extractInvoice, trustedOperation } from '../src/ingestion/ocr.js';
+import { extractInvoice, trustedOperation, partyNameEvidence } from '../src/ingestion/ocr.js';
 import { IngestionService } from '../src/ingestion/service.js';
 import { createIngestionRouter } from '../src/routes/ingestion.js';
 
@@ -91,4 +91,13 @@ test('endpoint authenticates before body parsing and rejects invalid ids',async(
 test('invoice date minimum confidence is inclusive at 50 percent',()=>{
  for(const confidence of [0.5,0.669,0.89,1])assert.equal(extractInvoice({analyzeResult:{documents:[{fields:{InvoiceDate:{valueDate:'2026-09-22',confidence}}}]}}).date,'2026-09-22');
  for(const confidence of [0.499,1.01])assert.equal(extractInvoice({analyzeResult:{documents:[{fields:{InvoiceDate:{valueDate:'2026-09-22',confidence}}}]}}).reason,'invoice_date_requires_review');
+});
+
+test('supplier corroboration uses only high-confidence words inside the vendor field and a verified vendor NIF',()=>{
+ const result={analyzeResult:{documents:[{fields:{VendorName:{valueString:'OBRAMAT',confidence:.481,spans:[{offset:0,length:7}]},VendorTaxId:{valueString:'B84406289',confidence:.82},CustomerName:{valueString:'Company'}}}],pages:[{words:[{content:'OBRAMAT',confidence:.989,span:{offset:0,length:7}},{content:'OBRAMAT',confidence:.999,span:{offset:100,length:7}}]}]}};
+ const e=partyNameEvidence(result,'Vendor');assert.equal(e.name_field_confidence,.481);assert.equal(e.word_confidence,.989);assert.equal(e.tax_id_confidence,.82);
+ const outside=structuredClone(result);outside.analyzeResult.pages[0].words.shift();assert.equal(partyNameEvidence(outside,'Vendor'),null);
+ const poor=structuredClone(result);poor.analyzeResult.documents[0].fields.VendorTaxId.confidence=.499;assert.equal(partyNameEvidence(poor,'Vendor'),null);
+ const lowWord=structuredClone(result);lowWord.analyzeResult.pages[0].words[0].confidence=.499;assert.equal(partyNameEvidence(lowWord,'Vendor'),null);
+ const customer=structuredClone(result);customer.analyzeResult.documents[0].fields.CustomerName.valueString='OBRAMAT';assert.equal(partyNameEvidence(customer,'Vendor'),null);
 });

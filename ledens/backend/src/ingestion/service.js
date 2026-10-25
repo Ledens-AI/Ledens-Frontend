@@ -81,6 +81,7 @@ export class IngestionService {
               extracted.totalConfidence,extracted.numberConfidence,extracted.partyConfidence,
               extracted.taxIdConfidence,extracted.directionConfidence]);
         }
+        if(extracted.partyEvidence && (await c.query("SELECT 1 FROM information_schema.columns WHERE table_schema='ledens' AND table_name='invoice_ingestions' AND column_name='party_evidence'")).rows.length)await c.query('UPDATE ledens.invoice_ingestions SET party_evidence=$2 WHERE id=$1',[id,JSON.stringify(extracted.partyEvidence)]);
         await storeInvoiceLines(c,row.document_id,extractLines(result),extracted);
         return this.response(row);
       } catch(e) {

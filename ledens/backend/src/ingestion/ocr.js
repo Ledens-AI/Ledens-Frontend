@@ -1,6 +1,6 @@
 import {municipalAssessment} from './municipal.js';
 import { invoiceQuarter } from './validation.js';
-import {taxId,INVOICE_MIN_CONFIDENCE} from '../bridge/rules.js';
+import {taxId,normalize,INVOICE_MIN_CONFIDENCE} from '../bridge/rules.js';
 
 export function trustedOperation(url, endpoint) {
   const value = new URL(url);
@@ -30,6 +30,17 @@ export class InvoiceOcr {
     return (await this.request(trustedOperation(url, this.endpoint))).json();
   }
 }
+export function partyNameEvidence(result,party){
+ const f=result.analyzeResult?.documents?.[0]?.fields||{},field=f[party+'Name'],name=field?.valueString,nif=f[party+'TaxId'];
+ const valid=n=>typeof n==='number'&&n>=INVOICE_MIN_CONFIDENCE&&n<=1;
+ if(!name||!valid(nif?.confidence)||taxId(nif.valueString).length<8)return null;
+ const opposite=f[party==='Vendor'?'CustomerName':'VendorName']?.valueString;
+ if(opposite&&normalize(opposite)===normalize(name))return null;
+ const spans=field.spans||[];
+ const words=(result.analyzeResult.pages||[]).flatMap(p=>p.words||[]).filter(w=>w.span&&spans.some(s=>w.span.offset>=s.offset&&w.span.offset+w.span.length<=s.offset+s.length));
+ if(!words.length||words.some(w=>!valid(w.confidence))||normalize(words.map(w=>w.content).join(' '))!==normalize(name))return null;
+ return {rule:'party_name_span_and_tax_id',name:normalize(name),tax_id:taxId(nif.valueString),name_field_confidence:field.confidence,word_confidence:Math.min(...words.map(w=>w.confidence)),tax_id_confidence:nif.confidence,source:'azure-di'};
+}
 export function extractInvoice(result, {businessTaxId=process.env.BRIDGE_BUSINESS_TAX_ID||'B19753805'}={}) {
   if(municipalAssessment(result))return {reason:'municipal_assessment_requires_review'};
   const docs = result.analyzeResult?.documents;
@@ -52,6 +63,6 @@ export function extractInvoice(result, {businessTaxId=process.env.BRIDGE_BUSINES
     taxId:text(party+'TaxId'), subtotal:signed('SubTotal'), tax:signed('TotalTax'), total:signed('InvoiceTotal'),
     direction,currency:f.InvoiceTotal?.valueCurrency?.currencyCode||null,
     totalConfidence:f.InvoiceTotal?.confidence||0,numberConfidence:f.InvoiceId?.confidence||0,
-    partyConfidence:f[party+'Name']?.confidence||0,taxIdConfidence:f[party+'TaxId']?.confidence||0,
+    partyConfidence:f[party+'Name']?.confidence||0,taxIdConfidence:f[party+'TaxId']?.confidence||0,partyEvidence:partyNameEvidence(result,party),
     directionConfidence:direction&&money('InvoiceTotal')>0?(f[sellerOwn?'VendorTaxId':'CustomerTaxId']?.confidence||0):0 };
 }
