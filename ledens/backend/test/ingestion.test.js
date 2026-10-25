@@ -40,11 +40,6 @@ test('untrusted folder, path traversal and mismatching signature are rejected',a
   await assert.rejects(validateInvoice(payload('1',{content_base64:Buffer.from('fake').toString('base64')}),config),{status:415});
   await assert.rejects(validateInvoice(payload('1',{content_base64:'%%%'}),config),{code:'invalid_base64'});
 });
-test('F0 long PDFs require review instead of processing a truncated document',async()=>{
-  const pdf=await PDFDocument.create();for(let i=0;i<3;i++)pdf.addPage();
-  const file=await validateInvoice(payload('long',{content_base64:Buffer.from(await pdf.save()).toString('base64')}),config);
-  assert.equal(file.reason,'f0_page_limit');
-});
 test('deduplicates source replay and identical bytes uploaded under a different name',async()=>{
   const first=await service.receive(await validateInvoice(payload('original'),config));
   const replay=await service.receive(await validateInvoice(payload('original'),config));
@@ -100,4 +95,36 @@ test('supplier corroboration uses only high-confidence words inside the vendor f
  const poor=structuredClone(result);poor.analyzeResult.documents[0].fields.VendorTaxId.confidence=.499;assert.equal(partyNameEvidence(poor,'Vendor'),null);
  const lowWord=structuredClone(result);lowWord.analyzeResult.pages[0].words[0].confidence=.499;assert.equal(partyNameEvidence(lowWord,'Vendor'),null);
  const customer=structuredClone(result);customer.analyzeResult.documents[0].fields.CustomerName.valueString='OBRAMAT';assert.equal(partyNameEvidence(customer,'Vendor'),null);
+});
+// Pages of different widths (101, 102, …) tell which page reached the OCR.
+const pagesPdf=async(n)=>{const pdf=await PDFDocument.create();for(let i=1;i<=n;i++)pdf.addPage([100+i,100]);return Buffer.from(await pdf.save());};
+const widths=async(bytes)=>(await PDFDocument.load(bytes)).getPages().map(p=>p.getWidth());
+test('a PDF over two pages sends only its first page to the OCR; the original and its hash stay whole',async()=>{
+  const original=await pagesPdf(6);
+  const file=await validateInvoice(payload('long',{content_base64:original.toString('base64')}),config);
+  assert.equal(file.reason,null);assert.equal(file.pageCount,6);
+  assert.deepEqual(await widths(file.ocrContent),[101]);
+  assert.ok(file.content.equals(original));assert.equal(file.hash,createHash('sha256').update(original).digest('hex'));
+  const two=await validateInvoice(payload('two',{content_base64:(await pagesPdf(2)).toString('base64')}),config);
+  assert.equal(two.ocrContent,null,'up to two pages the whole file goes to the OCR');assert.equal(two.reason,null);
+  // The OCR receives exactly that first page; the stored hash is the original's.
+  const sent=[];const svc=new IngestionService({connect:async()=>({query:(q,p)=>db.query(q,p),release(){}})},{...ocr,start:async(content)=>{sent.push(content);return ocr.start();}},config);
+  const row=await svc.receive(file);assert.equal(row.status,'received');
+  assert.equal((await svc.process(row.ingestion_id)).status,'analyzing');
+  assert.deepEqual(await widths(sent[0]),[101]);
+  assert.equal((await db.query('SELECT content_hash FROM ledens.invoice_ingestions WHERE id=$1',[row.ingestion_id])).rows[0].content_hash,file.hash);
+});
+test('a PDF held as f0_page_limit is analysed when it arrives again, also re-uploaded under another name',async()=>{
+  const sent=[];const svc=new IngestionService({connect:async()=>({query:(q,p)=>db.query(q,p),release(){}})},{...ocr,start:async(content)=>{sent.push(content);return ocr.start();}},config);
+  for(const [n,again] of [[7,payload('orange')],[8,payload('orange-2',{filename:'Orange copia.pdf'})]]){
+    const content_base64=(await pagesPdf(n)).toString('base64'),first={...payload(again.item_id==='orange'?'orange':'orange-1',{content_base64})};
+    const valid=await validateInvoice(first,config);
+    // As before this change: held for review, nothing stored for the OCR.
+    const held=await svc.receive({...valid,reason:'f0_page_limit',ocrContent:null});
+    assert.deepEqual([held.status,held.reason],['review','f0_page_limit']);
+    const back=await svc.receive(await validateInvoice({...again,content_base64},config));
+    assert.deepEqual([back.status,back.reason,back.duplicate],['received',null,false],'the Logic App only processes non-duplicates');
+    assert.equal((await svc.process(back.ingestion_id)).status,'analyzing');
+    assert.deepEqual(await widths(sent.at(-1)),[101]);
+  }
 });
