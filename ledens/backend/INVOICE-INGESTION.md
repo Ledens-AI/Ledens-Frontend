@@ -43,7 +43,7 @@ must remain in Landing for review and must not move the canonical original again
 The flow calls `POST /:ingestion_id/process` every five seconds (maximum 15 minutes).
 The first call starts prebuilt-invoice analysis; later calls poll its stored
 operation URL. Status is durable across flow retries and backend restarts.
-PDFs longer than two pages (Document Intelligence F0 reads two at most) send only their first page to the OCR: number, date, base, VAT and total are expected there. The stored hash, duplicate detection and the archived original are always the complete file. A PDF held earlier as `f0_page_limit` is analysed when it arrives again (replay or re-upload, which is then reported as non-duplicate so the Logic App processes it). Encrypted/unreadable PDFs, or one whose first page cannot be extracted, go directly to `review`.
+PDFs longer than two pages (Document Intelligence F0 reads two at most) send two pages to the OCR: page 1 (number, date) and page 2, or page 3 instead when the text layer of the first three pages shows the total (`Total factura`, `Importe total`, `Total a pagar`, `TOTAL:`…; not `Subtotal`) only on page 3. Scans without text send pages 1 and 2. The stored hash, duplicate detection and the archived original are always the complete file. A PDF held earlier as `f0_page_limit` is analysed when it arrives again (replay or re-upload, which is then reported as non-duplicate so the Logic App processes it). Encrypted/unreadable PDFs, or one whose first page cannot be extracted, go directly to `review`.
 The original stays in SharePoint. Temporary bytes in PostgreSQL are cleared after
 OCR finishes or the document is sent to review. There is no extra original-file
 archive in Azure storage.
