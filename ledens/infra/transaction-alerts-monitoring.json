@@ -1,0 +1,17 @@
+{
+  "scope": "rg-ledens",
+  "recipient": "alvaro.navarro@ledens.es",
+  "workflows": [
+    "ledens-invoice-ingestion",
+    "ledens-bank-bridge",
+    "ledens-transaction-alerts"
+  ],
+  "metric": "RunsFailed",
+  "namespace": "Microsoft.Logic/workflows",
+  "aggregation": "Total",
+  "operator": "GreaterThan",
+  "threshold": 0,
+  "windowSize": "PT5M",
+  "evaluationFrequency": "PT1M",
+  "severity": 2
+}
