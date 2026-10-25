@@ -3,6 +3,7 @@ import { api } from './api.js';
 import RecordsView from './RecordsView.jsx';
 import Resumen from './Resumen.jsx';
 import Conciliacion from './Conciliacion.jsx';
+import Conciliados from './Conciliados.jsx';
 import BridgeMovimientos from './BridgeMovimientos.jsx';
 import PendienteTrabajador from './PendienteTrabajador.jsx';
 import Proyectos from './Proyectos.jsx';
@@ -19,6 +20,7 @@ const INTRO = {
   trabajador: 'Vista de consulta de los pagos a trabajadores, con su rol y proyecto. Los pagos nuevos se preparan en «Pendiente de trabajador».',
   cliente: 'Cobros recibidos de clientes. Son cobros, no ingresos reconocidos: un anticipo no es facturación.',
   concepto:'Líneas de facturas y documentos pendientes de clasificar, sin duplicar el original.',
+  conciliados: 'Movimientos ya conciliados con su factura y cómo está clasificado cada concepto: materiales, pagos a trabajadores o cobro de clientes. Si no estás de acuerdo, pulsa «Cambiar» e indica el motivo.',
   conciliacion: 'Movimientos bancarios pendientes de conciliar con sus documentos. Selecciona los pagos de nóminas y pulsa «Pago a trabajadores» para segregarlos.',
   bridge:'Enlaces entre movimientos y documentos existentes, con importes, estado y motivo de conciliación.',
   'pendiente-bridge':'Selecciona el documento existente y guarda la conciliación. Los movimientos completamente conciliados salen de esta bandeja.',
@@ -69,6 +71,7 @@ export default function GestionFinanciera({ tab, go, toast, onPending, onBridgeP
         <RecordsView mode={tab} summary={summary} initialProject={project} onChanged={changed} toast={toast} />
       ) : null}
       {tab === 'conciliacion' ? <Conciliacion toast={toast} onChanged={changed} go={go} /> : null}
+      {tab === 'conciliados' ? <Conciliados toast={toast} onChanged={changed} /> : null}
       {tab==='bridge'||tab==='pendiente-bridge'?<BridgeMovimientos key={tab} pending={tab==='pendiente-bridge'} toast={toast} onChanged={changed} go={go} />:null}
       {tab === 'pendiente-trabajador' ? <PendienteTrabajador toast={toast} onChanged={changed} /> : null}
       {tab === 'proyectos' ? <Proyectos toast={toast} /> : null}

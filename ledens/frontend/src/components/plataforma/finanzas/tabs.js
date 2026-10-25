@@ -9,6 +9,7 @@ export const FIN_TABS = [
   ['cliente', 'Pagos de clientes', 'ri-hand-coin-line'],
   ['concepto', 'Conceptos de facturas', 'ri-file-list-line'],
   ['conciliacion', 'Pendiente de conciliación', 'ri-bank-line'],
+  ['conciliados', 'Movimientos conciliados', 'ri-checkbox-multiple-line', true],
   ['bridge', 'Bridge Movimientos Documentos', 'ri-links-line'],
   ['pendiente-bridge', 'Pendiente de bridge movimientos documentos', 'ri-notification-3-line'],
   ['pendiente-trabajador', 'Pendiente de trabajador', 'ri-user-follow-line'],

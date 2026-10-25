@@ -156,8 +156,9 @@ export class FinanceService {
      if(body.category!=='advance'&&!/^\d{4}-\d{2}-\d{2}$/.test(body.recognized_on||''))fail(400,'recognition_date_required');
      // Customer receipts remain treasury/advances: revenue belongs to the issued invoice.
      if(r.customer_payment_id&&body.category!=='advance')fail(409,'customer_receipt_is_not_revenue');
-     if(r.material_id&&!['materials','overhead'].includes(body.category))fail(409,'source_category_mismatch');
-     if(r.worker_payment_id&&body.category!=='labor')fail(409,'source_category_mismatch');
+     // A reclassified source (Movimientos conciliados) may be approved in its current category.
+     if(r.material_id&&!['materials','overhead',r.category].includes(body.category))fail(409,'source_category_mismatch');
+     if(r.worker_payment_id&&!['labor',r.category].includes(body.category))fail(409,'source_category_mismatch');
      // Payroll has no supplier invoice: a worker payment is recognized on its bank
      // movement alone, capped by that movement like an advance.
      const payroll=body.category==='labor'&&r.worker_payment_id&&r.bank_movement_id&&!r.document_id;

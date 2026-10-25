@@ -46,6 +46,9 @@ export const api = {
   bulk: (body) => request('POST', '/api/finanzas/registros/lote', body),
   profitability: (projectId) => request('GET', `/api/finanzas/proyectos/${projectId}/rentabilidad`),
   reconciliation: (f) => request('GET', '/api/finanzas/conciliacion' + qs(f)),
+  // Movimientos conciliados (admins): classification and its change.
+  reconciled: (f) => request('GET', '/api/finanzas/conciliados' + qs(f)),
+  reclassify: (recordId, body) => request('PUT', `/api/finanzas/conciliados/${recordId}/clasificacion`, body),
   // Pago a trabajadores (backend: FinanzasService.classifyWorkerPayments …).
   classifyWorkerPayments: (movementIds) => request('POST', '/api/finanzas/conciliacion/pago-trabajadores', { movementIds }),
   // Efectivo (backend: FinanzasService.createCash …; admins only).
