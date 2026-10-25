@@ -13,4 +13,6 @@ export const FIN_TABS = [
   ['rentabilidad', 'Rentabilidad por proyecto', 'ri-line-chart-line'],
   ['proyectos', 'Proyectos', 'ri-building-2-line'],
   ['trabajadores', 'Trabajadores', 'ri-team-line'],
+  // Fourth element: admins only (hidden from jefes de obra in the sidebar).
+  ['logs', 'Logs de transacciones', 'ri-pulse-line', true],
 ];

@@ -218,3 +218,20 @@
 /* Trabajadores: workers de baja stay visible but dimmed. */
 .fin-table tbody tr.is-inactive td { color: #6B6B68; }
 
+
+/* Logs de transacciones. */
+.fin-log-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+.fin-log-card { display: flex; flex-direction: column; gap: 4px; text-align: left; font: inherit; color: inherit; cursor: pointer; padding: 14px 16px; }
+.fin-log-card:hover, .fin-log-card.is-active { border-color: #5567AE; }
+.fin-log-card.is-active { background: #F2F4FA; }
+.fin-log-card.is-bad { border-left: 4px solid #D14A4A; }
+.fin-log-card-title { font-weight: 700; font-size: 14px; color: #0C062B; }
+.fin-log-counts { display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; font-weight: 600; }
+.fin-log-counts .is-ok { color: #2F6B63; } .fin-log-counts .is-warn { color: #7A4E0E; } .fin-log-counts .is-bad { color: #B84371; }
+.fin-log-problem { font-size: 12px; color: #B84371; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fin-log-row { cursor: pointer; }
+.fin-log-row.is-open td { background: #F2F4FA; }
+.fin-log-detail td { background: #FAFAF8; }
+.fin-log-json { margin: 0; padding: 10px 12px; background: #fff; border: 1px solid #EDEDEA; border-radius: 8px; font-size: 12px; overflow-x: auto; max-height: 260px; }
+.fin-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #3A3A38; white-space: nowrap; }
+

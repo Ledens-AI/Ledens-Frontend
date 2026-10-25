@@ -2,6 +2,7 @@ import {Router} from 'express';
 import {getPool,isDbConfigured} from '../db/pool.js';
 import {requireAuth} from '../auth/sessions.js';
 import {FinanceService,FinanceError,uuid} from '../finance/service.js';
+import {traced} from '../logs/runs.js';
 
 export function createFinanceRouter({service,authorize=requireAuth,origin=process.env.CORS_ORIGIN}={}){
  const router=Router();const get=()=>service||new FinanceService(getPool());
@@ -41,21 +42,21 @@ export function createFinanceRouter({service,authorize=requireAuth,origin=proces
  router.get('/finance/records/:id',handle(async(req,res)=>res.json(await get().record(get().pool,req.params.id,req.user))));
  router.get('/finance/records/:id/allocations',handle(async(req,res)=>res.json({items:(await get().record(get().pool,req.params.id,req.user)).allocations})));
  router.get('/finance/records/:id/history',handle(async(req,res)=>{const p=pagination(req);res.json(page(await get().history(req.user,req.params.id,p),p));}));
- router.post('/finance/allocations/bulk',handle(async(req,res)=>res.json(await get().bulk(req.user,req.body||{}))));
- router.patch('/finance/records/:id/project',handle(async(req,res)=>{
+ router.post('/finance/allocations/bulk',traced('imputacion','Asignación de proyectos (API)',{summary:b=>({message:`${b.records?.length||0} registros actualizados`,detail:{registros:b.records?.length||0}})})(async(req,res)=>res.json(await get().bulk(req.user,req.body||{}))));
+ router.patch('/finance/records/:id/project',traced('imputacion','Asignación de proyecto (API)',{entity:req=>({type:'registro',id:req.params.id})})(async(req,res)=>{
    const b=req.body||{};if(b.project_id!==null&&!uuid(b.project_id))throw new FinanceError(400,'invalid_project');
    const r=await get().record(get().pool,req.params.id,req.user);
    res.json(await get().bulk(req.user,{request_id:b.request_id,reason:b.reason,
     records:[{record_id:r.id,version:b.version,allocations:b.project_id===null?[]:[{project_id:b.project_id,amount:r.gross_amount}]}]}));
  }));
- router.patch('/finance/records/:id/recognition',handle(async(req,res)=>res.json(await get().approve(req.user,req.params.id,req.body||{}))));
+ router.patch('/finance/records/:id/recognition',traced('validacion','Validación contable',{entity:req=>({type:'registro',id:req.params.id}),summary:b=>({message:'Estado contable: '+b.status,detail:{estado:b.status,categoria:b.category}})})(async(req,res)=>res.json(await get().approve(req.user,req.params.id,req.body||{}))));
  router.get('/finance/documents/:id/lines',handle(async(req,res)=>{const p=pagination(req);res.json(page(await get().lines(req.user,req.params.id,p),p));}));
- router.post('/finance/documents/:id/lines',handle(async(req,res)=>res.status(201).json(await get().createLine(req.user,req.params.id,req.body||{}))));
- router.put('/finance/budget-versions/:id/basis',handle(async(req,res)=>res.json(await get().verifyBudget(req.user,req.params.id,req.body||{}))));
+ router.post('/finance/documents/:id/lines',traced('ingesta','Alta de línea de factura',{entity:req=>({type:'documento',id:req.params.id})})(async(req,res)=>res.status(201).json(await get().createLine(req.user,req.params.id,req.body||{}))));
+ router.put('/finance/budget-versions/:id/basis',traced('validacion','Verificación de presupuesto',{entity:req=>({type:'version_presupuesto',id:req.params.id})})(async(req,res)=>res.json(await get().verifyBudget(req.user,req.params.id,req.body||{}))));
  for(const route of ['financial-summary','profitability'])router.get('/projects/:projectId/'+route,handle(async(req,res)=>res.json(await get().summary(req.user,req.params.projectId))));
  router.get('/projects/:projectId/financial-transactions',handle(async(req,res)=>{const p=pagination(req);res.json(page(await get().list(req.user,{...p,project_id:req.params.projectId}),p));}));
  router.get('/projects/:projectId/financial-evolution',handle(async(req,res)=>{const p=pagination(req);res.json(page(await get().evolution(req.user,req.params.projectId,p),p));}));
- router.put('/finance/permissions',handle(async(req,res)=>{
+ router.put('/finance/permissions',traced('permisos','Conceder permiso',{entity:req=>({type:'usuario',id:req.body?.user_id})})(async(req,res)=>{
    if(req.user.role!=='admin')throw new FinanceError(403,'finance_forbidden');
    const b=req.body||{};
    if(!uuid(b.user_id)||(b.project_id!==null&&!uuid(b.project_id))||typeof b.can_write!=='boolean'||typeof b.can_review_unassigned!=='boolean'||typeof b.reason!=='string'||b.reason.length<5)throw new FinanceError(400,'invalid_permission');
@@ -67,7 +68,7 @@ export function createFinanceRouter({service,authorize=requireAuth,origin=proces
      return {updated:true};
    });res.json(result);
  }));
- router.delete('/finance/permissions',handle(async(req,res)=>{
+ router.delete('/finance/permissions',traced('permisos','Revocar permiso',{entity:req=>({type:'usuario',id:req.body?.user_id})})(async(req,res)=>{
    if(req.user.role!=='admin')throw new FinanceError(403,'finance_forbidden');
    const b=req.body||{};
    if(!uuid(b.user_id)||(b.project_id!==null&&!uuid(b.project_id))||typeof b.reason!=='string'||b.reason.trim().length<5)throw new FinanceError(400,'invalid_permission');
