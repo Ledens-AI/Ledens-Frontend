@@ -158,7 +158,16 @@ export class FinanceService {
      if(r.customer_payment_id&&body.category!=='advance')fail(409,'customer_receipt_is_not_revenue');
      if(r.material_id&&!['materials','overhead'].includes(body.category))fail(409,'source_category_mismatch');
      if(r.worker_payment_id&&body.category!=='labor')fail(409,'source_category_mismatch');
-     if(body.category!=='advance'&&r.bank_movement_id&&!r.document_id)fail(409,'recognition_requires_document');
+     // Payroll has no supplier invoice: a worker payment is recognized on its bank
+     // movement alone, capped by that movement like an advance.
+     const payroll=body.category==='labor'&&r.worker_payment_id&&r.bank_movement_id&&!r.document_id;
+     if(body.category!=='advance'&&!payroll&&r.bank_movement_id&&!r.document_id)fail(409,'recognition_requires_document');
+     if(payroll){
+       const envelope=(await c.query(`SELECT abs(b.total_amount) capacity,coalesce(sum(abs(r.gross_amount)),0) used FROM ledens.bank_movements b
+         LEFT JOIN ledens.financial_records r ON r.bank_movement_id=b.id AND r.id<>$2 AND r.status='approved' AND r.category='labor' AND r.document_id IS NULL
+         WHERE b.id=$1 GROUP BY b.id`,[r.bank_movement_id,r.id])).rows[0];
+       if(!envelope||absolute(cents(r.gross_amount))+cents(envelope.used)>cents(envelope.capacity))fail(409,'bank_amount_exceeded');
+     }
      if(body.category!=='advance'&&r.document_id){
        const d=(await c.query('SELECT * FROM ledens.documents WHERE id=$1 FOR UPDATE',[r.document_id])).rows[0];
        const capSql=(await this.documentFunding(c)).capacities;const capacity=(await c.query('SELECT capacity FROM ('+capSql+') caps WHERE document_id=$1',[d.id])).rows[0].capacity;
