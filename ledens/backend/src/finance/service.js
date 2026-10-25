@@ -74,7 +74,7 @@ export class FinanceService {
     AND ($3::text IS NULL OR CASE WHEN r.material_id IS NOT NULL THEN 'materials' WHEN r.worker_payment_id IS NOT NULL THEN 'worker-payments' WHEN r.customer_payment_id IS NOT NULL THEN 'customer-payments' ELSE 'invoice-lines' END=$3)
     AND ($4::text IS NULL OR r.status=$4)
     AND ($5::uuid IS NULL OR EXISTS(SELECT 1 FROM ledens.project_financial_allocations a WHERE a.record_id=r.id AND a.project_id=$5))
-    AND (NOT $6 OR abs(r.gross_amount)>coalesce((SELECT sum(abs(a.allocated_amount)) FROM ledens.project_financial_allocations a WHERE a.record_id=r.id),0))
+    AND (NOT $6 OR (r.source_valid AND r.status<>'excluded' AND abs(r.gross_amount)>coalesce((SELECT sum(abs(a.allocated_amount)) FROM ledens.project_financial_allocations a WHERE a.record_id=r.id),0)))
     AND ($7::text IS NULL OR concat_ws(' ',r.description,r.counterparty,d.numerodocumento) ILIKE '%'||$7||'%')
     AND ($8::date IS NULL OR r.occurred_on >= $8) AND ($9::date IS NULL OR r.occurred_on <= $9)
     AND ($10::numeric IS NULL OR abs(r.gross_amount)>=$10) AND ($11::numeric IS NULL OR abs(r.gross_amount)<=$11)

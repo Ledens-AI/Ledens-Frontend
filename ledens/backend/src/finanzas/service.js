@@ -16,7 +16,8 @@ const BASE=`WITH base AS (
  f.version,f.status accounting_status,f.category,f.occurred_on fecha,f.gross_amount importe,f.document_id,f.bank_movement_id,
  coalesce(f.counterparty,d.tercero,to_jsonb(w)->>'empleado',to_jsonb(c)->>'cliente') tercero,
  coalesce(f.description,to_jsonb(m)->>'description',to_jsonb(w)->>'categoria',d.numerodocumento) concepto,
- to_jsonb(m)->>'quantity' quantity,to_jsonb(m)->>'und' unidad,to_jsonb(m)->>'unit_price' unit_price,
+ coalesce(to_jsonb(m)->>'quantity',il.quantity::text) quantity,to_jsonb(m)->>'und' unidad,coalesce(to_jsonb(m)->>'unit_price',il.evidence->>'unit_price') unit_price,
+ il.line_number,il.evidence->>'product_code' product_code,
  d.numerodocumento,d.tipo doc_tipo,coalesce(a.allocated,0) allocated,coalesce(a.n,0) allocation_count,
  CASE WHEN a.n=1 AND a.allocated=f.gross_amount THEN a.project_id END project_id,
  CASE WHEN a.n=1 AND a.allocated=f.gross_amount THEN a.project_label END project_label,
@@ -28,6 +29,7 @@ const BASE=`WITH base AS (
  LEFT JOIN ledens.worker_payment_splits ws ON ws.worker_payment_id=f.worker_payment_id
  LEFT JOIN ledens.employees em ON em.id=(to_jsonb(w)->>'employee_id')::uuid LEFT JOIN ledens.positions po ON po.id=em.primary_position_id
  LEFT JOIN ledens.customer_payments c ON c.id=f.customer_payment_id
+ LEFT JOIN ledens.invoice_lines il ON il.id=f.invoice_line_id
  LEFT JOIN ledens.finance_review_flags rv ON rv.record_id=f.id
  LEFT JOIN LATERAL(SELECT sum(pa.allocated_amount) allocated,sum(abs(pa.allocated_amount)) used,count(*)::int n,
   (array_agg(pa.project_id))[1] project_id,(array_agg(pr.name))[1] project_label FROM ledens.project_financial_allocations pa

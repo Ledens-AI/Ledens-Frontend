@@ -199,3 +199,26 @@ test('scoped project access redacts shared invoice totals and audit snapshots',a
  const history=await service.history(user,records[0].id);assert.ok(history.some(e=>e.action==='document_changed'));
  assert.ok(history.every(e=>e.before_value.total===undefined&&e.before_value.document===undefined&&e.after_value.document===undefined));
 });
+
+const detailedInvoice=()=>({analyzeResult:{documents:[{fields:{InvoiceTotal:{valueCurrency:{amount:1210,currencyCode:'EUR'},confidence:.99},TotalTax:{valueCurrency:{amount:210},confidence:.99},Items:{valueArray:[350,150,200,300].map((n,i)=>({valueObject:{Description:{valueString:['Cemento','Mortero','Adhesivo','Pintura'][i]},ProductCode:{valueString:'SKU-'+i},Quantity:{valueNumber:i+1},Amount:{valueCurrency:{amount:n,currencyCode:'EUR'},confidence:.99},TaxRate:{valueString:'21.00',confidence:.99}}}))}}}]}});
+test('reconciled item extraction replaces an unassigned envelope with four products and preserves one Bridge',async()=>{
+ const d=await doc();await db.query("UPDATE ledens.documents SET numerodocumento='SPLIT-DOC-0001',tercero='Proveedor' WHERE id=$1",[d]);const bank=(await db.query("INSERT INTO ledens.bank_movements(amount,total_amount,currency) VALUES(-1210,-1210,'EUR') RETURNING id")).rows[0].id;await db.query("INSERT INTO ledens.bank_document_allocations(document_id,bank_movement_id,allocated_amount,state) VALUES($1,$2,-1210,'Confirmado')",[d,bank]);
+ await service.transaction(c=>storeInvoiceLines(c,d,[{line_number:1,description:'Sin desglose',net_amount:1000,vat_amount:null}],{direction:'Pagar',currency:'EUR'}));
+ const lines=extractLines(detailedInvoice());assert.deepEqual(lines.map(l=>l.gross_amount),['423.50','181.50','242.00','363.00']);
+ await service.transaction(c=>storeInvoiceLines(c,d,lines,{direction:'Pagar',currency:'EUR',actorId:admin.id}));await service.transaction(c=>storeInvoiceLines(c,d,lines,{direction:'Pagar',currency:'EUR',actorId:admin.id}));
+ const active=(await db.query("SELECT * FROM ledens.financial_records WHERE document_id=$1 AND source_valid AND status<>'excluded' ORDER BY description",[d])).rows;assert.equal(active.length,4);assert.equal(active.reduce((a,r)=>a+cents(r.gross_amount),0n),121000n);
+ const pending=(await service.list(admin,{unassigned:true,search:'SPLIT-DOC-0001'}));assert.equal(pending.length,4);assert.ok(pending.every(r=>r.document_number==='SPLIT-DOC-0001'&&r.reconciled&&r.allocations.length===0));
+ const first=active.filter(r=>['Cemento','Mortero'].includes(r.description)),second=active.filter(r=>['Adhesivo','Pintura'].includes(r.description));for(const r of first)await replace(r,[share(p1,r.gross_amount)]);for(const r of second)await replace(r,[share(p2,r.gross_amount)]);
+ assert.equal((await db.query('SELECT count(*)::int n FROM ledens.bank_document_allocations WHERE document_id=$1',[d])).rows[0].n,1);assert.equal((await db.query("SELECT count(*)::int n FROM ledens.finance_events WHERE action='document_line_breakdown_replaced' AND before_value->>'document_id'=$1::text",[d])).rows[0].n,1);
+});
+test('gross Amount including VAT and mixed tax rates are normalized against verified document totals',()=>{
+ const make=(gross,tax,amounts,rates)=>({analyzeResult:{documents:[{fields:{InvoiceTotal:{valueCurrency:{amount:gross},confidence:.99},TotalTax:{valueCurrency:{amount:tax},confidence:.99},Items:{valueArray:amounts.map((n,i)=>({valueObject:{Description:{valueString:'Concepto '+i},Amount:{valueCurrency:{amount:n},confidence:.99},TaxRate:{valueString:String(rates[i]),confidence:.99}}}))}}}]}});
+ const advance=extractLines(make(772.56,134.08,[772.56],[21]));assert.equal(advance.length,1);assert.equal(advance[0].gross_amount,'772.56');assert.equal(advance[0].net_amount,'638.48');assert.equal(advance[0].vat_amount,'134.08');
+ const mixed=extractLines(make(231,31,[121,110],[21,10]));assert.deepEqual(mixed.map(l=>l.net_amount),['100.00','100.00']);assert.deepEqual(mixed.map(l=>l.vat_amount),['21.00','10.00']);
+ const credit=extractLines(make(-121,-21,[-121],[21]));assert.equal(credit[0].gross_amount,'-121.00');assert.equal(credit[0].net_amount,'-100.00');
+});
+test('assigned envelope cannot be replaced without explicit allocation review',async()=>{
+ const d=await doc('-121');await service.transaction(c=>storeInvoiceLines(c,d,[{line_number:1,net_amount:100,vat_amount:null}],{direction:'Pagar',currency:'EUR'}));const r=(await db.query('SELECT * FROM ledens.financial_records WHERE document_id=$1',[d])).rows[0];await replace(r,[share(p1,'121')]);
+ await assert.rejects(service.transaction(c=>storeInvoiceLines(c,d,[{line_number:1,description:'Material',net_amount:100,vat_amount:21}],{direction:'Pagar',currency:'EUR'})),/assigned_envelope_requires_line_review/);
+ assert.equal((await db.query('SELECT count(*)::int n FROM ledens.financial_records WHERE document_id=$1',[d])).rows[0].n,1);assert.equal((await db.query('SELECT project_id FROM ledens.project_financial_allocations WHERE record_id=$1',[r.id])).rows[0].project_id,p1);
+});
