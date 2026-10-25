@@ -58,6 +58,10 @@ jobs:
         env:
           NOTIFICATIONS_TEST_DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_notifications_test
         run: node --test test/notifications.test.js
+      - name: Automatic bank matching and concurrency on PostgreSQL 16
+        env:
+          BRIDGE_TEST_DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_bridge_test
+        run: node --test test/bridge.test.js
       - name: Frontend dependency installation
         working-directory: ledens/frontend
         run: npm ci

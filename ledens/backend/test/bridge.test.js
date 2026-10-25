@@ -2,12 +2,14 @@ import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
+import pg from 'pg';
 import {BridgeService} from '../src/bridge/service.js';
 import {cents,eligibleBank,automaticBlock} from '../src/bridge/rules.js';
 let db,service,pool;
 before(async()=>{
- db=new PGlite();for(const path of ['finance-fixture.sql','../src/db/migrations/004_invoice_ingestion.sql','../src/db/migrations/005_bank_bridge.sql'])await db.exec(await fs.readFile(new URL(path,import.meta.url),'utf8'));
- pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};service=new BridgeService(pool);
+ if(process.env.BRIDGE_TEST_DATABASE_URL){const real=new pg.Pool({connectionString:process.env.BRIDGE_TEST_DATABASE_URL});db={query:(...a)=>real.query(...a),exec:q=>real.query(q),close:()=>real.end()};pool=real;}else{db=new PGlite();}
+ for(const path of ['finance-fixture.sql','../src/db/migrations/004_invoice_ingestion.sql','../src/db/migrations/005_bank_bridge.sql'])await db.exec(await fs.readFile(new URL(path,import.meta.url),'utf8'));
+ pool=pool||{query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};service=new BridgeService(pool);
 });after(()=>db?.close());
 const document=async(number,total='-121')=>{
  const d=(await db.query("INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento,tercero,niftercero) VALUES($1,'Pagar','2025-09-01',$2,'Proveedor Ejemplo','B12345678') RETURNING id",[total,number])).rows[0].id;
@@ -20,21 +22,22 @@ test('exact verified reference and party reconcile once using signed Confirmado 
  await service.evaluate(d,{force:true});const rows=(await db.query('SELECT * FROM ledens.bank_document_allocations WHERE document_id=$1',[d])).rows;
  assert.equal(rows.length,1);assert.equal(rows[0].bank_movement_id,b);assert.equal(rows[0].allocated_amount,'-121');assert.equal(rows[0].state,'Confirmado');
 });
-test('same amount without reference remains pending',async()=>{
- const d=await document('TEST-000002');await bank('Transferencia');assert.equal((await service.evaluate(d,{force:true})).reason,'insufficient_evidence');
+test('unique nearby supplier and amount reconcile without reference',async()=>{
+ const d=await document('TEST-000002','-122');await bank('Transferencia','-122');assert.equal((await service.evaluate(d,{force:true})).status,'matched');
+ const event=(await db.query("SELECT detail FROM ledens.bridge_events WHERE document_id=$1 AND action='auto_confirmed'",[d])).rows[0].detail;assert.equal(event.reference,false);assert.equal(event.evidence_mode,'party_amount_near_date');
 });
 test('ambiguous banks and competing documents are not assigned greedily',async()=>{
- const d=await document('TEST-000003');await bank('TEST-000003');await bank('TEST-000003');assert.equal((await service.evaluate(d,{force:true})).reason,'ambiguous_match');
- const a=await document('TEST-000004'),b=await document('TEST-000004-copy');await db.query("UPDATE ledens.documents SET numerodocumento='TEST-000004' WHERE id=$1",[b]);await bank('TEST-000004');
+ const d=await document('TEST-000003','-123');await bank('TEST-000003','-123');await bank('TEST-000003','-123');assert.equal((await service.evaluate(d,{force:true})).reason,'ambiguous_match');
+ const a=await document('TEST-000004','-124'),b=await document('TEST-000004-copy','-124');await db.query("UPDATE ledens.documents SET numerodocumento='TEST-000004' WHERE id=$1",[b]);await bank('TEST-000004','-124');
  assert.equal((await service.evaluate(a,{force:true})).reason,'competing_document');
 });
 test('late bank arrival can retry and reversed owned match returns to review',async()=>{
- const d=await document('TEST-000005');assert.equal((await service.evaluate(d,{force:true})).status,'pending');const b=await bank('TEST-000005');assert.equal((await service.evaluate(d,{force:true})).status,'matched');
+ const d=await document('TEST-000005','-125');assert.equal((await service.evaluate(d,{force:true})).status,'pending');const b=await bank('TEST-000005','-125');assert.equal((await service.evaluate(d,{force:true})).status,'matched');
  await db.query("UPDATE ledens.bank_movements SET state='REVERTED' WHERE id=$1",[b]);await service.monitor(d);
  assert.equal((await db.query('SELECT state FROM ledens.bank_document_allocations WHERE document_id=$1',[d])).rows[0].state,'Revisar');
 });
 test('manual or imported partial match is preserved for user review',async()=>{
- const d=await document('TEST-000006'),b=await bank('TEST-000006');await db.query("INSERT INTO ledens.bank_document_allocations(document_id,bank_movement_id,allocated_amount,state) VALUES($1,$2,-60,'Confirmado')",[d,b]);
+ const d=await document('TEST-000006','-126'),b=await bank('TEST-000006','-126');await db.query("INSERT INTO ledens.bank_document_allocations(document_id,bank_movement_id,allocated_amount,state) VALUES($1,$2,-60,'Confirmado')",[d,b]);
  assert.equal((await service.evaluate(d,{force:true})).reason,'partial_or_existing_allocation');assert.equal((await db.query('SELECT allocated_amount FROM ledens.bank_document_allocations WHERE document_id=$1',[d])).rows[0].allocated_amount,'-60');
 });
 test('fees, currency mismatch, internal transfer and missing confidence cannot auto-reconcile',()=>{
@@ -48,6 +51,38 @@ test('all invoice confidence checks use inclusive 50 percent threshold',()=>{
  const d={total:'-121',tipo:'Pagar',document_on:'2025-09-01',invoice_currency:'EUR',date_confidence:.5,total_confidence:.5,number_confidence:.5,direction_confidence:.5,numerodocumento:'TEST-000050',tercero:'Proveedor Ejemplo',party_confidence:.5};
  const bank={amount:'-121',total_amount:'-121',state:'COMPLETED',currency:'EUR',type:'TRANSFER',completed_on:'2025-09-02',is_internal_transfer:false,reference:'TEST-000050',beneficiary_name:'Proveedor Ejemplo'};
  assert.equal(automaticBlock(d),null);assert.equal(eligibleBank(d,bank),true);
- for(const key of ['date_confidence','total_confidence','number_confidence','direction_confidence'])assert.equal(automaticBlock({...d,[key]:.499}),'unverified_invoice_fields');
+ for(const key of ['date_confidence','total_confidence','direction_confidence'])assert.equal(automaticBlock({...d,[key]:.499}),'unverified_invoice_fields');
  assert.equal(eligibleBank({...d,party_confidence:.499},bank),false);
+});
+
+test('reference-free matching accepts exactly +/- 7 days and needs no invoice-number confidence',async()=>{
+ const d=await document('WINDOW-00001','-901'),b=await bank(null,'-901');
+ await db.query("UPDATE ledens.documents SET numerodocumento=NULL WHERE id=$1",[d]);await db.query('UPDATE ledens.invoice_ingestions SET number_confidence=NULL WHERE document_id=$1',[d]);
+ await db.query("UPDATE ledens.bank_movements SET completed_on='2025-09-09' WHERE id=$1",[b]);assert.equal((await service.evaluate(d,{force:true})).status,'pending');
+ await db.query("UPDATE ledens.bank_movements SET completed_on='2025-09-08' WHERE id=$1",[b]);assert.equal((await service.evaluate(d,{force:true})).status,'matched');
+ const before=await document('WINDOW-00002','-902'),prior=await bank(null,'-902');await db.query("UPDATE ledens.bank_movements SET completed_on='2025-08-24' WHERE id=$1",[prior]);assert.equal((await service.evaluate(before,{force:true})).status,'pending');await db.query("UPDATE ledens.bank_movements SET completed_on='2025-08-25' WHERE id=$1",[prior]);assert.equal((await service.evaluate(before,{force:true})).status,'matched');
+});
+test('two nearby unreferenced banks or two competing invoices stay pending',async()=>{
+ const d=await document('AMBIGUOUS-001','-903');await bank(null,'-903');await bank(null,'-903');assert.equal((await service.evaluate(d,{force:true})).reason,'ambiguous_match');
+ const a=await document('COMPETE-001','-904'),other=await document('COMPETE-002','-904');await bank(null,'-904');assert.equal((await service.evaluate(a,{force:true})).reason,'competing_document');assert.equal((await service.evaluate(other,{force:true})).reason,'competing_document');
+});
+test('wrong supplier, wrong amount, refunds and occupied bank rows do not match',async()=>{
+ const d=await document('REJECT-00001','-905'),wrong=await bank(null,'-905');await db.query("UPDATE ledens.bank_movements SET beneficiary_name='Otro Proveedor' WHERE id=$1",[wrong]);assert.equal((await service.evaluate(d,{force:true})).status,'pending');
+ await db.query("UPDATE ledens.bank_movements SET beneficiary_name='Proveedor Ejemplo',amount=-904,total_amount=-904 WHERE id=$1",[wrong]);assert.equal((await service.evaluate(d,{force:true})).status,'pending');
+ await db.query('UPDATE ledens.bank_movements SET amount=905,total_amount=905 WHERE id=$1',[wrong]);assert.equal((await service.evaluate(d,{force:true})).status,'pending');
+ const held=await document('HELD-0001','-909'),owner=await document('HELD-0002','-909'),reserved=await bank(null,'-909');await db.query("INSERT INTO ledens.bank_document_allocations(document_id,bank_movement_id,allocated_amount,state) VALUES($1,$2,-909,'Confirmado')",[owner,reserved]);assert.equal((await service.evaluate(held,{force:true})).status,'pending');
+});
+test('reference rule retains its longer window and old owned allocations can still be invalidated',async()=>{
+ const d=await document('LONG-REF-001','-906'),b=await bank('LONG-REF-001','-906');await db.query("UPDATE ledens.bank_movements SET completed_on='2025-10-01' WHERE id=$1",[b]);assert.equal((await service.evaluate(d,{force:true})).status,'matched');
+ await db.query("UPDATE ledens.bank_document_allocations SET observaciones='AUTO_BRIDGE:exact-reference-party-v1' WHERE document_id=$1",[d]);await db.query("UPDATE ledens.bank_movements SET state='REVERTED' WHERE id=$1",[b]);await service.monitor(d);assert.equal((await db.query('SELECT state FROM ledens.bank_document_allocations WHERE document_id=$1',[d])).rows[0].state,'Revisar');
+});
+test('new rule migration retries ingested pending cases while preserving confirmed cases',async()=>{
+ const d=await document('MIGRATION-001','-907');await db.query("UPDATE ledens.bridge_cases SET next_attempt_at='infinity',reason='unverified_invoice_fields' WHERE document_id=$1",[d]);
+ await db.exec(await fs.readFile(new URL('../src/db/migrations/012_bridge_party_amount_date.sql',import.meta.url),'utf8'));
+ const row=(await db.query('SELECT next_attempt_at FROM ledens.bridge_cases WHERE document_id=$1',[d])).rows[0];assert.ok(Number.isFinite(+new Date(row.next_attempt_at)));
+ const b=await bank(null,'-907');assert.equal((await service.evaluate(d,{force:true})).status,'matched');await service.evaluate(d,{force:true});assert.equal((await db.query('SELECT count(*)::int n FROM ledens.bank_document_allocations WHERE bank_movement_id=$1',[b])).rows[0].n,1);
+});
+test('PostgreSQL competing evaluations cannot allocate one bank twice',{skip:!process.env.BRIDGE_TEST_DATABASE_URL},async()=>{
+ const a=await document('CONCURRENT-001','-908'),b=await document('CONCURRENT-002','-908'),movement=await bank(null,'-908');
+ const result=await Promise.all([service.evaluate(a,{force:true}),service.evaluate(b,{force:true})]);assert.ok(result.every(x=>x.status==='pending'));assert.equal((await db.query('SELECT count(*)::int n FROM ledens.bank_document_allocations WHERE bank_movement_id=$1',[movement])).rows[0].n,0);
 });

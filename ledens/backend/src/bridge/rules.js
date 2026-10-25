@@ -1,7 +1,9 @@
 import {createHash} from 'node:crypto';
 
 export const INVOICE_MIN_CONFIDENCE=0.5;
-export const RULE_VERSION='exact-reference-party-v1';
+export const RULE_VERSION='party-amount-date-v2';
+export const OWNED_RULE_VERSIONS=['exact-reference-party-v1',RULE_VERSION];
+export const NEAR_DATE_DAYS=7;
 export const LOCK_ID=727032;
 export const normalize=s=>String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();
 export const taxId=s=>normalize(s).replace(/\s/g,'').replace(/^ES(?=[A-Z0-9]{9}$)/,'');
@@ -42,12 +44,12 @@ export function automaticBlock(doc){
   if(!['Pagar','Cobrar'].includes(doc.tipo)||(doc.tipo==='Pagar')!==(total<0n))return 'unknown_direction';
   if(doc.review_state==='Incidencia')return 'invoice_issue';
   if(doc.invoice_currency!=='EUR')return 'unverified_currency';
-  for(const [key,threshold] of [['total_confidence',INVOICE_MIN_CONFIDENCE],['date_confidence',INVOICE_MIN_CONFIDENCE],['number_confidence',INVOICE_MIN_CONFIDENCE],['direction_confidence',INVOICE_MIN_CONFIDENCE]]){
+  for(const [key,threshold] of [['total_confidence',INVOICE_MIN_CONFIDENCE],['date_confidence',INVOICE_MIN_CONFIDENCE],['direction_confidence',INVOICE_MIN_CONFIDENCE]]){
     const value=Number(doc[key]);if(!Number.isFinite(value)||value<threshold||value>1)return 'unverified_invoice_fields';
   }
   return null;
 }
-export function eligibleBank(doc,bank){
+export function bankMatchRule(doc,bank){
   const dt=cents(doc.total),amount=cents(bank.amount),total=cents(bank.total_amount);
   if(dt===null||dt===0n||amount===null||total===null||dt!==amount||dt!==total)return false;
   if(bank.state!=='COMPLETED'||bank.currency!=='EUR'||bank.is_internal_transfer===true)return false;
@@ -57,5 +59,9 @@ export function eligibleBank(doc,bank){
   if(bank.bill_currency&&bank.bill_currency!==bank.currency)return false;
   if(bank.bill_amount!=null&&abs(cents(bank.bill_amount)??0n)!==abs(amount))return false;
   const a=day(doc.document_on),b=day(bank.completed_on);
-  return a!==null&&b!==null&&b>=a-7&&b<=a+90&&hasReference(doc.numerodocumento,bank)&&hasParty(doc,bank,{verified:true});
+  if(a===null||b===null||!hasParty(doc,bank,{verified:true}))return false;
+  if(Number(doc.number_confidence)>=INVOICE_MIN_CONFIDENCE&&Number(doc.number_confidence)<=1&&b>=a-7&&b<=a+90&&hasReference(doc.numerodocumento,bank))return 'exact_reference';
+  return Math.abs(b-a)<=NEAR_DATE_DAYS?'party_amount_near_date':false;
 }
+
+export const eligibleBank=(doc,bank)=>Boolean(bankMatchRule(doc,bank));
