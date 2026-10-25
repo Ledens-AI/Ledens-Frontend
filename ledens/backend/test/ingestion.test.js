@@ -185,3 +185,22 @@ test('a tax id printed with its label («ES NIF B…», «IE VAT IE…») is sti
   assert.equal(seller.direction,'Pagar');
   assert.equal(extractInvoice(inv({VendorTaxId:{valueString:'ES NIF B19753805',confidence:.9}})).direction,'Cobrar','our labelled id as seller');
 });
+test('a store ticket with only a header on page 1 and «Total TTI» on page 3 sends pages 2 and 3',async()=>{
+  const sent=async(texts,n=4)=>{const file=await validateInvoice(payload('k'+Math.random(),{content_base64:(await pagesPdf(n,texts)).toString('base64')}),config);return [file.ocrPageNumbers,await widths(file.ocrContent)];};
+  const header='FACTURA 008-0010-453160 DUPLICADO BRICOLAJE BRICOMAN',items='Malaga, a 19 Octubre 2026 Numero NIF B19753805 Fecha de venta 19/10/2026 1 SACO RAFIA 25KG 25 UNID 0,17 2 PTA 4C BORMUJOS 80x60 1 UNID 21,49';
+  assert.deepEqual(await sent([header,items,'Tasa IVA Total. SI Total IVA Total TTI (EUR) 403,45']),[[2,3],[302,303]]);
+  assert.deepEqual(await sent([[header,...Array(12).fill('Linea de detalle del documento')].join('\n'),items,'Total TTI (EUR) 403,45']),[[1,3],[301,303]],'a full first page stays');
+  assert.deepEqual(await sent([header,items,'Total IVA 70,02']),[[1,2],[301,302]],'«Total IVA» alone is not the invoice total');
+});
+test('an invoice held for date, total or low-confidence fields is read again on resend; other reasons and linked documents are not',async()=>{
+  const sent=[];const svc=new IngestionService({connect:async()=>({query:(q,p)=>db.query(q,p),release(){}})},{...ocr,start:async(content)=>{sent.push(content);return ocr.start();}},config);
+  const resend=async(reason,id)=>{const pdf=await PDFDocument.create();pdf.addPage([500+id.length,100]);const content_base64=Buffer.from(await pdf.save()).toString('base64');
+    const row=await svc.receive(await validateInvoice(payload(id,{content_base64}),config));
+    await db.query("UPDATE ledens.invoice_ingestions SET status='review',reason=$2,content=NULL WHERE id=$1",[row.ingestion_id,reason]);
+    return svc.receive(await validateInvoice(payload(id+'-again',{content_base64,filename:id+'.pdf'}),config));};
+  for(const reason of ['invoice_date_requires_review','invoice_total_requires_review','invoice_fields_require_review','invoice_currency_requires_review']){
+    const back=await resend(reason,'r-'+reason);assert.deepEqual([back.status,back.duplicate],['received',false],reason);
+  }
+  const other=await resend('ocr_rejected_document','r-other-reason');
+  assert.deepEqual([other.status,other.reason],['review','ocr_rejected_document'],'not an OCR field reason');
+});

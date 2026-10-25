@@ -4,6 +4,10 @@ import { IngestError } from './validation.js';
 import {archiveIssue} from './completeness.js';
 import {cents,decimal} from '../bridge/rules.js';
 import { extractInvoice } from './ocr.js';
+// Review reasons decided from the OCR reading: an explicit resend (Logic App
+// resubmission or re-upload) reads it again, since page choice and extraction
+// rules improve; never once a bank movement is linked to the document.
+const OCR_RETRY=['invoice_direction_requires_review','invoice_date_requires_review','invoice_total_requires_review','invoice_currency_requires_review','invoice_fields_require_review'];
 
 export class IngestionService {
   constructor(pool, ocr, config) { this.pool=pool; this.ocr=ocr; this.config=config; }
@@ -32,8 +36,8 @@ export class IngestionService {
   }
   // A PDF held as f0_page_limit before the first-page rule: when it arrives again
   // with OCR input, it goes back to «received» and is analysed like a new one.
-  // Likewise a supplier invoice held as invoice_direction_requires_review before
-  // the seller-tax-id rule, while no bank movement is linked to its document.
+  // Likewise an invoice held for an OCR_RETRY reason (direction, date, total…),
+  // while no bank movement is linked to its document.
   async linked(c,documentId){
     if(!(await c.query("SELECT to_regclass('ledens.bank_document_allocations') IS NOT NULL ok")).rows[0].ok)return false;
     return (await c.query('SELECT 1 FROM ledens.bank_document_allocations WHERE document_id=$1 LIMIT 1',[documentId])).rows.length>0;
@@ -41,7 +45,7 @@ export class IngestionService {
   async recoverReview(c,row,file){
     if(row.status!=='review'||file.reason||file.nativePurchase||file.nativeStatement)return;
     if(row.reason==='f0_page_limit'){if(!file.ocrContent)return;}
-    else if(row.reason!=='invoice_direction_requires_review'||!row.document_id||await this.linked(c,row.document_id))return;
+    else if(!OCR_RETRY.includes(row.reason)||!row.document_id||await this.linked(c,row.document_id))return;
     await c.query("UPDATE ledens.invoice_ingestions SET status='received',reason=NULL,content=$2,operation_url=NULL,updated_at=now() WHERE id=$1",[row.id,file.ocrContent||file.content]);
     Object.assign(row,{status:'received',reason:null,operation_url:null});return true;
   }

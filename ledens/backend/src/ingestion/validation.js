@@ -21,8 +21,11 @@ export async function pickPages(pdf, indices) {
   for (const page of await out.copyPages(pdf, indices)) out.addPage(page);
   return Buffer.from(await out.save());
 }
-// Wording of an invoice total (not «Subtotal»): «Total factura», «Importe total», «Total a pagar», «TOTAL: 15,25 €»…
-export const TOTAL_TEXT = /(?<![a-z])(importe\s+total|total\s+(?:factura|de\s+la\s+factura|a\s+pagar|general|con\s+iva|iva\s+incluido|eur)|total\s*(?:\(\s*eur\s*\)|€|:))/i;
+// Wording of an invoice total (not «Subtotal»): «Total factura», «Importe total», «Total a pagar», «TOTAL: 15,25 €»,
+// and the till-ticket «Total TTI (EUR)» / «Total TTC» (tax included) of store invoices…
+export const TOTAL_TEXT = /(?<![a-z])(importe\s+total|total\s+(?:factura|de\s+la\s+factura|a\s+pagar|general|con\s+iva|iva\s+incluido|eur|tt[ci]\b)|total\s*(?:\(\s*eur\s*\)|€|:))/i;
+// A first page with less text than this is only a header (logo, number, company register).
+const HEADER_ONLY = 300;
 // Text of the first `n` pages; a page without a text layer (a scan) is ''.
 export async function pageTexts(content, n) {
   let pdf;
@@ -39,7 +42,11 @@ export async function pageTexts(content, n) {
 export async function ocrPages(content) {
   const texts = await pageTexts(content, 3);
   const at = texts.findIndex((t) => TOTAL_TEXT.test(t));
-  return at === 2 ? [0, 2] : [0, 1];
+  if (at !== 2) return [0, 1];
+  // Total on page 3 behind a header-only page 1 (store tickets: date, NIF and
+  // items on page 2): pages 2 and 3 carry everything the OCR needs.
+  const size = (t) => (t || '').replace(/\s/g, '').length;
+  return size(texts[0]) < HEADER_ONLY && size(texts[1]) > size(texts[0]) ? [1, 2] : [0, 2];
 }
 export async function validateInvoice(body, config) {
   if (!body || body.site_url !== config.site || body.library !== 'Shared Documents' ||
