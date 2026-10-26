@@ -26,7 +26,7 @@ import '../../styles/plataforma.css';
 const HOME = { client: 'c_home', worker: 'w_home', admin: 'a_home' };
 const PREFIX = { client: 'c_', worker: 'w_', admin: 'a_' };
 // Screens drawn by ./obras/Obras.jsx, and which of its views each one is.
-const OBRAS_SCREEN = { c_home: 'home', c_presupuestos: 'presupuestos', c_obras: 'obras', w_home: 'home', w_obras: 'presupuestos', a_presu: 'presupuestos' };
+const OBRAS_SCREEN = { c_home: 'home', c_presupuestos: 'presupuestos', c_obras: 'obras', w_home: 'home', w_obras: 'presupuestos', w_avance: 'avance', a_presu: 'presupuestos', a_avance: 'avance' };
 
 class PlataformaView extends React.Component {
   state={role:ROLE_VIEW[this.props.user.role]||'client',screen:HOME[ROLE_VIEW[this.props.user.role]||'client'],userId:null,adminUsers:null,adminAudit:[],roleEdit:null,saving:false,notifOpen:false,modal:null,toast:'',phone:'',personType:'fisica',profErr:'',reason:'',userFilter:'all',q:'',presu:null,finTab:'resumen',finPending:0,finBridgePending:0,finConciliationPending:0};
@@ -65,8 +65,8 @@ class PlataformaView extends React.Component {
     const user=rowsAll.find(u=>u.id===s.userId)||{id:null,name:s.adminUsers?'Usuario no encontrado':'Cargando…',email:'',role:'client',roleL:'',since:'',prov:'',ver:'',verBg:'#EDEDEA',verFg:'#3A3A38',profS:'',works:'—',last:'',phone:'—',city:'—',issues:[],initials:''};
     const pc=s.presu||{},obrasScreen=OBRAS_SCREEN[s.screen]||null;
     const nav=role==='client'?[mk(L.nav.home,'ri-home-5-line','c_home'),mk(L.nav.presupuestos,'ri-file-list-3-line','c_presupuestos',pc.pendiente||0),mk(L.nav.obras,'ri-building-2-line','c_obras'),mk(L.nav.perfil,'ri-user-3-line','c_perfil')]
-      :role==='worker'?[mk('Hoy','ri-sun-line','w_home'),mk('Obras asignadas','ri-building-2-line','w_obras',pc.cambios||0)]
-      :[mk('Panel','ri-dashboard-3-line','a_home'),mk('Usuarios','ri-group-line','a_users',rowsAll.filter(u=>u.issues.length).length,['a_users','a_user']),mk('Auditoría','ri-history-line','a_audit'),mk('Presupuestos y obras','ri-file-list-3-line','a_presu',pc.cambios||0)];
+      :role==='worker'?[mk('Hoy','ri-sun-line','w_home'),mk('Obras asignadas','ri-building-2-line','w_obras',pc.cambios||0),mk('Actualizar avance','ri-bar-chart-horizontal-line','w_avance')]
+      :[mk('Panel','ri-dashboard-3-line','a_home'),mk('Usuarios','ri-group-line','a_users',rowsAll.filter(u=>u.issues.length).length,['a_users','a_user']),mk('Auditoría','ri-history-line','a_audit'),mk('Presupuestos y obras','ri-file-list-3-line','a_presu',pc.cambios||0),mk('Actualizar avance','ri-bar-chart-horizontal-line','a_avance')];
     const finScreen=PREFIX[role]+'fin',isFin=s.screen===finScreen;
     // Admin-only finance tabs follow the panel on screen: an admin in the jefe
     // panel (or viewing as a jefe) sees the jefe's tabs.
@@ -74,7 +74,7 @@ class PlataformaView extends React.Component {
       return {label,icon,badge:k==='pendientes'?s.finPending:k==='conciliacion'?s.finConciliationPending:k==='pendiente-bridge'?s.finBridgePending:0,finConciliationPending:0,go:()=>this.go(finScreen,{finTab:k}),bg:on?'#F2F4FA':'transparent',fg:on?'#3E4D85':'#3A3A38',fw:on?700:500};}));
     const U=this.props.user,shown=s.viewAs||U,meName=shown.name||shown.email;
     const me={name:meName,initials:initials(meName),role:shown.role&&shown.role!=='client'?ROLE_LABEL[shown.role]:L.clientRole,avBg:role==='client'?'#EC6090':role==='worker'?'#68C0B5':'#0C062B'};
-    const titles={c_home:[L.nav.home],c_obras:[L.nav.obras],c_presupuestos:[L.nav.presupuestos],c_perfil:[L.nav.perfil],w_home:['Hoy'],w_obras:['Obras asignadas'],a_home:['Panel de administración'],a_users:['Usuarios'],a_user:['Usuarios',user.name],a_audit:['Auditoría'],a_presu:['Presupuestos y obras']};
+    const titles={c_home:[L.nav.home],c_obras:[L.nav.obras],c_presupuestos:[L.nav.presupuestos],c_perfil:[L.nav.perfil],w_home:['Hoy'],w_obras:['Obras asignadas'],a_home:['Panel de administración'],a_users:['Usuarios'],a_user:['Usuarios',user.name],a_audit:['Auditoría'],a_presu:['Presupuestos y obras'],w_avance:['Actualizar avance'],a_avance:['Actualizar avance']};
     titles[finScreen]=['Gestión financiera',(FIN_TABS.find(t=>t[0]===s.finTab)||FIN_TABS[0])[1]];
     const parent={a_user:'a_users'};
     const tt=titles[s.screen];const crumbs=tt.map((l,i)=>({label:l,sep:i>0,fg:i===tt.length-1?'#1D1D1B':'#6B6B68',fw:i===tt.length-1?700:500,go:()=>i<tt.length-1&&(isFin?this.go(finScreen,{finTab:'resumen'}):this.go(parent[s.screen]))}));

@@ -25,6 +25,7 @@ const fontaneria = (caliente = '50') => ({
   ],
 });
 const items = (d) => d.version.chapters.flatMap((c) => c.items);
+const obraItemById = (d, id) => d.obra.chapters.flatMap((c) => c.items).find((i) => i.id === id);
 const obraItem = (d, code) => d.obra.chapters.flatMap((c) => c.items).find((i) => i.code === code);
 
 before(async () => {
@@ -226,4 +227,19 @@ test('references keep every digit past 999', async () => {
   const refs = [];
   for (let n = 0; n < 2; n++) refs.push((await as(admin).create({ title: 'Ref ' + n, clientId: cliente.id })).ref);
   assert.deepEqual(refs.map((r) => r.split('-')[2]), ['999', '1000']);
+});
+
+test('an admin reassigns the jefe de obra; the new one (admin or jefe) takes over, ampliaciones included', async () => {
+  await assert.rejects(as(jefe).assignJefe(obraId, { jefeId: otroJefe.id }), { status: 403 });
+  await assert.rejects(as(admin).assignJefe(obraId, { jefeId: cliente.id }), { status: 400 });
+  const d = await as(admin).assignJefe(obraId, { jefeId: otroJefe.id });
+  assert.equal(d.jefe.name, 'Otro Jefe');
+  assert.ok(d.ampliaciones.length);
+  assert.equal((await db.query('SELECT count(*)::int n FROM presupuestos WHERE parent_id=$1 AND jefe_id<>$2', [obraId, otroJefe.id])).rows[0].n, 0);
+  await assert.rejects(as(jefe).get(obraId), { status: 404 }, 'the previous jefe no longer sees it');
+  const item = d.obra.chapters[0].items[0];
+  const after = await as(otroJefe).declare(obraId, { items: [{ partidaId: item.id, executed: '27.5' }] });
+  assert.equal(obraItemById(after, item.id).executed, '27.5000');
+  await as(admin).assignJefe(obraId, { jefeId: jefe.id });
+  assert.equal((await db.query("SELECT count(*)::int n FROM audit_log WHERE action='Jefe de obra asignado'")).rows[0].n, 2);
 });
