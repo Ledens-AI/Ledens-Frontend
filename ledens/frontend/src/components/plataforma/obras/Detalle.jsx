@@ -3,6 +3,7 @@ import { api, PHASE, VSTATUS, KIND, parseDecimal, pctS } from './api.js';
 import { eur, num, fecha, fechaHora } from '../finanzas/format.js';
 import { Badge, Dialog, Empty, ErrorBox, Kpi } from '../finanzas/ui.jsx';
 import Editor from './Editor.jsx';
+import Archivos from './Archivos.jsx';
 
 export const PhaseBadge = ({ phase }) => { const p = PHASE[phase] || PHASE.borrador; return <Badge bg={p.bg} fg={p.fg} icon={p.icon}>{p.label}</Badge>; };
 // 0–100 bar with the current value on it; values over 100 fill the bar and say so.
@@ -64,7 +65,8 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
   };
   const options = v.chapters.flatMap((c) => c.items).filter((i) => i.kind === 'decision' || i.kind === 'opcion');
   const optionalChosen = options.filter((i) => selected.includes(i.id)).reduce((a, i) => a + Number(i.amount), 0);
-  const tabs = [['presupuesto', 'Presupuesto'], ...(doc.obra ? [['obra', 'Obra en curso']] : []), ['conversacion', `Conversación${doc.comments.length ? ` (${doc.comments.length})` : ''}`]];
+  // Photos and documents belong to the obra: an approved root presupuesto.
+  const tabs = [['presupuesto', 'Presupuesto'], ...(doc.obra ? [['obra', 'Obra en curso'], ['archivos', 'Fotos y documentos']] : []), ['conversacion', `Conversación${doc.comments.length ? ` (${doc.comments.length})` : ''}`]];
 
   return (
     <div className="fin-stack obr">
@@ -171,6 +173,8 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
       ) : null}
 
       {tab === 'obra' && doc.obra ? <ObraTab doc={doc} can={can} busy={busy} autoEdit={initialEdit} onDeclare={(items) => act(() => api.declare(doc.id, { items }), 'Avance guardado')} error={dialogError} /> : null}
+
+      {tab === 'archivos' && doc.obra ? <Archivos obraId={doc.id} readOnly={readOnly} toast={toast} /> : null}
 
       {tab === 'conversacion' ? (
         <div className="fin-card">

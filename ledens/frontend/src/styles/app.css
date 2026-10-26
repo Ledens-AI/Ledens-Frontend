@@ -104,6 +104,8 @@
 .hdr-ctas { display: flex; gap: 10px; align-items: center; flex: 0 0 auto; }
 .hdr-user { display: flex; align-items: center; gap: 10px; }
 .hdr-user-name { font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+/* Header buttons carry a long and a short label; phones swap them (≤560px). */
+.lbl-short, .hdr-logout i { display: none; }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -518,6 +520,11 @@ footer { background: var(--ledens-navy); color: rgba(255,255,255,0.8); padding: 
     box-shadow: none;
     z-index: 0;
   }
+  /* The carousel is only a backdrop here: its arrows and captions would sit
+     on top of the copy and buttons. It keeps autoplaying; the dots stay. */
+  .hero .carousel-ctrl,
+  .hero .slide-caption { display: none; }
+  .hero-copy { padding-bottom: 76px; } /* clear the dots at the bottom */
   /* Stronger top-to-bottom gradient on mobile so headline text is readable */
   .hero .slide::after {
     background: linear-gradient(
@@ -544,8 +551,20 @@ footer { background: var(--ledens-navy); color: rgba(255,255,255,0.8); padding: 
 
 @media (max-width: 560px) {
   .logo-sep, .logo-tag { display: none; }
-  .logo img { width: 44px; height: 44px; }
-  .logo-word { font-size: 30px; }
+  /* Header: compact logo + short labels so everything fits in one row */
+  .hdr-inner { padding: 10px 16px; gap: 10px; }
+  .logo { gap: 8px; }
+  .logo img { width: 34px; height: 34px; }
+  .logo-word { font-size: 25px; }
+  .hdr-ctas { min-width: 0; }
+  .hdr-user { gap: 8px; }
+  .hdr-user-name { display: none; }
+  .lbl-long { display: none; }
+  .lbl-short, .hdr-logout i { display: inline; }
+  .hdr-logout { width: 40px; padding: 0; font-size: 18px; }
+  .hdr-user .btn-blue { padding: 0 14px; }
+  .hero-eyebrow { font-size: 10.5px; letter-spacing: 0.1em; padding: 7px 12px; margin-bottom: 18px; }
+  .hero-copy { padding-top: 32px; }
   .hero h1 { font-size: 32px; }
   .hero-sub { font-size: 15px; }
 
@@ -564,6 +583,10 @@ footer { background: var(--ledens-navy); color: rgba(255,255,255,0.8); padding: 
     width: 100%;
     min-width: 0;        /* allow flex/grid children to shrink below content size */
   }
+  /* Logged in: one row (MI ÁREA + logout icon), not the two-column grid */
+  .hdr-ctas .hdr-user { grid-column: 1 / -1; justify-content: flex-end; }
+  .hdr-ctas .hdr-user .btn { width: auto; }
+  .hdr-ctas .hdr-logout { width: 40px; flex: none; }
   .btn-lg { height: 50px; padding: 0 14px; font-size: 14px; }
   .btn-sm { padding: 0 10px; font-size: 11.5px; }
   /* Hide the "655 638 219" tail on mobile so the button label still fits two-up */
@@ -573,6 +596,10 @@ footer { background: var(--ledens-navy); color: rgba(255,255,255,0.8); padding: 
   .promise-inner { grid-template-columns: 1fr 1fr; }
   .gallery-grid { grid-template-columns: 1fr; grid-template-rows: repeat(5, 220px); }
   .foot-inner { grid-template-columns: 1fr; }
+  /* Filter pills scroll sideways inside their capsule instead of widening the page */
+  .gallery-tabs { display: flex; max-width: 100%; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .gallery-tabs::-webkit-scrollbar { display: none; }
+  .gallery-tabs button { flex: none; padding: 9px 14px; }
   .carousel-ctrl { width: 36px; height: 36px; font-size: 16px; }
 }
 
