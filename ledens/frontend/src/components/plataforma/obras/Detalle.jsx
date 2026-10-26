@@ -265,7 +265,7 @@ function ObraTab({ doc, can, busy, onDeclare, error }) {
     const items = [];
     for (const i of o.chapters.flatMap((c) => c.items)) {
       const raw = values[i.id];
-      const q = parseDecimal(raw, 3);
+      const q = parseDecimal(raw, 4);
       if (q === null) return setLocalError(`Cantidad no válida en «${i.name}»`);
       if (Number(q) !== Number(i.executed)) items.push({ partidaId: i.id, executed: q });
     }
@@ -309,10 +309,10 @@ function ObraTab({ doc, can, busy, onDeclare, error }) {
                 {c.items.map((i) => (
                   <tr key={i.id}>
                     <td className="fin-nowrap">{i.code || '—'}</td>
-                    <td><strong>{i.name}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{`Declarado por ${i.lastDeclared.by || '—'} · ${fechaHora(i.lastDeclared.at)}${i.lastDeclared.note ? ` · ${i.lastDeclared.note}` : ''}`}</div> : null}</td>
+                    <td><strong>{i.name}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{i.lastDeclared.by ? `Declarado por ${i.lastDeclared.by} · ${fechaHora(i.lastDeclared.at)}${i.lastDeclared.note ? ` · ${i.lastDeclared.note}` : ''}` : (i.lastDeclared.note || 'Avance importado')}</div> : null}</td>
                     <td className="fin-num fin-nowrap">{`${num(i.quantity)} ${i.unit}`}</td>
                     <td className="fin-num fin-nowrap">
-                      {editing ? <input aria-label={`Ejecutado en ${i.name}`} inputMode="decimal" className={'obr-in obr-in-num' + (parseDecimal(values[i.id], 3) === null ? ' is-invalid' : '')} value={values[i.id] ?? ''} onChange={(e) => setValues((s) => ({ ...s, [i.id]: e.target.value }))} />
+                      {editing ? <input aria-label={`Ejecutado en ${i.name}`} inputMode="decimal" className={'obr-in obr-in-num' + (parseDecimal(values[i.id], 4) === null ? ' is-invalid' : '')} value={values[i.id] ?? ''} onChange={(e) => setValues((s) => ({ ...s, [i.id]: e.target.value }))} />
                         : `${num(i.executed)} ${i.unit}`}
                       {i.excess && !editing ? <div className="fin-danger fin-small">supera lo presupuestado</div> : null}
                     </td>
