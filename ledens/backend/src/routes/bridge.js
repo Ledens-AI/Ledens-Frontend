@@ -1,12 +1,14 @@
 import {Router} from 'express';
 import {getPool,isDbConfigured} from '../db/pool.js';
-import {requireRole} from '../auth/sessions.js';
+import {requireAuth,checkRole} from '../auth/sessions.js';
+import {viewAs} from '../auth/viewAs.js';
 import {BridgeService,BridgeError} from '../bridge/service.js';
 import {BridgeWorkspace} from '../bridge/workspace.js';
 import {traced} from '../logs/runs.js';
 
 const uuid=s=>typeof s==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
-export function createBridgeRouter({service,authorize=requireRole('admin')}={}){
+// «Ver como»: an admin viewing as a jefe is refused here, as that jefe would be.
+export function createBridgeRouter({service,authorize=[requireAuth,viewAs(),checkRole('admin')]}={}){
   const router=Router();
   router.use((req,res,next)=>{if(!service&&!isDbConfigured())return res.status(503).json({error:'database_unavailable'});next();});
   router.use(authorize);

@@ -1,6 +1,7 @@
 /* Client platform (/plataforma): client area, site-manager workspace and admin
  * panel. Which one you get is decided by your role (users.role on the backend,
- * see CLAUDE.md "Roles"); there is no way to switch from the UI.
+ * see CLAUDE.md "Roles"). Admins can also open the jefe de obra and client
+ * panels, as such or as one user sees them (read-only, audited: VerComo.jsx).
  * Logic and markup ported from the Claude Design file "Ledens Plataforma.dc.html";
  * the JSX was converted mechanically from the design's markup, so it keeps the
  * design's inline styles. Admin screens show real data from /api/admin
@@ -13,6 +14,8 @@ import logo from '../../assets/logo-ledens-isotype.png';
 import { IMG, ST, BST, eur, num, TODAY, D, days, MES, OBRAS, B031, PERMS, BASE, ITYPE } from './data.js';
 import { ROLE_VIEW, ROLE_LABEL, initials, firstName, fmtDate, userRow, signupBars, adminKpis, auditRow } from './adminData.js';
 import { FIN_TABS } from './finanzas/tabs.js';
+import { setViewAs, viewAsHeaders } from './finanzas/api.js';
+import { VerComoSelector, VerComoBanner } from './VerComo.jsx';
 const GestionFinanciera = React.lazy(() => import('./finanzas/GestionFinanciera.jsx'));
 import '../../styles/plataforma.css';
 
@@ -26,10 +29,25 @@ class PlataformaView extends React.Component {
   // Gestión financiera is w_fin / a_fin (jefe de obra and admin), never c_.
   go=(screen,x)=>{if(!screen.startsWith(PREFIX[this.state.role]))return;this.setState(Object.assign({screen,notifOpen:false},x||{}));window.scrollTo(0,0);};
   componentDidMount(){if(this.state.role==='admin'){this.loadUsers();this.loadAudit();this.getJSON('/api/bridge/workspace/counts').then(d=>this.setState({finBridgePending:d.pending,finConciliationPending:d.reconciliation??d.pending}),()=>{});}if(this.state.role!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.pendientes}),()=>{});}
-  getJSON=async(url)=>{const r=await fetch(url);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'No se pudieron cargar los datos.');return d;};
+  getJSON=async(url)=>{const r=await fetch(url,{headers:viewAsHeaders()});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'No se pudieron cargar los datos.');return d;};
   loadUsers=()=>this.getJSON('/api/admin/users').then(d=>this.setState({adminUsers:d.users}),e=>{this.setState({adminUsers:[]});this.flash(e.message);});
   loadAudit=()=>this.getJSON('/api/admin/audit').then(d=>this.setState({adminAudit:d.entries}),e=>this.flash(e.message));
-  componentWillUnmount(){clearTimeout(this._t);}
+  componentWillUnmount(){clearTimeout(this._t);setViewAs(null);}
+  // «Ver como» (admins only): open another panel, optionally as one user sees it.
+  // Viewing as a user is recorded first (POST /api/admin/view-as); from then on
+  // finance requests carry X-Ledens-View-As and the backend answers read-only.
+  switchView=async(panel,user)=>{
+    if(this.props.user.role!=='admin'||!HOME[panel])return;
+    this.setState({switching:true});
+    try{
+      if(user){const r=await fetch('/api/admin/view-as',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:user.id})});
+        const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'No se pudo abrir la vista de ese usuario.');}
+      setViewAs(panel==='admin'?null:user?.id);
+      this.setState({role:panel,screen:HOME[panel],viewAs:panel==='admin'?null:user||null,finTab:'resumen',finPending:undefined,notifOpen:false,switching:false},
+        ()=>{if(panel!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.pendientes}),()=>{});});
+      window.scrollTo(0,0);
+    }catch(e){this.setState({switching:false});this.flash(e.message);}
+  };
   flash=t=>{this.setState({toast:t});clearTimeout(this._t);this._t=setTimeout(()=>this.setState({toast:''}),3600);};
   log=(actor,action,target,detail)=>this.setState(s=>({audit:[['21 oct · ahora',actor,action,target,detail]].concat(s.audit)}));
   build(raw,view){
@@ -73,10 +91,12 @@ class PlataformaView extends React.Component {
       :role==='worker'?[mk('Hoy','ri-sun-line','w_home'),mk('Obras asignadas','ri-building-2-line','w_obras',0,['w_obras','w_obra'])]
       :[mk('Panel','ri-dashboard-3-line','a_home'),mk('Usuarios','ri-group-line','a_users',rowsAll.filter(u=>u.issues.length).length,['a_users','a_user']),mk('Auditoría','ri-history-line','a_audit')];
     const finScreen=PREFIX[role]+'fin',isFin=s.screen===finScreen;
-    if(role!=='client')nav.push({header:'Gestión financiera'},...FIN_TABS.filter(t=>!t[3]||this.props.user.role==='admin').map(([k,label,icon])=>{const on=isFin&&s.finTab===k;
+    // Admin-only finance tabs follow the panel on screen: an admin in the jefe
+    // panel (or viewing as a jefe) sees the jefe's tabs.
+    if(role!=='client')nav.push({header:'Gestión financiera'},...FIN_TABS.filter(t=>!t[3]||(role==='admin'&&this.props.user.role==='admin')).map(([k,label,icon])=>{const on=isFin&&s.finTab===k;
       return {label,icon,badge:k==='pendientes'?s.finPending:k==='conciliacion'?s.finConciliationPending:k==='pendiente-bridge'?s.finBridgePending:0,finConciliationPending:0,go:()=>this.go(finScreen,{finTab:k}),bg:on?'#F2F4FA':'transparent',fg:on?'#3E4D85':'#3A3A38',fw:on?700:500};}));
-    const U=this.props.user,meName=U.name||U.email;
-    const me={name:meName,initials:initials(meName),role:ROLE_LABEL[U.role]||'Cliente',avBg:role==='client'?'#EC6090':role==='worker'?'#68C0B5':'#0C062B'};
+    const U=this.props.user,shown=s.viewAs||U,meName=shown.name||shown.email;
+    const me={name:meName,initials:initials(meName),role:ROLE_LABEL[shown.role]||'Cliente',avBg:role==='client'?'#EC6090':role==='worker'?'#68C0B5':'#0C062B'};
     const titles={c_home:['Inicio'],c_obras:['Mis obras'],c_obra:['Mis obras',obra.name],c_presupuestos:['Presupuestos'],c_presupuesto:['Presupuestos','PRE-2026-031 v1'],c_perfil:['Mi perfil'],w_home:['Hoy'],w_obras:['Obras asignadas'],w_obra:['Obras asignadas',obra.name],a_home:['Panel de administración'],a_users:['Usuarios'],a_user:['Usuarios',user.name],a_audit:['Auditoría']};
     titles[finScreen]=['Gestión financiera',(FIN_TABS.find(t=>t[0]===s.finTab)||FIN_TABS[0])[1]];
     const parent={c_obra:'c_obras',c_presupuesto:'c_presupuestos',w_obra:'w_obras',a_user:'a_users'};
@@ -127,8 +147,10 @@ class PlataformaView extends React.Component {
     return Object.assign({},is,it,{
       showDemo:role!=='admin'&&!isFin,isFin,finTab:s.finTab,finGo:k=>this.go(finScreen,{finTab:k}),finPending:n=>n!==s.finPending&&this.setState({finPending:n}),finBridgePending:(n,c=n)=>(n!==s.finBridgePending||c!==s.finConciliationPending)&&this.setState({finBridgePending:n,finConciliationPending:c}),flash:this.flash,isClient:role==='client',isWorker:role==='worker',isAdmin:role==='admin',isInternal:view==='internal',
       areaLabel:role==='client'?'Área de cliente':role==='worker'?'Workspace':'Administración',nav,me,crumbs,notifs,unread,notifOpen:s.notifOpen,
-      firstName:firstName(U),meFirst:(U.name||'').trim().split(/\s+/)[0]||'',meLast:(U.name||'').trim().split(/\s+/).slice(1).join(' '),meEmail:U.email,meSince:fmtDate(U.created_at).replace(/^\d+ /,''),
-      logout:()=>this.props.onLogout(),barsFrom:sb.from,barsTo:sb.to,roleOpts,
+      firstName:firstName(shown),meFirst:(shown.name||'').trim().split(/\s+/)[0]||'',meLast:(shown.name||'').trim().split(/\s+/).slice(1).join(' '),meEmail:shown.email,meSince:shown.created_at?fmtDate(shown.created_at).replace(/^\d+ /,''):'',
+      logout:()=>this.props.onLogout(),
+      isRealAdmin:U.role==='admin',panel:role,viewAs:s.viewAs||null,switching:!!s.switching,viewUsers:s.adminUsers||[],
+      switchView:this.switchView,exitView:()=>this.switchView('admin',null),barsFrom:sb.from,barsTo:sb.to,roleOpts,
       toggleNotif:()=>this.setState({notifOpen:!s.notifOpen}),readAll:()=>this.setState({readN:{n1:1,n2:1,n3:1,n4:1,n5:1}}),
       askBudget:()=>this.props.onOpenLead?this.props.onOpenLead():this.flash('Abriría el formulario de solicitud.'),
       obras,obra,tabs,fChap,pfilters,phFilters,toast:s.toast,hasToast:!!s.toast,
@@ -231,6 +253,7 @@ class PlataformaView extends React.Component {
             </div>
           </>
         ) : null}
+        {v.isRealAdmin ? <VerComoSelector panel={v.panel} viewAs={v.viewAs} users={v.viewUsers} busy={v.switching} onSwitch={v.switchView} /> : null}
         <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 8px 0", borderTop: "1px solid #EDEDEA" }}>
           <div style={{ width: "36px", height: "36px", borderRadius: "99px", background: v.me.avBg, color: "#fff", display: "grid", placeItems: "center", fontWeight: "700", fontSize: "13px" }}>
             {v.me.initials}
@@ -320,9 +343,10 @@ class PlataformaView extends React.Component {
           </div>
         </header>
         <main style={{ padding: "32px", maxWidth: "1240px", width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: "28px" }}>
+          {v.isRealAdmin ? <VerComoBanner panel={v.panel} viewAs={v.viewAs} onExit={v.exitView} /> : null}
           {v.isFin ? (
             <React.Suspense fallback={<div style={{ padding: "32px", color: "#6B6B68" }}>{"Cargando Gestión financiera…"}</div>}>
-              <GestionFinanciera tab={v.finTab} go={v.finGo} toast={v.flash} onPending={v.finPending} onBridgePending={v.finBridgePending} />
+              <GestionFinanciera key={v.viewAs?.id || 'self'} tab={v.finTab} go={v.finGo} toast={v.flash} onPending={v.finPending} onBridgePending={v.finBridgePending} />
             </React.Suspense>
           ) : null}
           {v.is_c_home ? (

@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { getPool, isDbConfigured } from '../db/pool.js';
-import { requireRole, checkRole } from '../auth/sessions.js';
+import { requireAuth, checkRole } from '../auth/sessions.js';
+import { viewAs } from '../auth/viewAs.js';
 import {FinanceError} from '../finance/service.js';
 import { FinanzasService, FinError, TYPES, isUuid } from '../finanzas/service.js';
 import { ProjectsService } from '../finanzas/projects.js';
@@ -16,13 +17,14 @@ export const FINANZAS_ROLES = ['admin', 'jefe'];
 
 // `authenticate` replaces only the session lookup (tests); the role check is
 // always the real one.
-export function createFinanzasRouter({ service, projects, workers, runLogs, authenticate, origin=process.env.CORS_ORIGIN } = {}) {
+export function createFinanzasRouter({ service, projects, workers, runLogs, authenticate, findUser, origin=process.env.CORS_ORIGIN } = {}) {
   const router = Router();
   router.use((_req, res, next) => {
     if (!service && !isDbConfigured()) return res.status(503).json({ error: 'Gestión financiera no disponible todavía' });
     next();
   });
-  router.use(authenticate ? [authenticate, checkRole(...FINANZAS_ROLES)] : requireRole(...FINANZAS_ROLES));
+  // An admin «viewing as» someone (read-only) is checked as that user from here on.
+  router.use(authenticate ? authenticate : requireAuth, viewAs({ findUser }), checkRole(...FINANZAS_ROLES));
   // The shared /api limiter (30/min) is too tight for a person working
   // through an inbox; this module gets its own, per IP, after auth.
   router.use(rateLimit({ windowMs: 60 * 1000, max: 240, standardHeaders: true, legacyHeaders: false }));

@@ -1,10 +1,11 @@
 import {Router} from 'express';
 import {getPool,isDbConfigured} from '../db/pool.js';
 import {requireAuth} from '../auth/sessions.js';
+import {viewAs} from '../auth/viewAs.js';
 import {FinanceService,FinanceError,uuid} from '../finance/service.js';
 import {traced} from '../logs/runs.js';
 
-export function createFinanceRouter({service,authorize=requireAuth,origin=process.env.CORS_ORIGIN}={}){
+export function createFinanceRouter({service,authorize=[requireAuth,viewAs()],origin=process.env.CORS_ORIGIN}={}){
  const router=Router();const get=()=>service||new FinanceService(getPool());
  const dates=(value,key='')=>value instanceof Date?(/_on$|^month$/.test(key)?value.toISOString().slice(0,10):value.toISOString()):
    Array.isArray(value)?value.map(v=>dates(v)):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,dates(v,k)])):value;

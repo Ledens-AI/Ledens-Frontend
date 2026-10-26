@@ -105,6 +105,7 @@ Browser
 | GET | `/api/auth/microsoft/callback` | Same shape as `/google/callback`. |
 | GET | `/api/admin/users` | **Admin only.** Every user with role, email verification, sign-in methods and last login. |
 | PATCH | `/api/admin/users/:id/role` | **Admin only.** `{ role, reason }` — changes a role (never your own) and writes an `audit_log` row. |
+| POST | `/api/admin/view-as` | **Admin only.** `{ userId }` — starts «Ver como» that user (writes an `audit_log` row, returns the user). See "Roles". |
 | GET | `/api/admin/audit` | **Admin only.** Last 200 `audit_log` entries. |
 | * | `/api/finanzas/*` | **Admin + explicitly authorized jefe.** Gestión financiera: imputing `ledens.material_expenses` / `worker_payments` / `customer_payments` to `ledens.projects`, splits, review flags, profitability. See `ledens/backend/FINANZAS.md`. |
 
@@ -165,9 +166,10 @@ Every user has one role in `users.role`; it decides what they get in `/plataform
 | `jefe` | Workspace de jefe de obra + Gestión financiera | `/api/finanzas/*` (works API not built yet) |
 | `client` | Área de cliente | — (works/budgets API not built yet) |
 
-- **Enforced on the backend**: `requireRole('admin')` from `src/auth/sessions.js` guards `/api/admin` (401 logged out, 403 wrong role). The frontend only mirrors the role to pick the view; there is no role switcher.
+- **Enforced on the backend**: `requireRole('admin')` from `src/auth/sessions.js` guards `/api/admin` (401 logged out, 403 wrong role). The frontend mirrors the role to pick the view.
+- **«Ver como» (admins only):** the sidebar of an admin has «Ver panel» (Administración / Jefe de obra / Cliente) and «Como usuario». A panel on its own is seen with the admin's own identity; choosing a user first calls `POST /api/admin/view-as` (audited) and then every request carries `X-Ledens-View-As: <id>`. `src/auth/viewAs.js` — applied in `/api/finanzas`, `/api/finance` and `/api/bridge` before the role check — accepts it only from an admin and only on `GET` (anything else is 403 «solo lectura»), and answers as that user: their role and finance permissions apply, so a client target gets 403 from finance just like the client would. Frontend: `plataforma/VerComo.jsx`, `finanzas/api.js` (`setViewAs`).
 - New registrations are always `client`. Admins change roles from the user's page in `/plataforma` (needs a reason, logged in `audit_log`); an admin can't change their own role, so there is always at least one admin.
-- **Seeded accounts** (migration 004): `ajnavarrosilva@gmail.com` and `alvaro.navarro@ledens.es` → admin, `ana.anzola@ledens.es` → jefe, `alvaronavarrosilva@outlook.es` → client. Missing ones were created **without a password** — so nobody can register those emails themselves (409) — and existing ones only had their role changed. A passwordless account gets in via Google/Microsoft on that email (claims it, see the security note below) or with a temporary password from the CLI.
+- **Seeded accounts** (migration 004): `ajnavarrosilva@gmail.com` and `alvaro.navarro@ledens.es` → admin, `ana.anzola@ledens.es` → jefe (admin since migration `019_ana_admin.sql`, 26 Oct 2026), `alvaronavarrosilva@outlook.es` → client. Missing ones were created **without a password** — so nobody can register those emails themselves (409) — and existing ones only had their role changed. A passwordless account gets in via Google/Microsoft on that email (claims it, see the security note below) or with a temporary password from the CLI.
 - **CLI** (`src/scripts/users.js`), run where `DATABASE_URL` points at the right DB — in production inside the Container App:
   ```bash
   az containerapp exec -g rg-ledens -n ledens-backend --command "npm run users -- set-password ana.anzola@ledens.es"

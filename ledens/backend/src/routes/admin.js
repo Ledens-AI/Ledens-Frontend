@@ -77,6 +77,22 @@ router.patch('/users/:id/role', async (req, res, next) => {
   }
 });
 
+// «Ver como»: the admin starts looking at the platform as this user (read-only,
+// see src/auth/viewAs.js). Recorded in audit_log; returns who it is.
+router.post('/view-as', async (req, res, next) => {
+  const { userId } = req.body || {};
+  if (typeof userId !== 'string' || !/^[0-9a-f-]{36}$/i.test(userId)) return res.status(400).json({ error: 'Usuario no válido' });
+  try {
+    const { rows: [target] } = await getPool().query('SELECT id, email, name, role FROM users WHERE id = $1', [userId]);
+    if (!target) return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (target.id === req.user.id) return res.status(400).json({ error: 'Ya estás viendo tu propio panel' });
+    await audit({ actor: req.user, action: 'Vista como usuario', target, detail: `Panel de ${ROLE_LABEL[target.role]} · solo lectura` });
+    res.json({ user: target });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/audit', async (_req, res, next) => {
   try {
     const { rows } = await getPool().query(
