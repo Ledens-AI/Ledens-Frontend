@@ -10,7 +10,7 @@ import { ObraArchivosService } from '../src/obras/archivos.js';
 import { folderStorage, createStorage } from '../src/obras/storage.js';
 import { sniff, MAX_PHOTO } from '../src/obras/validation.js';
 import { createObrasRouter } from '../src/routes/obras.js';
-// Fotos y documentos de obra on PGlite (migrations 020 + 021) with the files in
+// Fotos y documentos de obra on PGlite (migrations 020–022) with the files in
 // a temporary folder: the jefe assigned uploads, the client of the obra sees
 // and downloads, nobody else gets in, and the real bytes decide the format.
 let db, pool, dir, storage, admin, jefe, otroJefe, cliente, otroCliente, obraId, borradorId, ampliacionId, server, base;
@@ -35,7 +35,7 @@ before(async () => {
   await db.exec(`CREATE TABLE users(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), email text NOT NULL, name text, role text NOT NULL);
     CREATE TABLE audit_log(id bigint GENERATED ALWAYS AS IDENTITY, actor_id uuid REFERENCES users(id), actor_label text, action text,
       target_id uuid REFERENCES users(id), target_label text, detail text);`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_obra_archivos.sql']) {
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '022_obra_archivos.sql']) {
     await db.exec(await fs.readFile(new URL(`../src/db/migrations/${m}`, import.meta.url), 'utf8'));
   }
   [admin, jefe, otroJefe, cliente, otroCliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES

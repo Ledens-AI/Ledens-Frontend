@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { PresupuestosService, isUuid } from '../presupuestos/service.js';
 import { FileError, validateUpload, validateThumb } from './validation.js';
 
-// Fotos y documentos de una obra (migration 021). One service per request,
+// Fotos y documentos de una obra (migration 022). One service per request,
 // built with the effective user (after «Ver como»). Who sees an obra is what
 // PresupuestosService decides: admin all, a jefe the ones assigned to them, a
 // client their own once sent. Only the team of the obra (its jefe or an admin)
