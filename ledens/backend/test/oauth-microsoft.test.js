@@ -183,3 +183,31 @@ test('a Google-verified account can also log in with Microsoft on the same email
     await cleanupByEmail(email);
   }
 });
+
+test('a staff account created without a password (migration 004) is claimed by a Microsoft login of the Ledens tenant', { skip }, async () => {
+  // Microsoft's userinfo has no email_verified: the id_token of the company's
+  // own tenant and domain is what makes the email verified.
+  const email = `staff-${Date.now()}@ledens.es`;
+  const tenant = '89aa3c28-3056-4509-bfc5-5c16f8f0737a';
+  const idToken = (over = {}) => ['e30', Buffer.from(JSON.stringify({ tid: tenant, aud: process.env.MICROSOFT_CLIENT_ID,
+    iss: `https://login.microsoftonline.com/${tenant}/v2.0`, preferred_username: email, ...over })).toString('base64url'), 'sig'].join('.');
+  try {
+    await getPool().query("INSERT INTO users (email, name, role) VALUES ($1, 'Staff', 'admin')", [email]);
+    const login = async (token) => {
+      const { state, stateCookie } = await startLogin('microsoft');
+      nextTokenResponse = { access_token: 'fake-token', id_token: token };
+      nextUserinfoResponse = { sub: `ms-staff-${Date.now()}`, email, name: 'Staff' };
+      return fetch(`${appBase}/api/auth/microsoft/callback?code=abc&state=${state}`, { redirect: 'manual', headers: { Cookie: stateCookie } });
+    };
+    // Another tenant: still refused as unverified.
+    const other = await login(idToken({ tid: 'f0000000-0000-0000-0000-000000000000', iss: 'https://login.microsoftonline.com/f0000000-0000-0000-0000-000000000000/v2.0' }));
+    assert.match(other.headers.get('location'), /^\/auth\?error=/);
+    const cb = await login(idToken());
+    assert.equal(cb.headers.get('location'), '/');
+    const me = await fetch(`${appBase}/api/auth/me`, { headers: { Cookie: cookieFrom(cb, 'ledens_session') } });
+    assert.deepEqual([(await me.json()).user.email, (await getPool().query('SELECT role, email_verified FROM users WHERE email=$1', [email])).rows[0]], [email, { role: 'admin', email_verified: true }]);
+  } finally {
+    nextTokenResponse = null;
+    await cleanupByEmail(email);
+  }
+});
