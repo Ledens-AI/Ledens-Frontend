@@ -6,6 +6,7 @@ import { createApp } from '../src/app.js';
 import { runMigrations } from '../src/db/migrate.js';
 import { getPool, closePool, isDbConfigured } from '../src/db/pool.js';
 import { hashPassword } from '../src/auth/passwords.js';
+import { createSession, SESSION_COOKIE } from '../src/auth/sessions.js';
 
 // Needs a real Postgres, same as auth.test.js.
 const skip = !isDbConfigured() && 'DATABASE_URL not set — start the local db to run these';
@@ -163,9 +164,17 @@ test('an admin changes a role with a reason, and it lands in the audit log', { s
 });
 
 test('«ver como»: an admin views a jefe read-only (audited); nobody else can, and a client target gets no finance', { skip }, async () => {
-  const admin = await loginAs('admin');
-  const jefe = await loginAs('jefe');
-  const client = await loginAs('client');
+  // Sessions straight from the session store: /api/auth/login allows 10 per
+  // IP every 15 minutes and the tests above already use most of them.
+  const sessionFor = async (role) => {
+    const { rows: [u] } = await getPool().query("INSERT INTO users (email, name, role) VALUES ($1, $2, $3) RETURNING id",
+      [`${role}-view-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@example.com`, `Test ${role}`, role]);
+    const { token } = await createSession(u.id);
+    return { id: u.id, cookie: `${SESSION_COOKIE}=${token}` };
+  };
+  const admin = await sessionFor('admin');
+  const jefe = await sessionFor('jefe');
+  const client = await sessionFor('client');
   const view = (who, target, method = 'GET', path = '/api/finanzas/trabajadores') => fetch(`${base}${path}`, {
     method, headers: { Cookie: who.cookie, 'X-Ledens-View-As': target.id, 'Content-Type': 'application/json', Origin: process.env.CORS_ORIGIN || 'http://localhost' },
     body: method === 'GET' ? undefined : '{}' });
