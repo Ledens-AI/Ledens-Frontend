@@ -81,8 +81,8 @@ router.get('/microsoft/callback', async (req, res) => {
   }
 
   try {
-    const accessToken = await microsoft.exchangeCodeForToken(code);
-    const profile = await microsoft.fetchProfile(accessToken);
+    const { accessToken, idToken } = await microsoft.exchangeCodeForToken(code);
+    const profile = await microsoft.fetchProfile(accessToken, { idToken });
     const user = await findOrCreateUserFromIdentity({ provider: 'microsoft', ...profile });
     const { token } = await createSession(user.id, { userAgent: req.get('user-agent'), ip: req.ip });
     res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
