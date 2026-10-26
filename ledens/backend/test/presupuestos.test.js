@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import express from 'express';
 import { PresupuestosService } from '../src/presupuestos/service.js';
 import { createPresupuestosRouter } from '../src/routes/presupuestos.js';
+import { importApproved } from '../src/presupuestos/import.js';
 // Presupuestos para clientes on PGlite: the users/audit_log columns this flow
 // reads plus migration 020. Synthetic data with the structure of a real
 // fontanería budget (chapters, coded lines, units, quantities, net prices, VAT).
@@ -33,7 +34,7 @@ before(async () => {
   await db.exec(`CREATE TABLE users(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), email text NOT NULL, name text, role text NOT NULL);
     CREATE TABLE audit_log(id bigint GENERATED ALWAYS AS IDENTITY, actor_id uuid REFERENCES users(id), actor_label text, action text,
       target_id uuid REFERENCES users(id), target_label text, detail text);`);
-  await db.exec(await fs.readFile(new URL('../src/db/migrations/020_presupuestos_cliente.sql', import.meta.url), 'utf8'));
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql']) await db.exec(await fs.readFile(new URL('../src/db/migrations/' + m, import.meta.url), 'utf8'));
   [admin, jefe, otroJefe, cliente, otroCliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES
     ('admin@pre.test','Admin Test','admin'),('jefe@pre.test','Jefe Test','jefe'),('jefe2@pre.test','Otro Jefe','jefe'),
     ('cliente@pre.test','Cliente Test','client'),('cliente2@pre.test','Otro Cliente','client') RETURNING id,email,name,role`)).rows;
@@ -190,4 +191,39 @@ test('HTTP: every role through the router, «ver como» read-only, origin checke
     assert.equal((await res.json()).comments.at(-1).team, false);
     assert.equal((await call('/no-es-un-id', jefe)).status, 404);
   } finally { s.close(); }
+});
+
+test('import: an approved spreadsheet budget with VAT-inclusive prices becomes an obra en curso with its progress', async () => {
+  const data = { clientEmail: 'CLIENTE2@pre.test', jefeEmail: 'admin@pre.test', title: 'Reforma importada', address: 'C/ Ficticia 9', vatRate: 21,
+    pricesIncludeVat: true, offeredOn: '2026-09-01', startDate: '2026-09-01', source: 'hoja de prueba',
+    chapters: [{ name: 'Demoliciones', items: [
+      { code: '1.1', unit: 'ud', name: 'Demolición de chimenea', quantity: 2, unitPrice: 200, progress: 1, progressNote: 'Salón 1 y 2' },
+      { code: '1.9', unit: 'ud', name: 'Demolición de losa', quantity: 5, unitPrice: 250, progress: 0.8 },
+      { code: '2.14', unit: 'm2', name: 'Demolición de losa de piso', quantity: 100.03, unitPrice: 65, progress: 0.18 },
+      { code: '2.16', unit: 'ud', name: 'Reconocimiento de drenajes', quantity: 1, unitPrice: 380 }] }] };
+  await assert.rejects(importApproved(pool, { ...data, clientEmail: 'nadie@pre.test' }), { status: 400, message: /No existe/ });
+  await assert.rejects(importApproved(pool, { ...data, jefeEmail: 'cliente@pre.test' }), { status: 400, message: /jefe/ });
+  const r = await importApproved(pool, data);
+  assert.deepEqual([r.lines, r.declared], [4, 3]);
+  await assert.rejects(importApproved(pool, data), { status: 409 }, 'never imported twice');
+  const d = await as(otroCliente).get(r.id);
+  assert.equal(d.phase, 'en_curso');
+  assert.equal(d.jefe.name, 'Admin Test');
+  // 400 + 1250 + 6501,95 + 380 = 8531,95 with VAT; net prices at 4 decimals add back up to it.
+  assert.deepEqual([d.version.base, d.version.total], ['7051.20', '8531.95']);
+  assert.equal(d.obra.chapters[0].items[0].unitPrice, '165.289256');
+  // Executed: 400 + 1000 + 1170,35 with VAT → 2570,35 of 8531,95 = 30,1 %.
+  assert.equal(d.obra.consumedPct, 30.1);
+  assert.equal(d.obra.chapters[0].items[2].executed, '18.0054');
+  assert.equal(d.obra.chapters[0].items[0].lastDeclared.by, null);
+  assert.equal(d.obra.chapters[0].items[0].lastDeclared.note, 'Avance importado de hoja de prueba · Salón 1 y 2');
+  assert.match((await db.query("SELECT detail FROM audit_log WHERE action='Presupuesto importado'")).rows[0].detail, /4 partidas, 3 con avance · hoja de prueba/);
+  assert.equal((await as(admin).get(r.id)).can.declare, true);
+});
+
+test('references keep every digit past 999', async () => {
+  await db.query("SELECT setval('presupuesto_ref_seq', 998)");
+  const refs = [];
+  for (let n = 0; n < 2; n++) refs.push((await as(admin).create({ title: 'Ref ' + n, clientId: cliente.id })).ref);
+  assert.deepEqual(refs.map((r) => r.split('-')[2]), ['999', '1000']);
 });

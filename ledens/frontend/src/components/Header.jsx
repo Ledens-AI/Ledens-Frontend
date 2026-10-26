@@ -20,7 +20,7 @@ const TXT = {
     projects: 'PROYECTOS', how: 'CÓMO FUNCIONA',
     cases: 'CASOS DE ÉXITO', casesAria: 'Casos de éxito',
     about: 'QUIÉNES SOMOS',
-    myArea: 'MI ÁREA', logout: 'CERRAR SESIÓN', login: 'INICIA SESIÓN', register: 'REGÍSTRATE',
+    myArea: 'MI ÁREA', logout: 'CERRAR SESIÓN', logoutAria: 'Cerrar sesión', login: 'INICIA SESIÓN', loginShort: 'ENTRAR', register: 'REGÍSTRATE',
     serviceList: [
       ['albanileria', 'Albañilería', 'Obra, alicatado y solados'],
       ['electricidad', 'Electricidad', 'Instalación, cuadro y domótica'],
@@ -40,7 +40,7 @@ const TXT = {
     projects: 'PROJECTS', how: 'HOW IT WORKS',
     cases: 'SUCCESS STORIES', casesAria: 'Success stories',
     about: 'ABOUT US',
-    myArea: 'MY AREA', logout: 'LOG OUT', login: 'LOG IN', register: 'SIGN UP',
+    myArea: 'MY AREA', logout: 'LOG OUT', logoutAria: 'Log out', login: 'LOG IN', loginShort: 'LOG IN', register: 'SIGN UP',
     serviceList: [
       ['albanileria', 'Masonry', 'Building work, tiling and flooring'],
       ['electricidad', 'Electrical', 'Wiring, fuse boards and home automation'],
@@ -118,13 +118,17 @@ export default function Header() {
               <div className="hdr-user">
                 <span className="hdr-user-name">{(user.name || user.email).split(' ')[0]}</span>
                 <Link to="/plataforma" className="btn btn-sm btn-blue">{t.myArea}</Link>
-                <button type="button" className="btn btn-sm btn-outline" onClick={logout}>
-                  {t.logout}
+                {/* On phones only the icon shows (see .hdr-logout in app.css). */}
+                <button type="button" className="btn btn-sm btn-outline hdr-logout" onClick={logout} aria-label={t.logoutAria}>
+                  <i className="ri-logout-box-r-line" aria-hidden="true"></i>
+                  <span className="lbl-long">{t.logout}</span>
                 </button>
               </div>
             ) : (
               <>
-                <Link to="/auth" className="btn btn-sm btn-outline">{t.login}</Link>
+                <Link to="/auth" className="btn btn-sm btn-outline">
+                  <span className="lbl-long">{t.login}</span><span className="lbl-short">{t.loginShort}</span>
+                </Link>
                 <Link to="/registro" className="btn btn-sm btn-blue">{t.register}</Link>
               </>
             )}

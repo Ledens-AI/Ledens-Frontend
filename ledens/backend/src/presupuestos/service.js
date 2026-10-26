@@ -19,12 +19,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (v) => typeof v === 'string' && UUID.test(v);
 export const KINDS = ['confirmada', 'condicionada', 'decision', 'opcion'];
 const COUNTED = "(l.kind IN ('confirmada','condicionada') OR l.selected)";
-const LINE = 'round(l.quantity*l.unit_price,2)';
+// Line amounts are summed unrounded and only totals are rounded, so net prices
+// converted from VAT-inclusive ones add back up to the original total.
+const LINE = 'l.quantity*l.unit_price';
 const LAST_EXECUTED = '(SELECT pr.executed FROM presupuesto_produccion pr WHERE pr.partida_id=l.id ORDER BY pr.id DESC LIMIT 1)';
 
-// Money as integer cents so totals never drift; returned as "1234.56".
-const cents = (v) => Math.round(Number(v || 0) * 100);
-const money = (c) => (c / 100).toFixed(2);
+// Money in (unrounded) cents; rounded to whole cents only when shown as "1234.56".
+const cents = (v) => Number(v || 0) * 100;
+const money = (c) => (Math.round(c) / 100).toFixed(2);
+// VAT on the unrounded base: a VAT-inclusive spreadsheet total comes back exactly.
 const vatOf = (baseCents, rate) => Math.round(baseCents * Number(rate) / 100);
 const pct = (part, whole) => (whole > 0 ? Math.round(part / whole * 1000) / 10 : 0);
 
@@ -51,7 +54,7 @@ const date = (v, field) => {
 };
 
 // Chapters and lines as sent by the editor: validated whole, before any write.
-function parseContent(body) {
+export function parseContent(body) {
   const vatRate = body.vatRate === undefined ? '21' : decimal(body.vatRate, 'Tipo de IVA', 2, { allowZero: true });
   if (Number(vatRate) >= 100) fail(400, 'Tipo de IVA no válido');
   const notes = text(body.notes, 'Condiciones y exclusiones', { max: 5000 });
@@ -74,7 +77,7 @@ function parseContent(body) {
           description: text(i.description, `Descripción de la ${where}`, { max: 4000 }),
           unit: text(i.unit, `Unidad de la ${where}`, { max: 20, required: true }),
           quantity: decimal(i.quantity, `Cantidad de la ${where}`, 3),
-          unitPrice: decimal(i.unitPrice, `Precio de la ${where}`, 2, { allowZero: true }),
+          unitPrice: decimal(i.unitPrice, `Precio de la ${where}`, 6, { allowZero: true }),
           kind,
         };
       }),
@@ -134,7 +137,7 @@ export class PresupuestosService {
 
   totals(base, optional, rate) {
     const b = cents(base), iva = vatOf(b, rate);
-    return { base: money(b), vat: money(iva), total: money(b + iva), optionalBase: money(cents(optional)), vatRate: String(Number(rate)) };
+    return { base: money(b), vat: money(iva), total: money(Math.round(b) + iva), optionalBase: money(cents(optional)), vatRate: String(Number(rate)) };
   }
 
   async list() {
@@ -188,7 +191,7 @@ export class PresupuestosService {
   // consumed does not (% de presupuesto consumido): the difference is the excess.
   lineFigures(l) {
     const price = Number(l.unit_price), qty = Number(l.quantity), ex = Number(l.executed);
-    return { amount: cents(l.amount), executedAmount: Math.round(Math.min(ex, qty) * price * 100), consumed: Math.round(ex * price * 100) };
+    return { amount: cents(l.amount), executedAmount: Math.min(ex, qty) * price * 100, consumed: ex * price * 100 };
   }
 
   async obraTotals(ids) {
@@ -266,20 +269,23 @@ export class PresupuestosService {
     const lines = await this.obraLines([p.id]);
     const groups = [];
     const tot = { base: 0, vat: 0, executed: 0, consumed: 0 };
+    const byVersion = new Map();
     for (const l of lines) {
       let g = groups[groups.length - 1];
       if (!g || g.id !== l.capitulo_id) groups.push(g = { id: l.capitulo_id, name: l.chapter_name, presupuesto: { id: l.presupuesto_id, ref: l.ref, title: l.title, ampliacion: !!l.parent_id }, base: 0, executed: 0, consumed: 0, items: [] });
       const f = this.lineFigures(l);
       g.base += f.amount; g.executed += f.executedAmount; g.consumed += f.consumed;
-      tot.base += f.amount; tot.executed += f.executedAmount; tot.consumed += f.consumed; tot.vat += vatOf(f.amount, l.vat_rate);
+      tot.base += f.amount; tot.executed += f.executedAmount; tot.consumed += f.consumed;
+      byVersion.set(l.version_id, { rate: l.vat_rate, base: (byVersion.get(l.version_id)?.base || 0) + f.amount });
       g.items.push({ id: l.id, code: l.code, name: l.name, description: l.description, unit: l.unit, quantity: l.quantity, unitPrice: l.unit_price, kind: l.kind,
         amount: money(f.amount), executed: l.executed, executedAmount: money(f.executedAmount), consumed: money(f.consumed),
         executionPct: pct(Math.min(Number(l.executed), Number(l.quantity)), Number(l.quantity)), excess: Number(l.executed) > Number(l.quantity),
         lastDeclared: l.last ? { at: l.last.at, by: l.last.by, note: l.last.note } : null });
     }
+    for (const v of byVersion.values()) tot.vat += vatOf(v.base, v.rate);
     return {
       startDate: p.start_date ? toDate(p.start_date) : null, endDate: p.end_date ? toDate(p.end_date) : null,
-      base: money(tot.base), vat: money(tot.vat), total: money(tot.base + tot.vat),
+      base: money(tot.base), vat: money(tot.vat), total: money(Math.round(tot.base) + tot.vat),
       executedAmount: money(tot.executed), consumed: money(tot.consumed),
       executionPct: pct(tot.executed, tot.base), consumedPct: pct(tot.consumed, tot.base),
       chapters: groups.map((g) => ({ ...g, base: money(g.base), executedAmount: money(g.executed), consumed: money(g.consumed), executionPct: pct(g.executed, g.base), consumedPct: pct(g.consumed, g.base), executed: undefined })),
@@ -289,9 +295,10 @@ export class PresupuestosService {
   // Admin form: clients to send to and jefes to assign.
   async options() {
     if (this.user.role !== 'admin') fail(403, 'Solo un administrador puede crear presupuestos');
-    const rows = (await this.pool.query("SELECT id, name, email, role FROM users WHERE role IN ('client','jefe') ORDER BY coalesce(name,email)")).rows;
+    const rows = (await this.pool.query("SELECT id, name, email, role FROM users WHERE role IN ('client','jefe','admin') ORDER BY coalesce(name,email)")).rows;
     const pick = (role) => rows.filter((u) => u.role === role).map((u) => ({ id: u.id, name: u.name || u.email, email: u.email }));
-    return { clients: pick('client'), jefes: pick('jefe') };
+    // An admin may also be the person in charge of an obra.
+    return { clients: pick('client'), jefes: [...pick('jefe'), ...pick('admin')] };
   }
 
   async writeContent(db, versionId, content) {
@@ -328,7 +335,7 @@ export class PresupuestosService {
         if (body.jefeId) {
           if (!isUuid(body.jefeId)) fail(400, 'Jefe de obra no válido');
           const j = (await db.query('SELECT role FROM users WHERE id=$1', [body.jefeId])).rows[0];
-          if (j?.role !== 'jefe') fail(400, 'El responsable debe ser un jefe de obra');
+          if (j?.role !== 'jefe' && j?.role !== 'admin') fail(400, 'El responsable debe ser un jefe de obra o un administrador');
           jefeId = body.jefeId;
         }
       }
@@ -460,7 +467,7 @@ export class PresupuestosService {
     if (!Array.isArray(items) || !items.length || items.length > 1000) fail(400, 'Indica la producción de al menos una partida');
     const parsed = items.map((i, n) => {
       if (!isUuid(i?.partidaId)) fail(400, `Partida ${n + 1} no válida`);
-      return { partidaId: i.partidaId, executed: decimal(i.executed, 'Cantidad ejecutada', 3, { allowZero: true }), note: text(i.note, 'Nota', { max: 1000 }) };
+      return { partidaId: i.partidaId, executed: decimal(i.executed, 'Cantidad ejecutada', 4, { allowZero: true }), note: text(i.note, 'Nota', { max: 1000 }) };
     });
     await this.tx(async (db) => {
       const p = await this.load(db, id, { lock: true });

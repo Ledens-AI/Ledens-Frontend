@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { api, parseDecimal } from './api.js';
 import { Badge, Dialog, Empty, ErrorBox, Kpi } from '../finanzas/ui.jsx';
 import Editor from './Editor.jsx';
+import Archivos from './Archivos.jsx';
 import { useObrasI18n } from './i18n.js';
 
 export const PhaseBadge = ({ phase }) => { const { PHASE } = useObrasI18n(); const p = PHASE[phase] || PHASE.borrador; return <Badge bg={p.bg} fg={p.fg} icon={p.icon}>{p.label}</Badge>; };
@@ -47,9 +48,17 @@ export default function Detalle({ id, initialTab, readOnly, toast, onBack, onCha
 
   const v = doc.version;
   const can = readOnly ? {} : doc.can;
+  // The editor always starts from the latest version, even when an older one is on screen.
+  const editLatest = async () => {
+    if (v.id !== doc.versions[0]?.id) {
+      try { setDoc(await api.get(doc.id)); setVersionId(null); } catch (e) { setError(e.message); return; }
+    }
+    setEditing('edit');
+  };
   const options = v.chapters.flatMap((c) => c.items).filter((i) => i.kind === 'decision' || i.kind === 'opcion');
   const optionalChosen = options.filter((i) => selected.includes(i.id)).reduce((a, i) => a + Number(i.amount), 0);
-  const tabs = [['presupuesto', t.tabBudget], ...(doc.obra ? [['obra', t.tabObra]] : []), ['conversacion', t.tabChat(doc.comments.length)]];
+  // Photos and documents belong to the obra: an approved root presupuesto.
+  const tabs = [['presupuesto', t.tabBudget], ...(doc.obra ? [['obra', t.tabObra], ['archivos', t.tabFiles]] : []), ['conversacion', t.tabChat(doc.comments.length)]];
 
   return (
     <div className="fin-stack obr">
@@ -71,7 +80,7 @@ export default function Detalle({ id, initialTab, readOnly, toast, onBack, onCha
 
       {tab === 'presupuesto' ? (
         <>
-          <TeamActions doc={doc} can={can} busy={busy} onEdit={() => setEditing('edit')} onSend={() => { setDialogError(''); setDialog('send'); }} onAmpliar={() => setEditing('ampliacion')} />
+          <TeamActions doc={doc} can={can} busy={busy} onEdit={editLatest} onSend={() => { setDialogError(''); setDialog('send'); }} onAmpliar={() => setEditing('ampliacion')} />
           {can.decide && v.status === 'sent' ? (
             <div className="fin-card obr-decide">
               <div>
@@ -155,6 +164,8 @@ export default function Detalle({ id, initialTab, readOnly, toast, onBack, onCha
       ) : null}
 
       {tab === 'obra' && doc.obra ? <ObraTab doc={doc} can={can} busy={busy} onDeclare={(items) => act(() => api.declare(doc.id, { items }), 'Producción guardada')} error={dialogError} /> : null}
+
+      {tab === 'archivos' && doc.obra ? <Archivos obraId={doc.id} readOnly={readOnly} toast={toast} /> : null}
 
       {tab === 'conversacion' ? (
         <div className="fin-card">
@@ -271,7 +282,7 @@ function ObraTab({ doc, can, busy, onDeclare, error }) {
     const items = [];
     for (const i of o.chapters.flatMap((c) => c.items)) {
       const raw = values[i.id];
-      const q = parseDecimal(raw, 3);
+      const q = parseDecimal(raw, 4);
       if (q === null) return setLocalError(`Cantidad no válida en «${i.name}»`);
       if (Number(q) !== Number(i.executed)) items.push({ partidaId: i.id, executed: q });
     }
@@ -315,10 +326,10 @@ function ObraTab({ doc, can, busy, onDeclare, error }) {
                 {c.items.map((i) => (
                   <tr key={i.id}>
                     <td className="fin-nowrap">{i.code || '—'}</td>
-                    <td><strong>{i.name}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{`${t.declaredBy(i.lastDeclared.by || '—', fechaHora(i.lastDeclared.at))}${i.lastDeclared.note ? ` · ${i.lastDeclared.note}` : ''}`}</div> : null}</td>
+                    <td><strong>{i.name}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{i.lastDeclared.by ? `${t.declaredBy(i.lastDeclared.by, fechaHora(i.lastDeclared.at))}${i.lastDeclared.note ? ` · ${i.lastDeclared.note}` : ''}` : (i.lastDeclared.note || t.imported)}</div> : null}</td>
                     <td className="fin-num fin-nowrap">{`${num(i.quantity)} ${i.unit}`}</td>
                     <td className="fin-num fin-nowrap">
-                      {editing ? <input aria-label={`Ejecutado en ${i.name}`} inputMode="decimal" className={'obr-in obr-in-num' + (parseDecimal(values[i.id], 3) === null ? ' is-invalid' : '')} value={values[i.id] ?? ''} onChange={(e) => setValues((s) => ({ ...s, [i.id]: e.target.value }))} />
+                      {editing ? <input aria-label={`Ejecutado en ${i.name}`} inputMode="decimal" className={'obr-in obr-in-num' + (parseDecimal(values[i.id], 4) === null ? ' is-invalid' : '')} value={values[i.id] ?? ''} onChange={(e) => setValues((s) => ({ ...s, [i.id]: e.target.value }))} />
                         : `${num(i.executed)} ${i.unit}`}
                       {i.excess && !editing ? <div className="fin-danger fin-small">{t.excess}</div> : null}
                     </td>
