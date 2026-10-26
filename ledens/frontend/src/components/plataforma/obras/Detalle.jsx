@@ -1,17 +1,19 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { api, PHASE, VSTATUS, KIND, parseDecimal, pctS } from './api.js';
-import { eur, num, fecha, fechaHora } from '../finanzas/format.js';
+import { api, parseDecimal } from './api.js';
 import { Badge, Dialog, Empty, ErrorBox, Kpi } from '../finanzas/ui.jsx';
 import Editor from './Editor.jsx';
 import Archivos from './Archivos.jsx';
+import { useObrasI18n } from './i18n.js';
 
-export const PhaseBadge = ({ phase }) => { const p = PHASE[phase] || PHASE.borrador; return <Badge bg={p.bg} fg={p.fg} icon={p.icon}>{p.label}</Badge>; };
+export const PhaseBadge = ({ phase }) => { const { PHASE } = useObrasI18n(); const p = PHASE[phase] || PHASE.borrador; return <Badge bg={p.bg} fg={p.fg} icon={p.icon}>{p.label}</Badge>; };
 const Bar = ({ value, color }) => <span className="fin-progress obr-bar"><span style={{ width: Math.min(100, value) + '%', background: color }}></span></span>;
 
 /* One presupuesto: its versions, chapters and lines, the conversation and, once
  * approved, the obra (execution and consumed budget). What the user may do
- * comes from the server (`can`); readOnly is «Ver como». */
+ * comes from the server (`can`); readOnly is «Ver como». What the client sees
+ * follows the ES / EN switch (./i18n.js); team-only actions stay in Spanish. */
 export default function Detalle({ id, initialTab, readOnly, toast, onBack, onChanged, onOpen }) {
+  const { t, eur, num, fecha, fechaHora, VSTATUS, KIND } = useObrasI18n();
   const [doc, setDoc] = useState(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState(initialTab || 'presupuesto');
@@ -36,8 +38,8 @@ export default function Detalle({ id, initialTab, readOnly, toast, onBack, onCha
     setBusy(false);
   };
 
-  if (error) return <div className="fin-stack"><BackLink onBack={onBack} /><ErrorBox message={error} onRetry={() => load(versionId)} /></div>;
-  if (!doc) return <div className="fin-loading fin-muted">Cargando presupuesto…</div>;
+  if (error) return <div className="fin-stack"><BackLink onBack={onBack} /><ErrorBox message={error} onRetry={() => load(versionId)} retryLabel={t.retry} /></div>;
+  if (!doc) return <div className="fin-loading fin-muted">{t.loadingDoc}</div>;
   if (editing) {
     return <Editor mode={editing} doc={editing === 'edit' ? doc : null} parent={doc}
       onCancel={() => setEditing(null)}
@@ -56,21 +58,21 @@ export default function Detalle({ id, initialTab, readOnly, toast, onBack, onCha
   const options = v.chapters.flatMap((c) => c.items).filter((i) => i.kind === 'decision' || i.kind === 'opcion');
   const optionalChosen = options.filter((i) => selected.includes(i.id)).reduce((a, i) => a + Number(i.amount), 0);
   // Photos and documents belong to the obra: an approved root presupuesto.
-  const tabs = [['presupuesto', 'Presupuesto'], ...(doc.obra ? [['obra', 'Obra en curso'], ['archivos', 'Fotos y documentos']] : []), ['conversacion', `Conversación${doc.comments.length ? ` (${doc.comments.length})` : ''}`]];
+  const tabs = [['presupuesto', t.tabBudget], ...(doc.obra ? [['obra', t.tabObra], ['archivos', t.tabFiles]] : []), ['conversacion', t.tabChat(doc.comments.length)]];
 
   return (
     <div className="fin-stack obr">
       <BackLink onBack={onBack} />
       <div className="obr-head">
         <div className="fin-project-head">
-          <span className="fin-muted">{`${doc.ref} · versión ${v.number}${doc.parent ? ` · ampliación de ${doc.parent.ref}` : ''}`}</span>
+          <span className="fin-muted">{`${doc.ref} · ${t.version} ${v.number}${doc.parent ? ` · ${t.extensionOf(doc.parent.ref)}` : ''}`}</span>
           <h2>{doc.title}</h2>
-          <span className="fin-muted">{[doc.address, `Cliente: ${doc.client?.name || '—'}`, `Jefe de obra: ${doc.jefe?.name || 'sin asignar'}`].filter(Boolean).join(' · ')}</span>
+          <span className="fin-muted">{[doc.address, t.client(doc.client?.name || '—'), t.jefeOf(doc.jefe?.name)].filter(Boolean).join(' · ')}</span>
         </div>
         <PhaseBadge phase={doc.phase} />
       </div>
 
-      {doc.parent ? <p className="fin-warn"><i className="ri-information-line"></i><span>{'Ampliación de la obra '}<button type="button" className="fin-link" onClick={() => onOpen?.(doc.parent.id)}>{`${doc.parent.ref} · ${doc.parent.title}`}</button>{'. Se aprueba por separado y, al aprobarla, suma al presupuesto de la obra.'}</span></p> : null}
+      {doc.parent ? <p className="fin-warn"><i className="ri-information-line"></i><span>{t.extensionNoteA}<button type="button" className="fin-link" onClick={() => onOpen?.(doc.parent.id)}>{`${doc.parent.ref} · ${doc.parent.title}`}</button>{t.extensionNoteB}</span></p> : null}
 
       <div className="fin-segmented" role="tablist">
         {tabs.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'is-on' : ''} onClick={() => setTab(k)}>{l}</button>)}
@@ -82,29 +84,29 @@ export default function Detalle({ id, initialTab, readOnly, toast, onBack, onCha
           {can.decide && v.status === 'sent' ? (
             <div className="fin-card obr-decide">
               <div>
-                <h2>Este presupuesto espera tu decisión</h2>
-                <p className="fin-muted">{options.length ? 'Marca en la tabla las opciones que quieras incluir y elige qué hacer.' : 'Revísalo y elige qué hacer. Si algo no te encaja, pide cambios y te enviaremos una versión nueva.'}</p>
+                <h2>{t.decideTitle}</h2>
+                <p className="fin-muted">{options.length ? t.decideOptions : t.decideNoOptions}</p>
               </div>
               <div className="obr-actions">
-                <button type="button" className="fin-btn is-danger" onClick={() => { setDialogError(''); setDialog('reject'); }}>Rechazar</button>
-                <button type="button" className="fin-btn" onClick={() => { setDialogError(''); setDialog('changes'); }}><i className="ri-chat-3-line"></i>Pedir cambios</button>
-                <button type="button" className="fin-btn is-primary" onClick={() => { setDialogError(''); setDialog('approve'); }}><i className="ri-check-line"></i>Aprobar</button>
+                <button type="button" className="fin-btn is-danger" onClick={() => { setDialogError(''); setDialog('reject'); }}>{t.reject}</button>
+                <button type="button" className="fin-btn" onClick={() => { setDialogError(''); setDialog('changes'); }}><i className="ri-chat-3-line"></i>{t.askChanges}</button>
+                <button type="button" className="fin-btn is-primary" onClick={() => { setDialogError(''); setDialog('approve'); }}><i className="ri-check-line"></i>{t.approve}</button>
               </div>
             </div>
           ) : null}
-          {v.status === 'changes_requested' && !can.edit ? <p className="fin-warn"><i className="ri-chat-3-line"></i>Has pedido cambios. El equipo está preparando una versión nueva; la verás aquí cuando te la envíe.</p> : null}
+          {v.status === 'changes_requested' && !can.edit ? <p className="fin-warn"><i className="ri-chat-3-line"></i>{t.changesPending}</p> : null}
           {can.schedule ? <Schedule doc={doc} busy={busy} onSave={(body) => act(() => api.schedule(doc.id, body), 'Fechas de obra guardadas')} error={dialog === null ? dialogError : ''} /> : null}
 
           <div className="fin-kpis">
-            <Kpi label="Base imponible" value={eur(v.base)} icon="ri-file-list-3-line" />
-            <Kpi label={`IVA ${v.vatRate.replace('.', ',')} %`} value={eur(v.vat)} icon="ri-percent-line" />
-            <Kpi label="Total con IVA" value={eur(v.total)} icon="ri-money-euro-circle-line" />
-            {Number(v.optionalBase) > 0 ? <Kpi label={v.status === 'approved' ? 'Opciones no elegidas' : 'Opciones (sin IVA)'} value={eur(v.optionalBase)} icon="ri-list-check-3" hint="Solo suman si se eligen al aprobar" /> : null}
+            <Kpi label={t.base} value={eur(v.base)} icon="ri-file-list-3-line" />
+            <Kpi label={t.vat(v.vatRate)} value={eur(v.vat)} icon="ri-percent-line" />
+            <Kpi label={t.total} value={eur(v.total)} icon="ri-money-euro-circle-line" />
+            {Number(v.optionalBase) > 0 ? <Kpi label={v.status === 'approved' ? t.optNotChosen : t.optExVat} value={eur(v.optionalBase)} icon="ri-list-check-3" hint={t.optHint} /> : null}
           </div>
 
           {doc.versions.length > 1 ? (
             <div className="fin-filters">
-              <label className="fin-field"><span>Versión</span>
+              <label className="fin-field"><span>{t.versionLabel}</span>
                 <select value={v.id} onChange={(e) => setVersionId(e.target.value)}>
                   {doc.versions.map((x) => <option key={x.id} value={x.id}>{`v${x.number} · ${VSTATUS[x.status]}${x.sentAt ? ` · ${fecha(x.sentAt)}` : ''} · ${eur(x.total)}`}</option>)}
                 </select>
@@ -117,7 +119,7 @@ export default function Detalle({ id, initialTab, readOnly, toast, onBack, onCha
               <div className="obr-chapter-head"><h2>{`${ci + 1}. ${c.name}`}</h2><span className="fin-strong">{eur(c.base)}</span></div>
               <div className="fin-table-wrap">
                 <table className="fin-table">
-                  <thead><tr><th>Código</th><th>Partida</th><th>Unidad</th><th className="fin-num">Cantidad</th><th className="fin-num">Precio</th><th className="fin-num">Importe</th></tr></thead>
+                  <thead><tr><th>{t.hCode}</th><th>{t.hItem}</th><th>{t.hUnit}</th><th className="fin-num">{t.hQty}</th><th className="fin-num">{t.hPrice}</th><th className="fin-num">{t.hAmount}</th></tr></thead>
                   <tbody>
                     {c.items.map((i) => {
                       const optional = i.kind === 'decision' || i.kind === 'opcion';
@@ -126,9 +128,9 @@ export default function Detalle({ id, initialTab, readOnly, toast, onBack, onCha
                           <td className="fin-nowrap">{i.code || '—'}</td>
                           <td>
                             <div className="obr-line-name">
-                              {can.decide && optional ? <input type="checkbox" aria-label={`Incluir ${i.name}`} checked={selected.includes(i.id)} onChange={(e) => setSelected((s) => (e.target.checked ? [...s, i.id] : s.filter((x) => x !== i.id)))} /> : null}
+                              {can.decide && optional ? <input type="checkbox" aria-label={t.include(i.name)} checked={selected.includes(i.id)} onChange={(e) => setSelected((s) => (e.target.checked ? [...s, i.id] : s.filter((x) => x !== i.id)))} /> : null}
                               <strong>{i.name}</strong>
-                              {i.kind !== 'confirmada' ? <Badge bg={KIND[i.kind].bg} fg={KIND[i.kind].fg}>{i.selected ? `${KIND[i.kind].label} · elegida` : KIND[i.kind].label}</Badge> : null}
+                              {i.kind !== 'confirmada' ? <Badge bg={KIND[i.kind].bg} fg={KIND[i.kind].fg}>{i.selected ? `${KIND[i.kind].label} · ${t.chosen}` : KIND[i.kind].label}</Badge> : null}
                             </div>
                             {i.description ? <div className="fin-muted obr-desc">{i.description}</div> : null}
                           </td>
@@ -143,11 +145,11 @@ export default function Detalle({ id, initialTab, readOnly, toast, onBack, onCha
                 </table>
               </div>
             </div>
-          )) : <Empty icon="ri-file-list-3-line" title="Sin partidas" text="Edita el borrador para añadir capítulos y partidas." />}
-          {v.notes ? <div className="fin-card"><h3>Condiciones y exclusiones</h3><p className="obr-pre">{v.notes}</p></div> : null}
+          )) : <Empty icon="ri-file-list-3-line" title={t.noItems} text={t.noItemsText} />}
+          {v.notes ? <div className="fin-card"><h3>{t.notes}</h3><p className="obr-pre">{v.notes}</p></div> : null}
           {doc.ampliaciones.length ? (
             <div className="fin-card">
-              <div className="fin-card-head"><h2>Ampliaciones</h2></div>
+              <div className="fin-card-head"><h2>{t.extensions}</h2></div>
               <ul className="obr-list">
                 {doc.ampliaciones.map((a) => (
                   <li key={a.id}><button type="button" className="obr-row" onClick={() => onOpen?.(a.id)}>
@@ -171,45 +173,45 @@ export default function Detalle({ id, initialTab, readOnly, toast, onBack, onCha
             <ol className="obr-thread">
               {doc.comments.map((k) => (
                 <li key={k.id} className={k.team ? 'is-team' : 'is-client'}>
-                  <div className="fin-muted fin-small">{`${k.author || '—'} · ${fechaHora(k.at)}${k.versionNumber ? ` · v${k.versionNumber}` : ''}`}{k.kind === 'cambios' ? ' · pidió cambios' : k.kind === 'rechazo' ? ' · rechazó' : ''}</div>
+                  <div className="fin-muted fin-small">{`${k.author || '—'} · ${fechaHora(k.at)}${k.versionNumber ? ` · v${k.versionNumber}` : ''}`}{k.kind === 'cambios' ? t.askedChanges : k.kind === 'rechazo' ? t.rejected : ''}</div>
                   <p className="obr-pre">{k.body}</p>
                 </li>
               ))}
             </ol>
-          ) : <Empty icon="ri-chat-3-line" title="Sin mensajes" text="Las preguntas y los cambios pedidos sobre este presupuesto aparecerán aquí." />}
+          ) : <Empty icon="ri-chat-3-line" title={t.noMessages} text={t.noMessagesText} />}
           {can.comment ? (
             <div className="fin-form obr-mt">
-              <label className="fin-field"><span>Escribe un mensaje</span><textarea rows={3} maxLength={4000} value={text} onChange={(e) => setText(e.target.value)} /></label>
+              <label className="fin-field"><span>{t.writeMessage}</span><textarea rows={3} maxLength={4000} value={text} onChange={(e) => setText(e.target.value)} /></label>
               {dialogError && !dialog ? <span className="fin-error-inline">{dialogError}</span> : null}
-              <div><button type="button" className="fin-btn is-primary" disabled={busy || !text.trim()} onClick={() => act(() => api.comment(doc.id, { body: text }), 'Mensaje enviado')}><i className="ri-send-plane-line"></i>Enviar</button></div>
+              <div><button type="button" className="fin-btn is-primary" disabled={busy || !text.trim()} onClick={() => act(() => api.comment(doc.id, { body: text }), t.messageSent)}><i className="ri-send-plane-line"></i>{t.send}</button></div>
             </div>
           ) : null}
         </div>
       ) : null}
 
       {dialog === 'approve' ? (
-        <Dialog title="Aprobar presupuesto" onClose={() => setDialog(null)} actions={<>
-          <button type="button" className="fin-btn" onClick={() => setDialog(null)}>Cancelar</button>
-          <button type="button" className="fin-btn is-primary" disabled={busy} onClick={() => act(() => api.approve(doc.id, { versionId: v.id, selected }), 'Presupuesto aprobado')}>Aprobar</button></>}>
-          <p>{`Apruebas la versión ${v.number} de ${doc.ref}.`}</p>
+        <Dialog title={t.approveTitle} onClose={() => setDialog(null)} actions={<>
+          <button type="button" className="fin-btn" onClick={() => setDialog(null)}>{t.cancel}</button>
+          <button type="button" className="fin-btn is-primary" disabled={busy} onClick={() => act(() => api.approve(doc.id, { versionId: v.id, selected }), t.approvedToast)}>{t.approve}</button></>}>
+          <p>{t.approveIntro(v.number, doc.ref)}</p>
           <dl className="fin-dl">
-            <dt>Base imponible</dt><dd>{eur(Number(v.base) + optionalChosen)}</dd>
-            <dt>{`IVA ${v.vatRate.replace('.', ',')} %`}</dt><dd>{eur(Math.round((Number(v.base) + optionalChosen) * Number(v.vatRate)) / 100)}</dd>
-            <dt>Total con IVA</dt><dd className="fin-strong">{eur(Number(v.base) + optionalChosen + Math.round((Number(v.base) + optionalChosen) * Number(v.vatRate)) / 100)}</dd>
-            {options.length ? <><dt>Opciones elegidas</dt><dd>{selected.length ? options.filter((o) => selected.includes(o.id)).map((o) => o.name).join(', ') : 'Ninguna'}</dd></> : null}
+            <dt>{t.base}</dt><dd>{eur(Number(v.base) + optionalChosen)}</dd>
+            <dt>{t.vat(v.vatRate)}</dt><dd>{eur(Math.round((Number(v.base) + optionalChosen) * Number(v.vatRate)) / 100)}</dd>
+            <dt>{t.total}</dt><dd className="fin-strong">{eur(Number(v.base) + optionalChosen + Math.round((Number(v.base) + optionalChosen) * Number(v.vatRate)) / 100)}</dd>
+            {options.length ? <><dt>{t.chosenOptions}</dt><dd>{selected.length ? options.filter((o) => selected.includes(o.id)).map((o) => o.name).join(', ') : t.none}</dd></> : null}
           </dl>
-          <p className="fin-muted">Pasará a «Presupuestos aprobados». Cuando fijemos la fecha de inicio, lo verás como obra en curso.</p>
+          <p className="fin-muted">{t.approveNote}</p>
           {dialogError ? <span className="fin-error-inline">{dialogError}</span> : null}
         </Dialog>
       ) : null}
       {dialog === 'changes' || dialog === 'reject' ? (
-        <Dialog title={dialog === 'changes' ? 'Pedir cambios' : 'Rechazar presupuesto'} onClose={() => setDialog(null)} actions={<>
-          <button type="button" className="fin-btn" onClick={() => setDialog(null)}>Cancelar</button>
+        <Dialog title={dialog === 'changes' ? t.changesTitle : t.rejectTitle} onClose={() => setDialog(null)} actions={<>
+          <button type="button" className="fin-btn" onClick={() => setDialog(null)}>{t.cancel}</button>
           <button type="button" className={'fin-btn ' + (dialog === 'reject' ? 'is-danger' : 'is-primary')} disabled={busy || (dialog === 'changes' && !text.trim())}
-            onClick={() => act(() => (dialog === 'changes' ? api.requestChanges : api.reject)(doc.id, { versionId: v.id, body: text }), dialog === 'changes' ? 'Cambios enviados al equipo' : 'Presupuesto rechazado')}>
-            {dialog === 'changes' ? 'Enviar comentarios' : 'Rechazar'}</button></>}>
-          <p>{dialog === 'changes' ? 'Cuéntanos qué quieres cambiar. El equipo lo revisará y te enviará una versión nueva.' : 'El presupuesto quedará cerrado. Si quieres, dinos el motivo.'}</p>
-          <label className="fin-field"><span>{dialog === 'changes' ? 'Comentarios' : 'Motivo (opcional)'}</span><textarea rows={4} maxLength={4000} value={text} onChange={(e) => setText(e.target.value)} /></label>
+            onClick={() => act(() => (dialog === 'changes' ? api.requestChanges : api.reject)(doc.id, { versionId: v.id, body: text }), dialog === 'changes' ? t.changesSent : t.rejectedToast)}>
+            {dialog === 'changes' ? t.sendComments : t.reject}</button></>}>
+          <p>{dialog === 'changes' ? t.changesIntro : t.rejectIntro}</p>
+          <label className="fin-field"><span>{dialog === 'changes' ? t.comments : t.reasonOpt}</span><textarea rows={4} maxLength={4000} value={text} onChange={(e) => setText(e.target.value)} /></label>
           {dialogError ? <span className="fin-error-inline">{dialogError}</span> : null}
         </Dialog>
       ) : null}
@@ -227,9 +229,11 @@ export default function Detalle({ id, initialTab, readOnly, toast, onBack, onCha
 }
 
 function BackLink({ onBack }) {
-  return <div><button type="button" className="fin-btn is-ghost is-small" onClick={onBack}><i className="ri-arrow-left-line"></i>Volver</button></div>;
+  const { t } = useObrasI18n();
+  return <div><button type="button" className="fin-btn is-ghost is-small" onClick={onBack}><i className="ri-arrow-left-line"></i>{t.back}</button></div>;
 }
 
+// Team only (edit, send, extend): Spanish.
 function TeamActions({ doc, can, busy, onEdit, onSend, onAmpliar }) {
   if (!can.edit && !can.send && !can.ampliar) return null;
   const last = doc.versions[0];
@@ -248,6 +252,7 @@ function TeamActions({ doc, can, busy, onEdit, onSend, onAmpliar }) {
   );
 }
 
+// Team only (set the dates): Spanish.
 function Schedule({ doc, busy, onSave, error }) {
   const [start, setStart] = useState(doc.startDate || '');
   const [end, setEnd] = useState(doc.endDate || '');
@@ -266,6 +271,7 @@ function Schedule({ doc, busy, onSave, error }) {
 }
 
 function ObraTab({ doc, can, busy, onDeclare, error }) {
+  const { t, eur, num, fecha, fechaHora, pct } = useObrasI18n();
   const o = doc.obra;
   const [editing, setEditing] = useState(false);
   const [values, setValues] = useState({});
@@ -284,17 +290,17 @@ function ObraTab({ doc, can, busy, onDeclare, error }) {
     onDeclare(items);
   };
   if (!o.startDate) {
-    return <Empty icon="ri-calendar-line" title="Obra pendiente de fecha de inicio" text="El presupuesto está aprobado. Cuando el equipo fije la fecha de inicio, aquí verás el avance." />;
+    return <Empty icon="ri-calendar-line" title={t.noStart} text={t.noStartText} />;
   }
   return (
     <div className="fin-stack">
       <div className="fin-kpis">
-        <div className="fin-kpi"><span className="fin-kpi-label"><i className="ri-hammer-line"></i>Ejecución</span><span className="fin-kpi-value">{pctS(o.executionPct)}</span><Bar value={o.executionPct} color="#5567AE" /><span className="fin-kpi-hint">{`${eur(o.executedAmount)} ejecutado`}</span></div>
-        <div className="fin-kpi"><span className="fin-kpi-label"><i className="ri-pie-chart-line"></i>Presupuesto consumido</span><span className="fin-kpi-value">{pctS(o.consumedPct)}</span><Bar value={o.consumedPct} color={o.consumedPct > 100 ? '#D14A4A' : '#55A89D'} /><span className="fin-kpi-hint">{`${eur(o.consumed)} de ${eur(o.base)} sin IVA`}</span></div>
-        <Kpi label="Presupuesto vigente" value={eur(o.total)} icon="ri-money-euro-circle-line" hint={`${eur(o.base)} + ${eur(o.vat)} de IVA${doc.ampliaciones.some((a) => a.phase === 'aprobado') ? ' · incluye ampliaciones aprobadas' : ''}`} />
-        <Kpi label="Fechas" value={fecha(o.startDate)} icon="ri-calendar-line" hint={o.endDate ? `Fin previsto: ${fecha(o.endDate)}` : 'Sin fecha de fin prevista'} />
+        <div className="fin-kpi"><span className="fin-kpi-label"><i className="ri-hammer-line"></i>{t.execution}</span><span className="fin-kpi-value">{pct(o.executionPct)}</span><Bar value={o.executionPct} color="#5567AE" /><span className="fin-kpi-hint">{t.executed(eur(o.executedAmount))}</span></div>
+        <div className="fin-kpi"><span className="fin-kpi-label"><i className="ri-pie-chart-line"></i>{t.consumed}</span><span className="fin-kpi-value">{pct(o.consumedPct)}</span><Bar value={o.consumedPct} color={o.consumedPct > 100 ? '#D14A4A' : '#55A89D'} /><span className="fin-kpi-hint">{t.ofExVat(eur(o.consumed), eur(o.base))}</span></div>
+        <Kpi label={t.current} value={eur(o.total)} icon="ri-money-euro-circle-line" hint={t.currentHint(eur(o.base), eur(o.vat), doc.ampliaciones.some((a) => a.phase === 'aprobado'))} />
+        <Kpi label={t.dates} value={fecha(o.startDate)} icon="ri-calendar-line" hint={o.endDate ? t.plannedEnd(fecha(o.endDate)) : t.noEnd} />
       </div>
-      <p className="fin-muted fin-small">Ejecución: lo hecho de cada partida hasta su cantidad presupuestada. Consumido: cantidad ejecutada × precio unitario; si una partida supera lo presupuestado, el exceso solo cuenta en el consumido.</p>
+      <p className="fin-muted fin-small">{t.obraExplain}</p>
       {can.declare ? (
         <div className="obr-actions obr-start">
           {editing ? (<>
@@ -307,27 +313,27 @@ function ObraTab({ doc, can, busy, onDeclare, error }) {
       {o.chapters.map((c) => (
         <div className="fin-card is-flush" key={c.id}>
           <div className="obr-chapter-head">
-            <div><h2>{c.name}</h2>{c.presupuesto.ampliacion ? <span className="fin-muted fin-small">{`Ampliación ${c.presupuesto.ref}`}</span> : null}</div>
+            <div><h2>{c.name}</h2>{c.presupuesto.ampliacion ? <span className="fin-muted fin-small">{t.extension(c.presupuesto.ref)}</span> : null}</div>
             <div className="obr-chapter-figs">
-              <span>{`Ejecución ${pctS(c.executionPct)}`}<Bar value={c.executionPct} color="#5567AE" /></span>
-              <span>{`Consumido ${pctS(c.consumedPct)} · ${eur(c.consumed)} de ${eur(c.base)}`}<Bar value={c.consumedPct} color={c.consumedPct > 100 ? '#D14A4A' : '#55A89D'} /></span>
+              <span>{t.chExecution(pct(c.executionPct))}<Bar value={c.executionPct} color="#5567AE" /></span>
+              <span>{t.chConsumed(pct(c.consumedPct), eur(c.consumed), eur(c.base))}<Bar value={c.consumedPct} color={c.consumedPct > 100 ? '#D14A4A' : '#55A89D'} /></span>
             </div>
           </div>
           <div className="fin-table-wrap">
             <table className="fin-table">
-              <thead><tr><th>Código</th><th>Partida</th><th className="fin-num">Presupuestado</th><th className="fin-num">Ejecutado</th><th className="fin-num">Avance</th><th className="fin-num">Precio</th><th className="fin-num">Consumido</th></tr></thead>
+              <thead><tr><th>{t.hCode}</th><th>{t.hItem}</th><th className="fin-num">{t.hBudgeted}</th><th className="fin-num">{t.hExecuted}</th><th className="fin-num">{t.hProgress}</th><th className="fin-num">{t.hPrice}</th><th className="fin-num">{t.hConsumed}</th></tr></thead>
               <tbody>
                 {c.items.map((i) => (
                   <tr key={i.id}>
                     <td className="fin-nowrap">{i.code || '—'}</td>
-                    <td><strong>{i.name}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{i.lastDeclared.by ? `Declarado por ${i.lastDeclared.by} · ${fechaHora(i.lastDeclared.at)}${i.lastDeclared.note ? ` · ${i.lastDeclared.note}` : ''}` : (i.lastDeclared.note || 'Avance importado')}</div> : null}</td>
+                    <td><strong>{i.name}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{i.lastDeclared.by ? `${t.declaredBy(i.lastDeclared.by, fechaHora(i.lastDeclared.at))}${i.lastDeclared.note ? ` · ${i.lastDeclared.note}` : ''}` : (i.lastDeclared.note || t.imported)}</div> : null}</td>
                     <td className="fin-num fin-nowrap">{`${num(i.quantity)} ${i.unit}`}</td>
                     <td className="fin-num fin-nowrap">
                       {editing ? <input aria-label={`Ejecutado en ${i.name}`} inputMode="decimal" className={'obr-in obr-in-num' + (parseDecimal(values[i.id], 4) === null ? ' is-invalid' : '')} value={values[i.id] ?? ''} onChange={(e) => setValues((s) => ({ ...s, [i.id]: e.target.value }))} />
                         : `${num(i.executed)} ${i.unit}`}
-                      {i.excess && !editing ? <div className="fin-danger fin-small">supera lo presupuestado</div> : null}
+                      {i.excess && !editing ? <div className="fin-danger fin-small">{t.excess}</div> : null}
                     </td>
-                    <td className="fin-num">{pctS(i.executionPct)}</td>
+                    <td className="fin-num">{pct(i.executionPct)}</td>
                     <td className="fin-num fin-nowrap">{eur(i.unitPrice)}</td>
                     <td className="fin-num fin-nowrap">{eur(i.consumed)}</td>
                   </tr>

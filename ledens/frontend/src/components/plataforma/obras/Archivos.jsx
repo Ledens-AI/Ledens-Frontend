@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { archivos } from './api.js';
-import { fecha } from '../finanzas/format.js';
+import { useObrasI18n } from './i18n.js';
 import { Dialog, Empty, ErrorBox } from '../finanzas/ui.jsx';
 import Carrusel from './Carrusel.jsx';
 
@@ -12,7 +12,7 @@ const MAX_PHOTO = 15 * 1024 * 1024;
 const MAX_PDF = 20 * 1024 * 1024;
 const isPdf = (f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
 const isImage = (f) => /^image\/(jpeg|png|heic|heif)$/.test(f.type) || /\.(jpe?g|png|heic|heif)$/i.test(f.name);
-const mb = (b) => (b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1024 / 1024).toLocaleString('es-ES', { maximumFractionDigits: 1 })} MB`);
+const mb = (b, locale = 'es-ES') => (b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1024 / 1024).toLocaleString(locale, { maximumFractionDigits: 1 })} MB`);
 const localDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 // A JPEG preview drawn by the browser (≤ 480 px), so the server needs no image
@@ -31,7 +31,10 @@ async function makeThumb(file) {
   } catch { return null; }
 }
 
+// The client's side follows the ES / EN switch; the upload form is team-only (Spanish).
 export default function Archivos({ obraId, readOnly, toast }) {
+  const { t, fecha, lang } = useObrasI18n();
+  const locale = lang === 'en' ? 'en-GB' : 'es-ES';
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [queue, setQueue] = useState([]);
@@ -42,8 +45,8 @@ export default function Archivos({ obraId, readOnly, toast }) {
   const load = useCallback(() => archivos.list(obraId).then((d) => { setData(d); setError(''); }, (e) => setError(e.message)), [obraId]);
   useEffect(() => { load(); }, [load]);
 
-  if (error) return <ErrorBox message={error} onRetry={load} />;
-  if (!data) return <div className="fin-loading fin-muted">Cargando fotos y documentos…</div>;
+  if (error) return <ErrorBox message={error} onRetry={load} retryLabel={t.retry} />;
+  if (!data) return <div className="fin-loading fin-muted">{t.filesLoading}</div>;
   const canUpload = data.can.upload && !readOnly;
   const today = localDay(new Date());
 
@@ -126,13 +129,13 @@ export default function Archivos({ obraId, readOnly, toast }) {
       ) : null}
 
       <div className="fin-card">
-        <div className="fin-card-head"><h2>{`Fotos${data.fotos.length ? ` · ${data.fotos.length}` : ''}`}</h2></div>
+        <div className="fin-card-head"><h2>{`${t.photos}${data.fotos.length ? ` · ${data.fotos.length}` : ''}`}</h2></div>
         {data.fotos.length ? <Carrusel fotos={data.fotos} actions={canUpload ? removeBtn : null} />
-          : <Empty icon="ri-camera-line" title="Aún no hay fotos" text={canUpload ? 'Sube las fotos del avance de la obra.' : 'Aquí verás las fotos del avance de tu obra.'} />}
+          : <Empty icon="ri-camera-line" title={t.noPhotos} text={canUpload ? t.noPhotosTeam : t.noPhotosClient} />}
       </div>
 
       <div className="fin-card">
-        <div className="fin-card-head"><h2>{`Documentos${data.documentos.length ? ` · ${data.documentos.length}` : ''}`}</h2></div>
+        <div className="fin-card-head"><h2>{`${t.documents}${data.documentos.length ? ` · ${data.documentos.length}` : ''}`}</h2></div>
         {data.documentos.length ? (
           <ul className="obr-docs">
             {data.documentos.map((d) => (
@@ -140,17 +143,17 @@ export default function Archivos({ obraId, readOnly, toast }) {
                 <i className="ri-file-pdf-2-line obr-docs-icon" aria-hidden="true"></i>
                 <span className="obr-row-main">
                   <strong>{d.title || d.name}</strong>
-                  <span className="fin-muted fin-small">{[fecha(d.date), d.title ? d.name : null, mb(d.size), d.uploadedBy ? `subido por ${d.uploadedBy}` : null].filter(Boolean).join(' · ')}</span>
+                  <span className="fin-muted fin-small">{[fecha(d.date), d.title ? d.name : null, mb(d.size, locale), d.uploadedBy ? t.docBy(d.uploadedBy) : null].filter(Boolean).join(' · ')}</span>
                   {d.description ? <span className="fin-small">{d.description}</span> : null}
                 </span>
                 <span className="obr-actions">
                   {removeBtn(d)}
-                  <a className="fin-btn is-small" href={d.downloadUrl} download={d.name}><i className="ri-download-2-line"></i>Descargar</a>
+                  <a className="fin-btn is-small" href={d.downloadUrl} download={d.name}><i className="ri-download-2-line"></i>{t.download}</a>
                 </span>
               </li>
             ))}
           </ul>
-        ) : <Empty icon="ri-file-text-line" title="Aún no hay documentos" text={canUpload ? 'Sube actas, planos, certificados o cualquier PDF de la obra.' : 'Aquí podrás descargar los documentos de tu obra.'} />}
+        ) : <Empty icon="ri-file-text-line" title={t.noDocs} text={canUpload ? t.noDocsTeam : t.noDocsClient} />}
       </div>
 
       {removing ? (

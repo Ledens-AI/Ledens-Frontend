@@ -1,22 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import Footer from './Footer.jsx';
+import { useI18n } from '../i18n/I18nContext.jsx';
+import useTocHighlight from './legal/useTocHighlight.js';
+import CookiesEn from './legal/CookiesEn.jsx';
 
-/* ── Scroll-spy hook ─────────────────────────────────────────────────────── */
-function useTocHighlight(ids) {
-  const [activeId, setActiveId] = useState(ids[0] || '');
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      entries => {
-        entries.forEach(e => { if (e.isIntersecting) setActiveId(e.target.id); });
-      },
-      { rootMargin: '-30% 0px -60% 0px' }
-    );
-    ids.forEach(id => { const el = document.getElementById(id); if (el) observer.observe(el); });
-    return () => observer.disconnect();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  return activeId;
-}
 
 const TOC = [
   { id: 'que-son',        label: '¿Qué son las cookies?' },
@@ -31,7 +19,13 @@ const TOC = [
   { id: 'cambios',        label: 'Cambios en esta política' },
 ];
 
+/* The English text lives in legal/CookiesEn.jsx — keep both in step. */
 export default function CookiesPage() {
+  const { lang } = useI18n();
+  return lang === 'en' ? <CookiesEn /> : <CookiesPageEs />;
+}
+
+function CookiesPageEs() {
   const activeId = useTocHighlight(TOC.map(t => t.id));
 
   return (
@@ -146,7 +140,7 @@ export default function CookiesPage() {
               <span className="cookie-chip chip-pref"><i className="ri-settings-3-line" /> Preferencias</span>{' '}
               Personalización
             </h3>
-            <p>Permiten recordar información para que accedas al servicio con determinadas características que pueden diferenciar tu experiencia (idioma, número de resultados a mostrar, tipo de navegador, configuración regional de la zona desde la que se accede al servicio…). Requieren <strong>tu consentimiento previo</strong>.</p>
+            <p>Permiten recordar información para que accedas al servicio con determinadas características que pueden diferenciar tu experiencia (número de resultados a mostrar, tipo de navegador, configuración regional de la zona desde la que se accede al servicio…). Requieren <strong>tu consentimiento previo</strong>.</p>
 
             <h3>
               <span className="cookie-chip chip-analytics"><i className="ri-line-chart-line" /> Analíticas</span>{' '}
@@ -180,6 +174,7 @@ export default function CookiesPage() {
                 <tr><td><code>ledens_sid</code></td><td>Propia</td><td>Identifica tu sesión de navegación.</td><td>Sesión</td></tr>
                 <tr><td><code>ledens_csrf</code></td><td>Propia</td><td>Protección frente a ataques CSRF en formularios y panel de cliente.</td><td>Sesión</td></tr>
                 <tr><td><code>ledens.cookieConsent.v1</code></td><td>Propia (localStorage)</td><td>Almacena tus preferencias de cookies para no volver a preguntártelo.</td><td>12 meses</td></tr>
+                <tr><td><code>ledens.lang.v1</code></td><td>Propia (localStorage)</td><td>Recuerda el idioma (ES / EN) que eliges en la barra superior. Solo se guarda cuando lo eliges tú.</td><td>Hasta que lo borres</td></tr>
                 <tr><td><code>__cf_bm</code></td><td>Cloudflare</td><td>Distingue tráfico humano de bots para proteger el sitio.</td><td>30 min</td></tr>
               </tbody>
             </table>
@@ -190,7 +185,6 @@ export default function CookiesPage() {
                 <tr><th className="col-name">Nombre</th><th className="col-type">Origen</th><th>Finalidad</th><th className="col-life">Duración</th></tr>
               </thead>
               <tbody>
-                <tr><td><code>ledens_lang</code></td><td>Propia</td><td>Recuerda tu idioma preferido (es-ES por defecto).</td><td>12 meses</td></tr>
                 <tr><td><code>ledens_city</code></td><td>Propia</td><td>Guarda la ciudad seleccionada en el buscador de reformas.</td><td>6 meses</td></tr>
                 <tr><td><code>ledens_last_quote</code></td><td>Propia</td><td>Conserva tu último presupuesto consultado para retomarlo.</td><td>30 días</td></tr>
               </tbody>

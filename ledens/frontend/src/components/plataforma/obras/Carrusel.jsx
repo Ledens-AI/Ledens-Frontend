@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { fecha } from '../finanzas/format.js';
+import { useObrasI18n } from './i18n.js';
 
 /* Photo carousel of an obra: previous/next buttons, arrow keys, swipe on touch
  * screens, full screen and a strip of thumbnails. `fotos` come from
  * /api/obras/:id/archivos; `actions(foto)` draws extra buttons for the team. */
 export default function Carrusel({ fotos, actions }) {
+  const { t, fecha } = useObrasI18n();
   const [i, setI] = useState(0);
   const [full, setFull] = useState(false);
   const [failed, setFailed] = useState({});
@@ -69,8 +70,8 @@ export default function Carrusel({ fotos, actions }) {
       {failed[foto.id] ? (
         <div className="obr-car-missing">
           <i className="ri-image-line" aria-hidden="true"></i>
-          <span>Tu navegador no puede mostrar esta foto (formato HEIC).</span>
-          <a className="fin-btn is-small" href={foto.downloadUrl}><i className="ri-download-2-line"></i>Descargar</a>
+          <span>{t.heic}</span>
+          <a className="fin-btn is-small" href={foto.downloadUrl}><i className="ri-download-2-line"></i>{t.download}</a>
         </div>
       ) : (
         <>
@@ -81,20 +82,20 @@ export default function Carrusel({ fotos, actions }) {
         </>
       )}
       {n > 1 ? <>
-        <button type="button" className="obr-car-nav is-prev" aria-label="Foto anterior" onClick={() => go(-1)}><i className="ri-arrow-left-s-line"></i></button>
-        <button type="button" className="obr-car-nav is-next" aria-label="Foto siguiente" onClick={() => go(1)}><i className="ri-arrow-right-s-line"></i></button>
+        <button type="button" className="obr-car-nav is-prev" aria-label={t.prevPhoto} onClick={() => go(-1)}><i className="ri-arrow-left-s-line"></i></button>
+        <button type="button" className="obr-car-nav is-next" aria-label={t.nextPhoto} onClick={() => go(1)}><i className="ri-arrow-right-s-line"></i></button>
       </> : null}
       <span className="obr-car-count" aria-live="polite">{`${at + 1} / ${n}`}</span>
       {inFull
-        ? <button type="button" className="obr-car-full" aria-label="Cerrar pantalla completa" onClick={close}><i className="ri-close-line"></i></button>
-        : <button type="button" className="obr-car-full" aria-label="Ver a pantalla completa" onClick={() => setFull(true)}><i className="ri-fullscreen-line"></i></button>}
+        ? <button type="button" className="obr-car-full" aria-label={t.closeFull} onClick={close}><i className="ri-close-line"></i></button>
+        : <button type="button" className="obr-car-full" aria-label={t.openFull} onClick={() => setFull(true)}><i className="ri-fullscreen-line"></i></button>}
     </div>
   );
   const caption = (
     <div className="obr-car-caption">
       <div>
         <strong>{foto.title || foto.name}</strong>
-        <span className="fin-muted fin-small">{[fecha(foto.date), foto.uploadedBy ? `subida por ${foto.uploadedBy}` : null].filter(Boolean).join(' · ')}</span>
+        <span className="fin-muted fin-small">{[fecha(foto.date), foto.uploadedBy ? t.photoBy(foto.uploadedBy) : null].filter(Boolean).join(' · ')}</span>
         {foto.description ? <p className="obr-pre">{foto.description}</p> : null}
       </div>
       {actions ? <div className="obr-actions">{actions(foto)}</div> : null}
@@ -102,20 +103,20 @@ export default function Carrusel({ fotos, actions }) {
   );
 
   return (
-    <div className="obr-car" tabIndex={0} onKeyDown={onKeyDown} aria-roledescription="carrusel" aria-label="Fotos de la obra">
+    <div className="obr-car" tabIndex={0} onKeyDown={onKeyDown} aria-roledescription={t.carousel} aria-label={t.carouselLabel}>
       {stage(false)}
       {caption}
       {n > 1 ? (
         <div className="obr-car-strip" ref={strip}>
           {fotos.map((f, k) => (
-            <button key={f.id} type="button" className={'obr-car-thumb' + (k === at ? ' is-on' : '')} aria-current={k === at} aria-label={`Foto ${k + 1}: ${f.title || f.name}`} onClick={() => setI(k)}>
+            <button key={f.id} type="button" className={'obr-car-thumb' + (k === at ? ' is-on' : '')} aria-current={k === at} aria-label={t.photoN(k + 1, f.title || f.name)} onClick={() => setI(k)}>
               {f.thumbUrl || !/hei[cf]/.test(f.mime) ? <img src={f.thumbUrl || f.url} alt="" loading="lazy" draggable={false} /> : <i className="ri-image-line" aria-hidden="true"></i>}
             </button>
           ))}
         </div>
       ) : null}
       {full ? (
-        <div className="obr-car-overlay" ref={overlay} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Fotos a pantalla completa">
+        <div className="obr-car-overlay" ref={overlay} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t.fullLabel}>
           {stage(true)}
           <div className="obr-car-overlay-caption">
             <strong>{foto.title || foto.name}</strong>

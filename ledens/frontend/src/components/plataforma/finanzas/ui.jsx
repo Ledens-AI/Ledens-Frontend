@@ -53,12 +53,12 @@ export function Empty({ icon, title, text, children }) {
   );
 }
 
-export function ErrorBox({ message, onRetry }) {
+export function ErrorBox({ message, onRetry, retryLabel = 'Reintentar' }) {
   return (
     <div className="fin-errorbox" role="alert">
       <i className="ri-error-warning-line" aria-hidden="true"></i>
       <span>{message}</span>
-      {onRetry ? <button type="button" className="fin-btn" onClick={onRetry}>Reintentar</button> : null}
+      {onRetry ? <button type="button" className="fin-btn" onClick={onRetry}>{retryLabel}</button> : null}
     </div>
   );
 }
