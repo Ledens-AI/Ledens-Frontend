@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useT } from '../i18n/I18nContext.jsx';
 
 import imgTilos19 from '../images/Tilos 57-19.webp';
 import imgTilos05 from '../images/Tilos 57-05.webp';
@@ -9,51 +10,42 @@ import img1641    from '../images/IMG_1641.webp';
 
 // Tilos 57-19 is the hero image — it goes first (idx = 0).
 const SLIDES = [
-  {
-    img:  imgTilos19,
-    room: 'Cocina',
-    loc:  'Cocina con isla · Tilos 57',
-    size: '24 m²',
-    meta: ['8 semanas', 'Llave en mano'],
-  },
-  {
-    img:  imgTilos05,
-    room: 'Baño',
-    loc:  'Baño doble · Tilos 57',
-    size: '9 m²',
-    meta: ['3 semanas', 'Ducha de obra'],
-  },
-  {
-    img:  img1478,
-    room: 'Terraza',
-    loc:  'Terraza · Málaga Centro',
-    size: '22 m²',
-    meta: ['5 semanas', 'Suelo de roble'],
-  },
-  {
-    img:  imgTilos02,
-    room: 'Baño',
-    loc:  'Baño principal · Tilos 57',
-    size: '7 m²',
-    meta: ['3 semanas', 'Microcemento'],
-  },
-  {
-    img:  imgTilos17,
-    room: 'Cocina',
-    loc:  'Cocina con isla · Tilos 57',
-    size: '22 m²',
-    meta: ['6 semanas', 'Mármol Calacatta'],
-  },
-  {
-    img:  img1641,
-    room: 'Dormitorio',
-    loc:  'Dormitorio principal · Málaga Centro',
-    size: '14 m²',
-    meta: ['4 semanas', 'Tarima de roble'],
-  },
+  { img: imgTilos19, size: '24 m²' },
+  { img: imgTilos05, size: '9 m²' },
+  { img: img1478,    size: '22 m²' },
+  { img: imgTilos02, size: '7 m²' },
+  { img: imgTilos17, size: '22 m²' },
+  { img: img1641,    size: '14 m²' },
 ];
 
+// One [room, location, meta[]] per slide, in SLIDES order.
+const TXT = {
+  es: {
+    aria: 'Galería de reformas Ledens', prev: 'Anterior', next: 'Siguiente', goTo: (n) => `Ir a slide ${n}`,
+    slides: [
+      ['Cocina', 'Cocina con isla · Tilos 57', ['8 semanas', 'Llave en mano']],
+      ['Baño', 'Baño doble · Tilos 57', ['3 semanas', 'Ducha de obra']],
+      ['Terraza', 'Terraza · Málaga Centro', ['5 semanas', 'Suelo de roble']],
+      ['Baño', 'Baño principal · Tilos 57', ['3 semanas', 'Microcemento']],
+      ['Cocina', 'Cocina con isla · Tilos 57', ['6 semanas', 'Mármol Calacatta']],
+      ['Dormitorio', 'Dormitorio principal · Málaga Centro', ['4 semanas', 'Tarima de roble']],
+    ],
+  },
+  en: {
+    aria: 'Ledens renovation gallery', prev: 'Previous', next: 'Next', goTo: (n) => `Go to slide ${n}`,
+    slides: [
+      ['Kitchen', 'Kitchen with island · Tilos 57', ['8 weeks', 'Turnkey']],
+      ['Bathroom', 'Double bathroom · Tilos 57', ['3 weeks', 'Walk-in shower']],
+      ['Terrace', 'Terrace · Málaga Centro', ['5 weeks', 'Oak flooring']],
+      ['Bathroom', 'Main bathroom · Tilos 57', ['3 weeks', 'Microcement']],
+      ['Kitchen', 'Kitchen with island · Tilos 57', ['6 weeks', 'Calacatta marble']],
+      ['Bedroom', 'Main bedroom · Málaga Centro', ['4 weeks', 'Oak floorboards']],
+    ],
+  },
+};
+
 export default function Carousel() {
+  const t = useT(TXT);
   const [idx, setIdx] = useState(0);
   const timerRef = useRef(null);
   const total = SLIDES.length;
@@ -81,27 +73,30 @@ export default function Carousel() {
       className="carousel"
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
-      aria-label="Galería de reformas Ledens"
+      aria-label={t.aria}
     >
       <div className="carousel-track" style={{ transform: `translateX(-${idx * 100}%)` }}>
-        {SLIDES.map((s, i) => (
-          <div key={i} className="slide" style={{ backgroundImage: `url('${s.img}')` }}>
-            <div className="slide-caption">
-              <div>
-                <div className="room">{s.room}</div>
-                <div className="loc">{s.loc} <span>· {s.size}</span></div>
-              </div>
-              <div className="slide-meta">
-                {s.meta.map((m, j) => <span key={j}>{m}</span>)}
+        {SLIDES.map((s, i) => {
+          const [room, loc, meta] = t.slides[i];
+          return (
+            <div key={i} className="slide" style={{ backgroundImage: `url('${s.img}')` }}>
+              <div className="slide-caption">
+                <div>
+                  <div className="room">{room}</div>
+                  <div className="loc">{loc} <span>· {s.size}</span></div>
+                </div>
+                <div className="slide-meta">
+                  {meta.map((m, j) => <span key={j}>{m}</span>)}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
-      <button className="carousel-ctrl carousel-prev" aria-label="Anterior" onClick={prev}>
+      <button className="carousel-ctrl carousel-prev" aria-label={t.prev} onClick={prev}>
         <i className="ri-arrow-left-s-line"></i>
       </button>
-      <button className="carousel-ctrl carousel-next" aria-label="Siguiente" onClick={next}>
+      <button className="carousel-ctrl carousel-next" aria-label={t.next} onClick={next}>
         <i className="ri-arrow-right-s-line"></i>
       </button>
       <div className="carousel-dots">
@@ -110,7 +105,7 @@ export default function Carousel() {
             key={i}
             type="button"
             className={i === idx ? 'active' : ''}
-            aria-label={`Ir a slide ${i + 1}`}
+            aria-label={t.goTo(i + 1)}
             onClick={() => go(i)}
           />
         ))}

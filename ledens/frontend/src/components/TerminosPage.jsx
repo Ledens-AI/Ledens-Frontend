@@ -1,22 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import Footer from './Footer.jsx';
+import { useI18n } from '../i18n/I18nContext.jsx';
+import useTocHighlight from './legal/useTocHighlight.js';
+import TerminosEn from './legal/TerminosEn.jsx';
 
-/* ── Scroll-spy hook ─────────────────────────────────────────────────────── */
-function useTocHighlight(ids) {
-  const [activeId, setActiveId] = useState(ids[0] || '');
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      entries => {
-        entries.forEach(e => { if (e.isIntersecting) setActiveId(e.target.id); });
-      },
-      { rootMargin: '-30% 0px -60% 0px' }
-    );
-    ids.forEach(id => { const el = document.getElementById(id); if (el) observer.observe(el); });
-    return () => observer.disconnect();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  return activeId;
-}
 
 const TOC = [
   { id: 'identificacion',  label: 'Identificación del prestador' },
@@ -36,7 +24,13 @@ const TOC = [
   { id: 'general',         label: 'Disposiciones generales' },
 ];
 
+/* The English text lives in legal/TerminosEn.jsx — keep both in step. */
 export default function TerminosPage() {
+  const { lang } = useI18n();
+  return lang === 'en' ? <TerminosEn /> : <TerminosPageEs />;
+}
+
+function TerminosPageEs() {
   const activeId = useTocHighlight(TOC.map(t => t.id));
 
   return (

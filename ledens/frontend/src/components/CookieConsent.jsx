@@ -1,39 +1,55 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import logo from '../assets/logo-ledens-isotype.png';
+import { useT } from '../i18n/I18nContext.jsx';
 
 /* ── Constants ───────────────────────────────────────────────────────────── */
 const STORAGE_KEY = 'ledens.cookieConsent.v1';
 
 const CATEGORIES = [
-  {
-    id: 'necessary',
-    title: 'Técnicas',
-    locked: true,
-    desc: 'Imprescindibles para que la web funcione: sesión, seguridad, balanceo de carga. No identifican a una persona concreta.',
-    count: 4,
-  },
-  {
-    id: 'preferences',
-    title: 'Preferencias',
-    locked: false,
-    desc: 'Recuerdan tus elecciones (idioma, ciudad de búsqueda, último presupuesto consultado) para no volver a preguntártelo.',
-    count: 3,
-  },
-  {
-    id: 'analytics',
-    title: 'Analíticas',
-    locked: false,
-    desc: 'Nos ayudan a entender qué páginas funcionan y dónde se atascan los visitantes. Siempre con datos agregados.',
-    count: 5,
-  },
-  {
-    id: 'marketing',
-    title: 'Marketing',
-    locked: false,
-    desc: 'Permiten medir la eficacia de nuestras campañas y mostrarte anuncios relevantes en otras webs y redes sociales.',
-    count: 6,
-  },
+  { id: 'necessary',   locked: true,  count: 5 },
+  { id: 'preferences', locked: false, count: 2 },
+  { id: 'analytics',   locked: false, count: 5 },
+  { id: 'marketing',   locked: false, count: 6 },
 ];
+
+const TXT = {
+  es: {
+    cats: {
+      necessary: ['Técnicas', 'Imprescindibles para que la web funcione: sesión, seguridad, balanceo de carga y el idioma que eliges. No identifican a una persona concreta.'],
+      preferences: ['Preferencias', 'Recuerdan tus elecciones (ciudad de búsqueda, último presupuesto consultado) para no volver a preguntártelo.'],
+      analytics: ['Analíticas', 'Nos ayudan a entender qué páginas funcionan y dónde se atascan los visitantes. Siempre con datos agregados.'],
+      marketing: ['Marketing', 'Permiten medir la eficacia de nuestras campañas y mostrarte anuncios relevantes en otras webs y redes sociales.'],
+    },
+    titleDetails: 'Elige tus preferencias', titleUpdate: 'Actualiza tus preferencias', titleFirst: 'Tú decides qué cookies usamos',
+    eyebrow: 'Privacidad & cookies', back: 'Volver',
+    p1: <>Usamos <strong>cookies propias y de terceros</strong> para que la web funcione, recordar tus preferencias, medir cómo la usas y, si tú lo aceptas, mostrarte campañas más relevantes.</>,
+    p2: <>Puedes <strong>aceptar todas</strong>, <strong>rechazarlas todas</strong> (salvo las imprescindibles) o <strong>elegir tú</strong> qué categorías activar. Cambiarás de opinión cuando quieras desde el icono inferior izquierdo o desde la</>,
+    policy: 'Política de cookies',
+    reject: 'Rechazar todas', customize: 'Personalizar', accept: 'Aceptar todas',
+    always: 'Siempre activas',
+    footNote: 'Tus preferencias se guardan durante 12 meses. Detalles en la',
+    onlyNecessary: 'Solo imprescindibles', save: 'Guardar mis preferencias',
+    reopen: 'Configuración de cookies',
+  },
+  en: {
+    cats: {
+      necessary: ['Technical', 'Essential for the website to work: session, security, load balancing and the language you choose. They don’t identify any particular person.'],
+      preferences: ['Preferences', 'They remember your choices (search city, last quote viewed) so we don’t have to ask again.'],
+      analytics: ['Analytics', 'They help us understand which pages work and where visitors get stuck. Always with aggregated data.'],
+      marketing: ['Marketing', 'They let us measure how well our campaigns work and show you relevant ads on other websites and social networks.'],
+    },
+    titleDetails: 'Choose your preferences', titleUpdate: 'Update your preferences', titleFirst: 'You decide which cookies we use',
+    eyebrow: 'Privacy & cookies', back: 'Back',
+    p1: <>We use <strong>our own and third-party cookies</strong> to make the website work, remember your preferences, measure how you use it and, if you agree, show you more relevant campaigns.</>,
+    p2: <>You can <strong>accept all</strong>, <strong>reject all</strong> (except the essential ones) or <strong>choose</strong> which categories to turn on. You can change your mind at any time from the icon at the bottom left or from the</>,
+    policy: 'Cookie policy',
+    reject: 'Reject all', customize: 'Customise', accept: 'Accept all',
+    always: 'Always on',
+    footNote: 'Your preferences are kept for 12 months. Details in the',
+    onlyNecessary: 'Essential only', save: 'Save my preferences',
+    reopen: 'Cookie settings',
+  },
+};
 
 /* ── Storage helpers ─────────────────────────────────────────────────────── */
 function loadPrefs() {
@@ -60,6 +76,7 @@ function allFalseExceptNecessary() {
 
 /* ── Component ───────────────────────────────────────────────────────────── */
 export default function CookieConsent() {
+  const t = useT(TXT);
   const stored = loadPrefs();
 
   const [open, setOpen]     = useState(false);
@@ -75,10 +92,10 @@ export default function CookieConsent() {
 
   const titleText = open
     ? view === 'details'
-      ? 'Elige tus preferencias'
+      ? t.titleDetails
       : stored
-        ? 'Actualiza tus preferencias'
-        : 'Tú decides qué cookies usamos'
+        ? t.titleUpdate
+        : t.titleFirst
     : '';
 
   /* Handlers */
@@ -181,13 +198,13 @@ export default function CookieConsent() {
               <img src={logo} alt="" />
             </div>
             <div className="cc-titles">
-              <div className="cc-eyebrow">Privacidad &amp; cookies</div>
+              <div className="cc-eyebrow">{t.eyebrow}</div>
               <h2 id="cc-title">{titleText}</h2>
             </div>
             <button
               className="cc-back"
               type="button"
-              aria-label="Volver"
+              aria-label={t.back}
               onClick={() => setView('summary')}
             >
               <i className="ri-arrow-left-line" />
@@ -197,33 +214,27 @@ export default function CookieConsent() {
           {/* ── Summary view ─────────────────────────────────────────── */}
           <div className="cc-summary">
             <div className="cc-body">
+              <p>{t.p1}</p>
               <p>
-                Usamos <strong>cookies propias y de terceros</strong> para que la web funcione,
-                recordar tus preferencias, medir cómo la usas y, si tú lo aceptas, mostrarte
-                campañas más relevantes.
-              </p>
-              <p>
-                Puedes <strong>aceptar todas</strong>, <strong>rechazarlas todas</strong> (salvo
-                las imprescindibles) o <strong>elegir tú</strong> qué categorías activar.
-                Cambiarás de opinión cuando quieras desde el icono inferior izquierdo o desde la{' '}
+                {t.p2}{' '}
                 <a href={policyPath} className="cc-more">
-                  Política de cookies <i className="ri-arrow-right-up-line" />
+                  {t.policy} <i className="ri-arrow-right-up-line" />
                 </a>.
               </p>
             </div>
             <div className="cc-actions">
               <button className="cc-btn cc-btn-ghost" type="button" onClick={handleReject}>
-                Rechazar todas
+                {t.reject}
               </button>
               <button
                 className="cc-btn cc-btn-outline"
                 type="button"
                 onClick={() => setView('details')}
               >
-                Personalizar
+                {t.customize}
               </button>
               <button className="cc-btn cc-btn-primary" type="button" onClick={handleAccept}>
-                Aceptar todas
+                {t.accept}
               </button>
             </div>
           </div>
@@ -234,10 +245,10 @@ export default function CookieConsent() {
               <div className="cc-row" key={cat.id}>
                 <div>
                   <h3>
-                    {cat.title}
-                    {cat.locked && <span className="cc-locked">Siempre activas</span>}
+                    {t.cats[cat.id][0]}
+                    {cat.locked && <span className="cc-locked">{t.always}</span>}
                   </h3>
-                  <p>{cat.desc}</p>
+                  <p>{t.cats[cat.id][1]}</p>
                   <span className="cc-count">
                     {cat.count} cookie{cat.count === 1 ? '' : 's'}
                   </span>
@@ -246,7 +257,7 @@ export default function CookieConsent() {
                   className="cc-toggle"
                   role="switch"
                   aria-checked={cat.locked ? 'true' : String(!!toggles[cat.id])}
-                  aria-label={cat.title}
+                  aria-label={t.cats[cat.id][0]}
                   data-cat={cat.id}
                   data-on={cat.locked ? 'true' : String(!!toggles[cat.id])}
                   data-locked={cat.locked ? 'true' : 'false'}
@@ -266,14 +277,14 @@ export default function CookieConsent() {
           {/* Details footer */}
           <div className="cc-details-foot">
             <span className="cc-foot-note">
-              Tus preferencias se guardan durante 12 meses. Detalles en la{' '}
-              <a href={policyPath}>Política de cookies</a>.
+              {t.footNote}{' '}
+              <a href={policyPath}>{t.policy}</a>.
             </span>
             <button className="cc-btn cc-btn-outline" type="button" onClick={handleReject}>
-              Solo imprescindibles
+              {t.onlyNecessary}
             </button>
             <button className="cc-btn cc-btn-primary" type="button" onClick={handleSave}>
-              Guardar mis preferencias
+              {t.save}
             </button>
           </div>
         </div>
@@ -283,7 +294,7 @@ export default function CookieConsent() {
       <button
         className="cc-reopen"
         type="button"
-        aria-label="Configuración de cookies"
+        aria-label={t.reopen}
         data-show={reopen ? 'true' : 'false'}
         onClick={handleOpen}
       >

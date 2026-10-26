@@ -57,6 +57,7 @@
 }
 .reg .reg-back { color: var(--fg3); display: inline-flex; align-items: center; gap: 6px; }
 .reg-topbar a.reg-strong { font-weight: 600; }
+.reg-topbar-right { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .reg h1 { font-size: 32px; font-weight: 700; letter-spacing: -.025em; color: var(--ledens-navy); margin: 0 0 6px; }
 .reg-sub { font-size: 15px; color: var(--fg2); margin: 0 0 28px; line-height: 1.5; }
 

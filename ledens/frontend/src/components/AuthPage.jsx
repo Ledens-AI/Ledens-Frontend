@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import { useI18n } from '../i18n/I18nContext.jsx';
+import { apiErrorText } from '../i18n/apiErrors.js';
 import logo from '../assets/logo-ledens-isotype.png';
 
 /* ─── Icons ─────────────────────────────────────────────────────────────── */
@@ -31,21 +33,79 @@ function isValidEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()); }
 // Only same-site paths ("/plataforma"), never "//evil.com" or absolute URLs.
 function safeRedirect(v) { return v && v.startsWith('/') && !v.startsWith('//') ? v : '/'; }
 
-// The backend redirects a failed Google/Microsoft login back here with one
-// of these codes in ?error=... (see routes/oauth.js) — translate for the UI.
-const OAUTH_ERRORS = {
-  google_cancelled: 'Has cancelado el inicio de sesión con Google.',
-  google_failed: 'No se pudo iniciar sesión con Google. Inténtalo de nuevo.',
-  google_email_in_use: 'Ese email ya tiene una cuenta con otro método de acceso. Inicia sesión con tu contraseña, o con el método que usaste la primera vez.',
-  microsoft_cancelled: 'Has cancelado el inicio de sesión con Microsoft.',
-  microsoft_failed: 'No se pudo iniciar sesión con Microsoft. Inténtalo de nuevo.',
-  microsoft_email_in_use: 'Ese email ya tiene una cuenta con otro método de acceso. Inicia sesión con tu contraseña, o con el método que usaste la primera vez.',
+const TXT = {
+  es: {
+    // The backend redirects a failed Google/Microsoft login back here with one
+    // of these codes in ?error=... (see routes/oauth.js) — translate for the UI.
+    oauthErrors: {
+      google_cancelled: 'Has cancelado el inicio de sesión con Google.',
+      google_failed: 'No se pudo iniciar sesión con Google. Inténtalo de nuevo.',
+      google_email_in_use: 'Ese email ya tiene una cuenta con otro método de acceso. Inicia sesión con tu contraseña, o con el método que usaste la primera vez.',
+      microsoft_cancelled: 'Has cancelado el inicio de sesión con Microsoft.',
+      microsoft_failed: 'No se pudo iniciar sesión con Microsoft. Inténtalo de nuevo.',
+      microsoft_email_in_use: 'Ese email ya tiene una cuenta con otro método de acceso. Inicia sesión con tu contraseña, o con el método que usaste la primera vez.',
+    },
+    loginFailed: 'No se pudo iniciar sesión', genericError: 'Ha ocurrido un error. Inténtalo de nuevo.',
+    errName: 'Introduce tu nombre.', errEmail: 'Introduce un email válido.',
+    errPwdShort: 'La contraseña debe tener al menos 8 caracteres.', errPwd: 'Introduce tu contraseña.',
+    unavailable: 'No disponible', badCredentials: 'Credenciales incorrectas', emailTaken: 'Email ya registrado',
+    tryAgain: 'Inténtalo de nuevo.',
+    netTitle: 'Error de conexión', netMsg: 'No se pudo contactar con el servidor. Inténtalo de nuevo.',
+    artTitle: <>Tu reforma, <em>bajo control</em><br />desde tu móvil.</>,
+    artBody: 'Accede a tu panel de cliente para ver el estado de obra, fotos semanales, presupuesto actualizado y tu interlocutor único directo en chat.',
+    stats: ['presupuesto cerrado', 'obra empezada', 'extras'], zero: '0€',
+    artFoot: '© 2026 Ledens · Reformas inteligentes · Málaga',
+    back: 'Volver', tabLogin: 'Iniciar sesión', tabSignup: 'Crear cuenta',
+    titleLogin: 'Bienvenido de vuelta', titleSignup: 'Crea tu cuenta Ledens',
+    subLogin: 'Accede para ver el estado de tu reforma y hablar con tu equipo.',
+    subSignup: 'En 30 segundos tienes acceso al panel de tu reforma.',
+    google: 'Continuar con Google', microsoft: 'Continuar con Microsoft', apple: 'Continuar con Apple', soon: 'Próximamente',
+    or: 'o', fullName: 'Nombre completo', namePh: 'Tu nombre', email: 'Email', emailPh: 'tu@correo.es',
+    password: 'Contraseña', pwdPh: 'Mínimo 8 caracteres', showPwd: 'Mostrar contraseña',
+    remember: 'Recuérdame', forgot: '¿Olvidaste tu contraseña?',
+    noAccount: '¿Aún no tienes cuenta?', signupFree: 'Regístrate gratis',
+    haveAccount: '¿Ya tienes cuenta?', login: 'Inicia sesión',
+    terms: <>Al crear cuenta aceptas los <Link to="/terminos">Términos</Link> y la{' '}<Link to="/privacidad">Política de privacidad</Link> de Ledens.</>,
+  },
+  en: {
+    oauthErrors: {
+      google_cancelled: 'You cancelled signing in with Google.',
+      google_failed: 'Could not sign in with Google. Please try again.',
+      google_email_in_use: 'That email already has an account with a different sign-in method. Log in with your password, or with the method you used the first time.',
+      microsoft_cancelled: 'You cancelled signing in with Microsoft.',
+      microsoft_failed: 'Could not sign in with Microsoft. Please try again.',
+      microsoft_email_in_use: 'That email already has an account with a different sign-in method. Log in with your password, or with the method you used the first time.',
+    },
+    loginFailed: 'Could not log in', genericError: 'Something went wrong. Please try again.',
+    errName: 'Please enter your name.', errEmail: 'Please enter a valid email.',
+    errPwdShort: 'The password must be at least 8 characters long.', errPwd: 'Please enter your password.',
+    unavailable: 'Not available', badCredentials: 'Incorrect credentials', emailTaken: 'Email already registered',
+    tryAgain: 'Please try again.',
+    netTitle: 'Connection error', netMsg: 'Could not reach the server. Please try again.',
+    artTitle: <>Your renovation, <em>under control</em><br />from your phone.</>,
+    artBody: 'Open your client area to see the status of the works, weekly photos, the up-to-date budget and chat directly with your single point of contact.',
+    stats: ['fixed-price quote', 'works started', 'extras'], zero: '€0',
+    artFoot: '© 2026 Ledens · Smart renovations · Málaga',
+    back: 'Back', tabLogin: 'Log in', tabSignup: 'Create account',
+    titleLogin: 'Welcome back', titleSignup: 'Create your Ledens account',
+    subLogin: 'Log in to see how your renovation is going and talk to your team.',
+    subSignup: 'In 30 seconds you’ll have access to your renovation dashboard.',
+    google: 'Continue with Google', microsoft: 'Continue with Microsoft', apple: 'Continue with Apple', soon: 'Coming soon',
+    or: 'or', fullName: 'Full name', namePh: 'Your name', email: 'Email', emailPh: 'you@email.com',
+    password: 'Password', pwdPh: 'At least 8 characters', showPwd: 'Show password',
+    remember: 'Remember me', forgot: 'Forgot your password?',
+    noAccount: 'Don’t have an account yet?', signupFree: 'Sign up for free',
+    haveAccount: 'Already have an account?', login: 'Log in',
+    terms: <>By creating an account you accept Ledens’ <Link to="/terminos">Terms</Link> and{' '}<Link to="/privacidad">Privacy policy</Link>.</>,
+  },
 };
 
 export default function AuthPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user, refresh } = useAuth();
+  const { lang } = useI18n();
+  const t = TXT[lang];
   const redirectTo = safeRedirect(searchParams.get('redirect'));
 
   const [mode, setMode]         = useState(searchParams.get('mode') === 'signup' ? 'signup' : 'login');
@@ -64,16 +124,10 @@ export default function AuthPage() {
   }, [user, navigate, redirectTo]);
 
   // A failed Google/Microsoft redirect lands back on /auth with ?error=...
-  // — surface it once, on arrival.
+  // — surface it once, on arrival. Kept as a code so it follows the language.
+  const oauthError = searchParams.get('error');
   useEffect(() => {
-    const code = searchParams.get('error');
-    if (code) {
-      setAlert({
-        type: 'error',
-        title: 'No se pudo iniciar sesión',
-        msg: OAUTH_ERRORS[code] || 'Ha ocurrido un error. Inténtalo de nuevo.',
-      });
-    }
+    if (oauthError) setAlert({ type: 'error', oauth: oauthError });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -85,13 +139,12 @@ export default function AuthPage() {
     navigate(`/auth${q.toString() ? `?${q}` : ''}`, { replace: true });
   }
 
+  // Field errors are stored as dictionary keys so they switch language too.
   function validate() {
     const e = {};
-    if (mode === 'signup' && !name.trim()) e.name = 'Introduce tu nombre.';
-    if (!isValidEmail(email))              e.email = 'Introduce un email válido.';
-    if (password.length < 8)              e.password = mode === 'signup'
-      ? 'La contraseña debe tener al menos 8 caracteres.'
-      : 'Introduce tu contraseña.';
+    if (mode === 'signup' && !name.trim()) e.name = 'errName';
+    if (!isValidEmail(email))              e.email = 'errEmail';
+    if (password.length < 8)              e.password = mode === 'signup' ? 'errPwdShort' : 'errPwd';
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -108,15 +161,15 @@ export default function AuthPage() {
       if (!res.ok) {
         const title =
           res.status === 409 ? duplicateTitle :
-          res.status === 503 ? 'No disponible' :
-                                'Credenciales incorrectas';
-        setAlert({ type: 'error', title, msg: data.error || 'Inténtalo de nuevo.' });
+          res.status === 503 ? 'unavailable' :
+                                'badCredentials';
+        setAlert({ type: 'error', title, apiMsg: data.error || null });
         return;
       }
       await refresh();
       navigate(redirectTo);
     } catch {
-      setAlert({ type: 'error', title: 'Error de conexión', msg: 'No se pudo contactar con el servidor. Inténtalo de nuevo.' });
+      setAlert({ type: 'error', title: 'netTitle', msgKey: 'netMsg' });
     } finally {
       setLoading(false);
     }
@@ -125,14 +178,22 @@ export default function AuthPage() {
   function handleLogin(e) {
     e.preventDefault(); setAlert(null);
     if (!validate()) return;
-    submitAuth('/api/auth/login', { email: email.trim(), password }, 'Credenciales incorrectas');
+    submitAuth('/api/auth/login', { email: email.trim(), password }, 'badCredentials');
   }
 
   function handleSignup(e) {
     e.preventDefault(); setAlert(null);
     if (!validate()) return;
-    submitAuth('/api/auth/register', { name: name.trim(), email: email.trim(), password }, 'Email ya registrado');
+    submitAuth('/api/auth/register', { name: name.trim(), email: email.trim(), password }, 'emailTaken');
   }
+
+  const alertTitle = alert && (alert.oauth ? t.loginFailed : t[alert.title]);
+  const alertMsg = alert && (
+    alert.oauth ? (t.oauthErrors[alert.oauth] || t.genericError)
+    : alert.msgKey ? t[alert.msgKey]
+    : alert.apiMsg ? apiErrorText(alert.apiMsg, lang, t.tryAgain)
+    : t.tryAgain
+  );
 
   return (
     <div className="auth-wrap">
@@ -143,38 +204,36 @@ export default function AuthPage() {
           <span>Ledens</span>
         </Link>
         <div className="auth-art-body">
-          <h2>Tu reforma, <em>bajo control</em><br />desde tu móvil.</h2>
-          <p>Accede a tu panel de cliente para ver el estado de obra, fotos semanales, presupuesto actualizado y tu interlocutor único directo en chat.</p>
+          <h2>{t.artTitle}</h2>
+          <p>{t.artBody}</p>
           <div className="auth-stats">
-            <div><div className="auth-stat-num">24h</div><div className="auth-stat-lab">presupuesto cerrado</div></div>
-            <div><div className="auth-stat-num">48h</div><div className="auth-stat-lab">obra empezada</div></div>
-            <div><div className="auth-stat-num">0€</div><div className="auth-stat-lab">extras</div></div>
+            <div><div className="auth-stat-num">24h</div><div className="auth-stat-lab">{t.stats[0]}</div></div>
+            <div><div className="auth-stat-num">48h</div><div className="auth-stat-lab">{t.stats[1]}</div></div>
+            <div><div className="auth-stat-num">{t.zero}</div><div className="auth-stat-lab">{t.stats[2]}</div></div>
           </div>
         </div>
-        <div className="auth-art-foot">© 2026 Ledens · Reformas inteligentes · Málaga</div>
+        <div className="auth-art-foot">{t.artFoot}</div>
       </aside>
 
       {/* Form panel */}
       <main className="auth-form-side">
         <div className="auth-card">
           <Link to="/" className="auth-back">
-            <i className="ri-arrow-left-line"></i> Volver
+            <i className="ri-arrow-left-line"></i> {t.back}
           </Link>
 
           <div className="auth-tabs" role="tablist">
             <button className={mode === 'login' ? 'active' : ''} onClick={() => switchMode('login')} type="button">
-              Iniciar sesión
+              {t.tabLogin}
             </button>
             <button className={mode === 'signup' ? 'active' : ''} onClick={() => switchMode('signup')} type="button">
-              Crear cuenta
+              {t.tabSignup}
             </button>
           </div>
 
-          <h1 className="auth-title">{mode === 'login' ? 'Bienvenido de vuelta' : 'Crea tu cuenta Ledens'}</h1>
+          <h1 className="auth-title">{mode === 'login' ? t.titleLogin : t.titleSignup}</h1>
           <p className="auth-subtitle">
-            {mode === 'login'
-              ? 'Accede para ver el estado de tu reforma y hablar con tu equipo.'
-              : 'En 30 segundos tienes acceso al panel de tu reforma.'}
+            {mode === 'login' ? t.subLogin : t.subSignup}
           </p>
 
           {alert && (
@@ -184,8 +243,8 @@ export default function AuthPage() {
                 alert.type === 'success' ? 'ri-checkbox-circle-line' :
                                            'ri-information-line'}></i>
               <div>
-                <div className="auth-alert-title">{alert.title}</div>
-                <div>{alert.msg}</div>
+                <div className="auth-alert-title">{alertTitle}</div>
+                <div>{alertMsg}</div>
               </div>
             </div>
           )}
@@ -196,84 +255,81 @@ export default function AuthPage() {
               navigate there. Apple (#13) has no backend route yet. */}
           <div className="auth-social">
             <a className="auth-btn-social" href="/api/auth/google">
-              <GoogleIcon /> Continuar con Google
+              <GoogleIcon /> {t.google}
             </a>
             <a className="auth-btn-social" href="/api/auth/microsoft">
-              <MicrosoftIcon /> Continuar con Microsoft
+              <MicrosoftIcon /> {t.microsoft}
             </a>
             <button className="auth-btn-social" type="button" disabled>
-              <AppleIcon /> Continuar con Apple <span className="auth-soon">Próximamente</span>
+              <AppleIcon /> {t.apple} <span className="auth-soon">{t.soon}</span>
             </button>
           </div>
-          <div className="auth-divider"><span>o</span></div>
+          <div className="auth-divider"><span>{t.or}</span></div>
 
           <form onSubmit={mode === 'login' ? handleLogin : handleSignup} noValidate>
             {mode === 'signup' && (
               <div className={`auth-field${errors.name ? ' invalid' : ''}`}>
-                <label htmlFor="auth-name">Nombre completo</label>
+                <label htmlFor="auth-name">{t.fullName}</label>
                 <div className="auth-field-input">
-                  <input id="auth-name" type="text" placeholder="Tu nombre"
+                  <input id="auth-name" type="text" placeholder={t.namePh}
                     autoComplete="name" value={name}
                     onChange={e => setName(e.target.value)} />
                 </div>
-                {errors.name && <div className="auth-field-error"><i className="ri-error-warning-line"></i> {errors.name}</div>}
+                {errors.name && <div className="auth-field-error"><i className="ri-error-warning-line"></i> {t[errors.name]}</div>}
               </div>
             )}
 
             <div className={`auth-field${errors.email ? ' invalid' : ''}`}>
-              <label htmlFor="auth-email">Email</label>
+              <label htmlFor="auth-email">{t.email}</label>
               <div className="auth-field-input">
-                <input id="auth-email" type="email" placeholder="tu@correo.es"
+                <input id="auth-email" type="email" placeholder={t.emailPh}
                   autoComplete="email" value={email}
                   onChange={e => setEmail(e.target.value)} />
               </div>
-              {errors.email && <div className="auth-field-error"><i className="ri-error-warning-line"></i> {errors.email}</div>}
+              {errors.email && <div className="auth-field-error"><i className="ri-error-warning-line"></i> {t[errors.email]}</div>}
             </div>
 
             <div className={`auth-field${errors.password ? ' invalid' : ''}`}>
-              <label htmlFor="auth-password">Contraseña</label>
+              <label htmlFor="auth-password">{t.password}</label>
               <div className="auth-field-input auth-field-input--icon">
                 <input id="auth-password"
                   type={showPwd ? 'text' : 'password'}
-                  placeholder={mode === 'signup' ? 'Mínimo 8 caracteres' : '••••••••'}
+                  placeholder={mode === 'signup' ? t.pwdPh : '••••••••'}
                   autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
                   value={password} onChange={e => setPassword(e.target.value)} />
                 <button type="button" className="auth-toggle-pwd"
-                  aria-label="Mostrar contraseña"
+                  aria-label={t.showPwd}
                   onClick={() => setShowPwd(v => !v)}>
                   <i className={showPwd ? 'ri-eye-off-line' : 'ri-eye-line'}></i>
                 </button>
               </div>
-              {errors.password && <div className="auth-field-error"><i className="ri-error-warning-line"></i> {errors.password}</div>}
+              {errors.password && <div className="auth-field-error"><i className="ri-error-warning-line"></i> {t[errors.password]}</div>}
             </div>
 
             {mode === 'login' && (
               <div className="auth-row-between">
                 <label className="auth-check">
                   <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
-                  Recuérdame
+                  {t.remember}
                 </label>
-                <a href="#" className="auth-forgot">¿Olvidaste tu contraseña?</a>
+                <a href="#" className="auth-forgot">{t.forgot}</a>
               </div>
             )}
 
             <button type="submit" className="auth-submit" disabled={loading}>
               {loading
                 ? <span className="auth-spinner"></span>
-                : <span>{mode === 'login' ? 'Iniciar sesión' : 'Crear cuenta'}</span>}
+                : <span>{mode === 'login' ? t.tabLogin : t.tabSignup}</span>}
             </button>
 
             <p className="auth-alt-link">
               {mode === 'login'
-                ? <>¿Aún no tienes cuenta?{' '}<button type="button" onClick={() => switchMode('signup')}>Regístrate gratis</button></>
-                : <>¿Ya tienes cuenta?{' '}<button type="button" onClick={() => switchMode('login')}>Inicia sesión</button></>}
+                ? <>{t.noAccount}{' '}<button type="button" onClick={() => switchMode('signup')}>{t.signupFree}</button></>
+                : <>{t.haveAccount}{' '}<button type="button" onClick={() => switchMode('login')}>{t.login}</button></>}
             </p>
 
             {mode === 'signup' && (
-              <p className="auth-terms">
-                Al crear cuenta aceptas los <a href="#">Términos</a> y la{' '}
-                <a href="#">Política de privacidad</a> de Ledens.
-              </p>
+              <p className="auth-terms">{t.terms}</p>
             )}
           </form>
         </div>
