@@ -7,6 +7,11 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 export const LANGS = ['es', 'en'];
 const STORAGE_KEY = 'ledens.lang.v1';
 const LOCALES = { es: 'es-ES', en: 'en-GB' };
+// The Spanish one is the same as index.html's <title>.
+const TITLES = {
+  es: 'Ledens · Reformas inteligentes en Málaga — Presupuesto en 24h, obra en 48h',
+  en: 'Ledens · Smart renovations in Málaga — Quote in 24h, works in 48h',
+};
 
 function initialLang() {
   try {
@@ -27,6 +32,7 @@ export function I18nProvider({ children }) {
 
   useEffect(() => {
     document.documentElement.lang = lang;
+    document.title = TITLES[lang];
   }, [lang]);
 
   const setLang = useCallback((next) => {

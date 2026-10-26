@@ -228,6 +228,7 @@ Every user has one role in `users.role`; it decides what they get in `/plataform
   - Public API: `window.LedensCookies = { open, close, get, reset }`
   - Saves preferences to `localStorage` key `ledens.cookieConsent.v1`
 - `LeadModal` — contact form, opens on CTA clicks, posts to `/api/contact`
+- **Language (ES / EN)** — `src/i18n/I18nContext.jsx` (`I18nProvider` in `main.jsx`, `useI18n()`, `useT(DICT)`), no library. Each component keeps its own `{ es, en }` dictionary next to its JSX; legal pages have their English text in `components/legal/*En.jsx`, services in `data/servicios.en.js`, the client area in `plataforma/i18n.js` and `plataforma/obras/i18n.js`. `LangSwitch` sits in `Header`, the `/plataforma` top bar and `/registro`. Choice saved in `localStorage` `ledens.lang.v1` (first visit: browser language, Spanish unless it is English); `<html lang>` and the title follow it. Backend errors are Spanish: `i18n/apiErrors.js` maps the client-visible ones. Admin panel, jefe de obra screens and Gestión financiera are Spanish-only.
 
 ### Frontend auth (issue #14)
 

@@ -501,6 +501,15 @@ footer { background: var(--ledens-navy); color: rgba(255,255,255,0.8); padding: 
 @media (max-width: 1560px) {
   .logo-sep, .logo-tag { display: none; }
 }
+/* Dead-centre only fits on wide screens: below that the nav sits in the flow
+   between logo and buttons (never on top of the language switch), and when
+   even that doesn't fit it hides, as it does on mobile. */
+@media (max-width: 1440px) {
+  .nav { position: static; transform: none; margin: 0 auto; padding: 0 16px; }
+}
+@media (max-width: 1240px) {
+  .nav { display: none; }
+}
 
 @media (max-width: 1000px) {
   .hdr-inner { height: auto; } /* already flex — just reset height */
@@ -561,6 +570,11 @@ footer { background: var(--ledens-navy); color: rgba(255,255,255,0.8); padding: 
   .logo-sep, .logo-tag { display: none; }
   .hdr-right { gap: 8px; }
   .lang-switch button { padding: 5px 7px; font-size: 11px; }
+}
+/* Phones: logo mark only, so the language switch and both buttons fit. */
+@media (max-width: 420px) {
+  .hdr-inner { padding: 0 16px; }
+  .logo-word { display: none; }
   .logo img { width: 44px; height: 44px; }
   .logo-word { font-size: 30px; }
   .hero h1 { font-size: 32px; }
