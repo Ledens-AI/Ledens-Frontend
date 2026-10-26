@@ -53,3 +53,20 @@
   .obr-span2 { grid-column: auto; }
   .obr-cards { grid-template-columns: 1fr; }
 }
+
+/* 0–100 progress bar with its value (Progress in Detalle.jsx). */
+.obr-progress { display: flex; flex-direction: column; gap: 4px; width: 100%; min-width: 140px; }
+.obr-progress-track { display: block; height: 10px; background: #EDEDEA; border-radius: 99px; overflow: hidden; }
+.obr-progress.is-compact .obr-progress-track { height: 8px; }
+.obr-progress-fill { display: block; height: 100%; border-radius: 99px; }
+.obr-progress-scale { display: flex; justify-content: space-between; font-size: 11px; color: #9A9A96; line-height: 14px; }
+.obr-progress-value { position: relative; display: block; height: 18px; }
+.obr-progress-value strong { position: absolute; top: 0; font-size: 13px; font-weight: 700; line-height: 18px; white-space: nowrap; }
+.obr-progress:not(.is-compact) .obr-progress-value { height: 24px; }
+.obr-progress:not(.is-compact) .obr-progress-value strong { font-size: 20px; line-height: 24px; }
+.obr-col-avance { width: 200px; min-width: 180px; }
+.obr-pct-edit { display: flex; align-items: center; gap: 8px; }
+.obr-pct-edit input[type="range"] { flex: 1; min-width: 90px; accent-color: #5567AE; }
+.obr-pct-input { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+.obr-in-pct { width: 72px; text-align: right; }
+.obr-card-cta { align-self: flex-start; margin-top: 6px; }

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { api, pctS } from './api.js';
 import { eur, fecha } from '../finanzas/format.js';
 import { Empty, ErrorBox, Kpi } from '../finanzas/ui.jsx';
-import Detalle, { PhaseBadge } from './Detalle.jsx';
+import Detalle, { PhaseBadge, Progress } from './Detalle.jsx';
 import Editor from './Editor.jsx';
 import '../../../styles/finanzas.css';
 import '../../../styles/obras.css';
@@ -30,7 +30,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
   if (open) {
     return (
       <div className="fin obr">
-        <Detalle key={open.id} id={open.id} initialTab={open.tab} readOnly={readOnly} toast={toast}
+        <Detalle key={open.id} id={open.id} initialTab={open.tab} initialEdit={open.edit && !readOnly} readOnly={readOnly} toast={toast}
           onBack={() => setOpen(null)} onChanged={load} onOpen={(id) => setOpen({ id })} />
       </div>
     );
@@ -76,6 +76,17 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
         <Section title="En revisión por el equipo" hint="Has pedido cambios: te enviaremos una versión nueva." rows={by('cambios')} onOpen={openP} client />
         <Section title="Presupuestos aprobados" rows={by('aprobado', 'en_curso')} onOpen={openP} client />
         <Section title="Rechazados" rows={by('rechazado')} onOpen={openP} client />
+      </div>
+    );
+  }
+
+  // Team: obras en curso, straight into updating the progress of each line.
+  if (screen === 'avance') {
+    return (
+      <div className="fin obr">
+        <Head title="Actualizar avance" text="Elige la obra y actualiza el avance de cada partida en %. El cliente lo ve al momento." />
+        {obras.length ? <div className="obr-cards">{obras.map((p) => <ObraCard key={p.id} p={p} team cta={readOnly ? null : 'Actualizar avance'} onClick={() => setOpen({ id: p.id, tab: 'obra', edit: true })} />)}</div>
+          : <Empty icon="ri-building-2-line" title="No hay obras en curso" text={panel === 'admin' ? 'Una obra aparece aquí cuando su presupuesto está aprobado y tiene fecha de inicio.' : 'Aquí verás las obras en curso de las que eres jefe de obra.'} />}
       </div>
     );
   }
@@ -151,7 +162,7 @@ function Section({ title, hint, rows, onOpen }) {
   );
 }
 
-function ObraCard({ p, onClick, team }) {
+function ObraCard({ p, onClick, team, cta }) {
   const o = p.obra || { executionPct: 0, consumedPct: 0 };
   const started = p.startDate && p.startDate <= new Date().toISOString().slice(0, 10);
   return (
@@ -159,11 +170,12 @@ function ObraCard({ p, onClick, team }) {
       <span className="obr-card-top"><PhaseBadge phase="en_curso" /><span className="fin-muted fin-small">{started ? `Desde el ${fecha(p.startDate)}` : `Empieza el ${fecha(p.startDate)}`}</span></span>
       <strong className="obr-card-title">{p.title}</strong>
       <span className="fin-muted fin-small">{[p.ref, p.address, team ? p.client.name : p.jefe ? `Jefe de obra: ${p.jefe.name}` : null].filter(Boolean).join(' · ')}</span>
-      <span className="obr-meter"><span>Ejecución</span><strong>{pctS(o.executionPct)}</strong></span>
-      <span className="fin-progress obr-bar"><span style={{ width: Math.min(100, o.executionPct) + '%', background: '#5567AE' }}></span></span>
-      <span className="obr-meter"><span>Presupuesto consumido</span><strong>{pctS(o.consumedPct)}</strong></span>
-      <span className="fin-progress obr-bar"><span style={{ width: Math.min(100, o.consumedPct) + '%', background: o.consumedPct > 100 ? '#D14A4A' : '#55A89D' }}></span></span>
+      <span className="obr-meter"><span>Ejecución</span></span>
+      <Progress value={o.executionPct} color="#5567AE" />
+      <span className="obr-meter"><span>Presupuesto consumido</span></span>
+      <Progress value={o.consumedPct} color={o.consumedPct > 100 ? '#D14A4A' : '#55A89D'} />
       <span className="fin-muted fin-small">{p.obra ? `${eur(p.obra.consumed)} de ${eur(p.obra.base)} sin IVA` : ''}</span>
+      {cta ? <span className="fin-btn is-primary is-small obr-card-cta"><i className="ri-edit-2-line"></i>{cta}</span> : null}
     </button>
   );
 }

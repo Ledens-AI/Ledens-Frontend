@@ -1,16 +1,26 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, PHASE, VSTATUS, KIND, parseDecimal, pctS } from './api.js';
 import { eur, num, fecha, fechaHora } from '../finanzas/format.js';
 import { Badge, Dialog, Empty, ErrorBox, Kpi } from '../finanzas/ui.jsx';
 import Editor from './Editor.jsx';
 
 export const PhaseBadge = ({ phase }) => { const p = PHASE[phase] || PHASE.borrador; return <Badge bg={p.bg} fg={p.fg} icon={p.icon}>{p.label}</Badge>; };
-const Bar = ({ value, color }) => <span className="fin-progress obr-bar"><span style={{ width: Math.min(100, value) + '%', background: color }}></span></span>;
+// 0–100 bar with the current value on it; values over 100 fill the bar and say so.
+export function Progress({ value, color = '#5567AE', compact }) {
+  const w = Math.max(0, Math.min(100, Number(value) || 0));
+  return (
+    <span className={'obr-progress' + (compact ? ' is-compact' : '')} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Number(value) || 0} aria-label={pctS(value)}>
+      <span className="obr-progress-value"><strong style={{ left: w + '%', color, transform: `translateX(-${w}%)` }}>{pctS(value)}</strong></span>
+      <span className="obr-progress-track"><span className="obr-progress-fill" style={{ width: w + '%', background: color }}></span></span>
+      <span className="obr-progress-scale"><span>0</span><span>100</span></span>
+    </span>
+  );
+}
 
 /* One presupuesto: its versions, chapters and lines, the conversation and, once
  * approved, the obra (execution and consumed budget). What the user may do
  * comes from the server (`can`); readOnly is «Ver como». */
-export default function Detalle({ id, initialTab, readOnly, toast, onBack, onChanged, onOpen }) {
+export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, onBack, onChanged, onOpen }) {
   const [doc, setDoc] = useState(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState(initialTab || 'presupuesto');
@@ -67,6 +77,7 @@ export default function Detalle({ id, initialTab, readOnly, toast, onBack, onCha
         </div>
         <PhaseBadge phase={doc.phase} />
       </div>
+      {can.assignJefe ? <JefePicker doc={doc} busy={busy} onSave={(jefeId) => act(() => api.assignJefe(doc.id, { jefeId }), 'Jefe de obra actualizado')} /> : null}
 
       {doc.parent ? <p className="fin-warn"><i className="ri-information-line"></i><span>{'Ampliación de la obra '}<button type="button" className="fin-link" onClick={() => onOpen?.(doc.parent.id)}>{`${doc.parent.ref} · ${doc.parent.title}`}</button>{'. Se aprueba por separado y, al aprobarla, suma al presupuesto de la obra.'}</span></p> : null}
 
@@ -159,7 +170,7 @@ export default function Detalle({ id, initialTab, readOnly, toast, onBack, onCha
         </>
       ) : null}
 
-      {tab === 'obra' && doc.obra ? <ObraTab doc={doc} can={can} busy={busy} onDeclare={(items) => act(() => api.declare(doc.id, { items }), 'Producción guardada')} error={dialogError} /> : null}
+      {tab === 'obra' && doc.obra ? <ObraTab doc={doc} can={can} busy={busy} autoEdit={initialEdit} onDeclare={(items) => act(() => api.declare(doc.id, { items }), 'Avance guardado')} error={dialogError} /> : null}
 
       {tab === 'conversacion' ? (
         <div className="fin-card">
@@ -261,78 +272,124 @@ function Schedule({ doc, busy, onSave, error }) {
   );
 }
 
-function ObraTab({ doc, can, busy, onDeclare, error }) {
+function JefePicker({ doc, busy, onSave }) {
+  const [open, setOpen] = useState(false);
+  const [opts, setOpts] = useState(null);
+  const [value, setValue] = useState(doc.jefe?.id || '');
+  const [error, setError] = useState('');
+  const show = () => { setOpen(true); setValue(doc.jefe?.id || ''); if (!opts) api.options().then((o) => setOpts(o.jefes), (e) => setError(e.message)); };
+  if (!open) return <div><button type="button" className="fin-btn is-small" onClick={show}><i className="ri-user-settings-line"></i>{doc.jefe ? 'Cambiar jefe de obra' : 'Asignar jefe de obra'}</button></div>;
+  return (
+    <div className="fin-filters">
+      <label className="fin-field"><span>Jefe de obra</span>
+        <select value={value} onChange={(e) => setValue(e.target.value)}>
+          <option value="">{opts ? 'Sin asignar' : 'Cargando…'}</option>
+          {(opts || []).map((j) => <option key={j.id} value={j.id}>{`${j.name} · ${j.email}`}</option>)}
+        </select>
+      </label>
+      <button type="button" className="fin-btn" onClick={() => setOpen(false)} disabled={busy}>Cancelar</button>
+      <button type="button" className="fin-btn is-primary" disabled={busy || !opts} onClick={() => { setOpen(false); onSave(value || null); }}>Guardar</button>
+      {error ? <span className="fin-error-inline">{error}</span> : null}
+    </div>
+  );
+}
+
+// Progress of a line as an editable percentage; a declared excess (over 100 %) is kept.
+const pctOf = (i) => Math.round(Number(i.executed) / Number(i.quantity) * 10000) / 100;
+const pctText = (n) => String(n).replace('.', ',');
+
+function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
   const o = doc.obra;
-  const [editing, setEditing] = useState(false);
-  const [values, setValues] = useState({});
+  const items = o.chapters.flatMap((c) => c.items);
+  const initial = () => Object.fromEntries(items.map((i) => [i.id, pctText(pctOf(i))]));
+  const [editing, setEditing] = useState(!!(autoEdit && can.declare));
+  const [values, setValues] = useState(initial);
   const [localError, setLocalError] = useState('');
-  const startEdit = () => { setValues(Object.fromEntries(o.chapters.flatMap((c) => c.items).map((i) => [i.id, String(Number(i.executed)).replace('.', ',')]))); setLocalError(''); setEditing(true); };
-  useEffect(() => { setEditing(false); }, [o]);
+  const startEdit = () => { setValues(initial()); setLocalError(''); setEditing(true); };
+  // A save brings a new obra: leave editing then (not on the first render).
+  // A save changes the executed quantities: leave editing then (a reload with the same figures keeps it).
+  const signature = items.map((i) => `${i.id}:${i.executed}`).join('|');
+  const shown = useRef(signature);
+  useEffect(() => { if (shown.current !== signature) { shown.current = signature; setEditing(false); } }, [signature]);
+  const setPct = (id, v) => setValues((s) => ({ ...s, [id]: v }));
   const save = () => {
-    const items = [];
-    for (const i of o.chapters.flatMap((c) => c.items)) {
-      const raw = values[i.id];
-      const q = parseDecimal(raw, 4);
-      if (q === null) return setLocalError(`Cantidad no válida en «${i.name}»`);
-      if (Number(q) !== Number(i.executed)) items.push({ partidaId: i.id, executed: q });
+    const out = [];
+    const before = initial();
+    for (const i of items) {
+      if (values[i.id] === before[i.id]) continue;
+      const p = parseDecimal(values[i.id], 2);
+      if (p === null || Number(p) > 1000) return setLocalError(`Avance no válido en «${i.name}» (de 0 a 100 %)`);
+      out.push({ partidaId: i.id, executed: (Math.round(Number(i.quantity) * Number(p) / 100 * 10000) / 10000).toFixed(4) });
     }
-    if (!items.length) { setEditing(false); return; }
-    onDeclare(items);
+    if (!out.length) { setEditing(false); return; }
+    onDeclare(out);
   };
   if (!o.startDate) {
     return <Empty icon="ri-calendar-line" title="Obra pendiente de fecha de inicio" text="El presupuesto está aprobado. Cuando el equipo fije la fecha de inicio, aquí verás el avance." />;
   }
+  const actions = can.declare ? (
+    <div className="obr-actions obr-start">
+      {editing ? (<>
+        <button type="button" className="fin-btn" onClick={() => setEditing(false)} disabled={busy}>Cancelar</button>
+        <button type="button" className="fin-btn is-primary" onClick={save} disabled={busy}><i className="ri-save-line"></i>{busy ? 'Guardando…' : 'Guardar avance'}</button>
+      </>) : <button type="button" className="fin-btn is-primary" onClick={startEdit}><i className="ri-edit-2-line"></i>Actualizar avance</button>}
+      {localError || error ? <span className="fin-error-inline">{localError || error}</span> : null}
+    </div>
+  ) : null;
   return (
     <div className="fin-stack">
       <div className="fin-kpis">
-        <div className="fin-kpi"><span className="fin-kpi-label"><i className="ri-hammer-line"></i>Ejecución</span><span className="fin-kpi-value">{pctS(o.executionPct)}</span><Bar value={o.executionPct} color="#5567AE" /><span className="fin-kpi-hint">{`${eur(o.executedAmount)} ejecutado`}</span></div>
-        <div className="fin-kpi"><span className="fin-kpi-label"><i className="ri-pie-chart-line"></i>Presupuesto consumido</span><span className="fin-kpi-value">{pctS(o.consumedPct)}</span><Bar value={o.consumedPct} color={o.consumedPct > 100 ? '#D14A4A' : '#55A89D'} /><span className="fin-kpi-hint">{`${eur(o.consumed)} de ${eur(o.base)} sin IVA`}</span></div>
+        <div className="fin-kpi"><span className="fin-kpi-label"><i className="ri-hammer-line"></i>Ejecución</span><Progress value={o.executionPct} color="#5567AE" /><span className="fin-kpi-hint">{`${eur(o.executedAmount)} ejecutado`}</span></div>
+        <div className="fin-kpi"><span className="fin-kpi-label"><i className="ri-pie-chart-line"></i>Presupuesto consumido</span><Progress value={o.consumedPct} color={o.consumedPct > 100 ? '#D14A4A' : '#55A89D'} /><span className="fin-kpi-hint">{`${eur(o.consumed)} de ${eur(o.base)} sin IVA`}</span></div>
         <Kpi label="Presupuesto vigente" value={eur(o.total)} icon="ri-money-euro-circle-line" hint={`${eur(o.base)} + ${eur(o.vat)} de IVA${doc.ampliaciones.some((a) => a.phase === 'aprobado') ? ' · incluye ampliaciones aprobadas' : ''}`} />
         <Kpi label="Fechas" value={fecha(o.startDate)} icon="ri-calendar-line" hint={o.endDate ? `Fin previsto: ${fecha(o.endDate)}` : 'Sin fecha de fin prevista'} />
       </div>
       <p className="fin-muted fin-small">Ejecución: lo hecho de cada partida hasta su cantidad presupuestada. Consumido: cantidad ejecutada × precio unitario; si una partida supera lo presupuestado, el exceso solo cuenta en el consumido.</p>
-      {can.declare ? (
-        <div className="obr-actions obr-start">
-          {editing ? (<>
-            <button type="button" className="fin-btn" onClick={() => setEditing(false)} disabled={busy}>Cancelar</button>
-            <button type="button" className="fin-btn is-primary" onClick={save} disabled={busy}><i className="ri-save-line"></i>{busy ? 'Guardando…' : 'Guardar producción'}</button>
-          </>) : <button type="button" className="fin-btn is-primary" onClick={startEdit}><i className="ri-edit-2-line"></i>Declarar producción</button>}
-          {localError || error ? <span className="fin-error-inline">{localError || error}</span> : null}
-        </div>
-      ) : null}
+      {actions}
+      {editing ? <p className="fin-warn"><i className="ri-information-line"></i>Indica el avance de cada partida de 0 a 100 %. Solo se guardan las que cambies, y el cliente lo verá al momento.</p> : null}
       {o.chapters.map((c) => (
         <div className="fin-card is-flush" key={c.id}>
           <div className="obr-chapter-head">
             <div><h2>{c.name}</h2>{c.presupuesto.ampliacion ? <span className="fin-muted fin-small">{`Ampliación ${c.presupuesto.ref}`}</span> : null}</div>
             <div className="obr-chapter-figs">
-              <span>{`Ejecución ${pctS(c.executionPct)}`}<Bar value={c.executionPct} color="#5567AE" /></span>
-              <span>{`Consumido ${pctS(c.consumedPct)} · ${eur(c.consumed)} de ${eur(c.base)}`}<Bar value={c.consumedPct} color={c.consumedPct > 100 ? '#D14A4A' : '#55A89D'} /></span>
+              <span>Ejecución<Progress value={c.executionPct} color="#5567AE" compact /></span>
+              <span>{`Consumido · ${eur(c.consumed)} de ${eur(c.base)}`}<Progress value={c.consumedPct} color={c.consumedPct > 100 ? '#D14A4A' : '#55A89D'} compact /></span>
             </div>
           </div>
           <div className="fin-table-wrap">
             <table className="fin-table">
-              <thead><tr><th>Código</th><th>Partida</th><th className="fin-num">Presupuestado</th><th className="fin-num">Ejecutado</th><th className="fin-num">Avance</th><th className="fin-num">Precio</th><th className="fin-num">Consumido</th></tr></thead>
+              <thead><tr><th>Código</th><th>Partida</th><th className="fin-num">Presupuestado</th><th className="fin-num">Ejecutado</th><th className="obr-col-avance">Avance</th><th className="fin-num">Precio</th><th className="fin-num">Consumido</th></tr></thead>
               <tbody>
-                {c.items.map((i) => (
-                  <tr key={i.id}>
-                    <td className="fin-nowrap">{i.code || '—'}</td>
-                    <td><strong>{i.name}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{i.lastDeclared.by ? `Declarado por ${i.lastDeclared.by} · ${fechaHora(i.lastDeclared.at)}${i.lastDeclared.note ? ` · ${i.lastDeclared.note}` : ''}` : (i.lastDeclared.note || 'Avance importado')}</div> : null}</td>
-                    <td className="fin-num fin-nowrap">{`${num(i.quantity)} ${i.unit}`}</td>
-                    <td className="fin-num fin-nowrap">
-                      {editing ? <input aria-label={`Ejecutado en ${i.name}`} inputMode="decimal" className={'obr-in obr-in-num' + (parseDecimal(values[i.id], 4) === null ? ' is-invalid' : '')} value={values[i.id] ?? ''} onChange={(e) => setValues((s) => ({ ...s, [i.id]: e.target.value }))} />
-                        : `${num(i.executed)} ${i.unit}`}
-                      {i.excess && !editing ? <div className="fin-danger fin-small">supera lo presupuestado</div> : null}
-                    </td>
-                    <td className="fin-num">{pctS(i.executionPct)}</td>
-                    <td className="fin-num fin-nowrap">{eur(i.unitPrice)}</td>
-                    <td className="fin-num fin-nowrap">{eur(i.consumed)}</td>
-                  </tr>
-                ))}
+                {c.items.map((i) => {
+                  const p = parseDecimal(values[i.id], 2);
+                  return (
+                    <tr key={i.id}>
+                      <td className="fin-nowrap">{i.code || '—'}</td>
+                      <td><strong>{i.name}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{i.lastDeclared.by ? `Declarado por ${i.lastDeclared.by} · ${fechaHora(i.lastDeclared.at)}${i.lastDeclared.note ? ` · ${i.lastDeclared.note}` : ''}` : (i.lastDeclared.note || 'Avance importado')}</div> : null}</td>
+                      <td className="fin-num fin-nowrap">{`${num(i.quantity)} ${i.unit}`}</td>
+                      <td className="fin-num fin-nowrap">
+                        {editing ? (p === null ? '—' : `${num(Number(i.quantity) * Number(p) / 100)} ${i.unit}`) : `${num(i.executed)} ${i.unit}`}
+                        {i.excess && !editing ? <div className="fin-danger fin-small">supera lo presupuestado</div> : null}
+                      </td>
+                      <td className="obr-col-avance">
+                        {editing ? (
+                          <span className="obr-pct-edit">
+                            <input type="range" min="0" max="100" step="1" aria-label={`Avance de ${i.name}`} value={Math.min(100, Number(p ?? 0))} onChange={(e) => setPct(i.id, e.target.value)} />
+                            <span className="obr-pct-input"><input aria-label={`Avance de ${i.name} en %`} inputMode="decimal" className={'obr-in obr-in-pct' + (p === null ? ' is-invalid' : '')} value={values[i.id] ?? ''} onChange={(e) => setPct(i.id, e.target.value)} />%</span>
+                          </span>
+                        ) : <Progress value={i.executionPct} color={i.executionPct >= 100 ? '#55A89D' : '#5567AE'} compact />}
+                      </td>
+                      <td className="fin-num fin-nowrap">{eur(i.unitPrice)}</td>
+                      <td className="fin-num fin-nowrap">{eur(i.consumed)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
       ))}
+      {editing ? actions : null}
     </div>
   );
 }

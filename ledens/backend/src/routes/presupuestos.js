@@ -40,6 +40,7 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, origin 
   router.post('/:id/cambios', handle((req) => svc(req).requestChanges(req.params.id, req.body || {})));
   router.post('/:id/rechazar', handle((req) => svc(req).reject(req.params.id, req.body || {})));
   router.post('/:id/comentarios', handle((req) => svc(req).comment(req.params.id, req.body || {})));
+  router.put('/:id/jefe', handle((req) => svc(req).assignJefe(req.params.id, req.body || {})));
   router.put('/:id/fechas', handle((req) => svc(req).schedule(req.params.id, req.body || {})));
   router.put('/:id/produccion', handle((req) => svc(req).declare(req.params.id, req.body || {})));
   return router;

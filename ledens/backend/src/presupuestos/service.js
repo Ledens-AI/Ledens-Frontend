@@ -261,6 +261,7 @@ export class PresupuestosService {
         schedule: team && !p.parent_id && approved,
         declare: team && !p.parent_id && approved && !!p.start_date,
         ampliar: team && !p.parent_id && approved,
+        assignJefe: this.user.role === 'admin' && !p.parent_id,
       },
     };
   }
@@ -441,6 +442,22 @@ export class PresupuestosService {
       if (!this.isTeam(p) && !(this.isClient && p.client_id === this.user.id)) fail(403, 'No puedes comentar este presupuesto');
       const v = await this.latest(db, p.id, { sentOnly: this.isClient });
       await db.query('INSERT INTO presupuesto_comentarios (presupuesto_id, version_id, author_id, body) VALUES ($1,$2,$3,$4)', [p.id, v?.id || null, this.user.id, comment]);
+    });
+    return this.get(id);
+  }
+
+  // Admins change who is in charge of an obra; its ampliaciones follow.
+  async assignJefe(id, body = {}) {
+    if (this.user.role !== 'admin') fail(403, 'Solo un administrador asigna el jefe de obra');
+    if (body.jefeId !== null && !isUuid(body.jefeId)) fail(400, 'Jefe de obra no válido');
+    await this.tx(async (db) => {
+      const p = await this.load(db, id, { lock: true });
+      if (p.parent_id) fail(400, 'El jefe se asigna en la obra principal');
+      const j = body.jefeId ? (await db.query('SELECT id, name, email, role FROM users WHERE id=$1', [body.jefeId])).rows[0] : null;
+      if (body.jefeId && j?.role !== 'jefe' && j?.role !== 'admin') fail(400, 'El responsable debe ser un jefe de obra o un administrador');
+      if ((p.jefe_id || null) === (j?.id || null)) return;
+      await db.query('UPDATE presupuestos SET jefe_id=$2, updated_at=now() WHERE id=$1 OR parent_id=$1', [p.id, j?.id || null]);
+      await audit({ actor: this.actor(), action: 'Jefe de obra asignado', target: { id: p.client_id, label: p.ref }, detail: `${p.ref} · ${j ? j.name || j.email : 'sin asignar'}` }, db);
     });
     return this.get(id);
   }

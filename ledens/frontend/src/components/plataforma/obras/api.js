@@ -31,6 +31,7 @@ export const api = {
   requestChanges: (id, body) => request('POST', `${base}/${id}/cambios`, body),
   reject: (id, body) => request('POST', `${base}/${id}/rechazar`, body),
   comment: (id, body) => request('POST', `${base}/${id}/comentarios`, body),
+  assignJefe: (id, body) => request('PUT', `${base}/${id}/jefe`, body),
   schedule: (id, body) => request('PUT', `${base}/${id}/fechas`, body),
   declare: (id, body) => request('PUT', `${base}/${id}/produccion`, body),
 };
