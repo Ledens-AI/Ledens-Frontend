@@ -8,6 +8,7 @@ import oauthRouter from './routes/oauth.js';
 import adminRouter from './routes/admin.js';
 import { createIngestionRouter } from './routes/ingestion.js';
 import { createFinanzasRouter } from './routes/finanzas.js';
+import { createPresupuestosRouter } from './routes/presupuestos.js';
 import bridgeRouter from './routes/bridge.js';
 import financeRouter from './routes/finance.js';
 
@@ -34,6 +35,7 @@ export function createApp() {
 
   // Mounted before the shared /api limiter: it has its own (see the router).
   app.use('/api/finanzas', createFinanzasRouter());
+  app.use('/api/presupuestos', createPresupuestosRouter());
 
   const apiLimiter = rateLimit({
     windowMs: 60 * 1000,

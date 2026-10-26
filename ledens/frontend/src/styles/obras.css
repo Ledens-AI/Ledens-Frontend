@@ -1,0 +1,55 @@
+/* Presupuestos y obras (plataforma/obras). Builds on finanzas.css. */
+.obr-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.obr-h3 { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #6B6B68; margin: 0; }
+.obr-hint { margin: -12px 0 0; font-size: 14px; }
+.obr-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.obr-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; font: inherit; color: inherit; text-align: left; cursor: pointer; background: #fff; border: 1px solid #EDEDEA; border-radius: 12px; padding: 16px 18px; }
+.obr-row:hover { border-color: #5567AE; box-shadow: 0 4px 12px rgba(12, 6, 43, 0.08); }
+.obr-row-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.obr-row-end { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+.obr-amount { display: flex; flex-direction: column; align-items: flex-end; font-weight: 700; }
+.obr-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.obr-card { display: flex; flex-direction: column; gap: 8px; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.obr-card:hover { border-color: #5567AE; box-shadow: 0 4px 12px rgba(12, 6, 43, 0.08); }
+.obr-card-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.obr-card-title { font-size: 18px; }
+.obr-meter { display: flex; justify-content: space-between; font-size: 14px; margin-top: 4px; }
+.obr-bar { margin-top: 0; display: block; }
+.obr-decide { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; border-color: #C9D0EA; background: #F8F9FC; }
+.obr-decide p { margin: 4px 0 0; }
+.obr-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+.obr-actions.obr-start { justify-content: flex-start; }
+.obr-chapter-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; padding: 16px 20px; border-bottom: 1px solid #EDEDEA; }
+.obr-chapter-figs { display: flex; gap: 20px; flex-wrap: wrap; font-size: 13px; color: #3A3A38; }
+.obr-chapter-figs > span { display: flex; flex-direction: column; gap: 4px; min-width: 200px; }
+.obr-line-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.obr-line-name input[type="checkbox"] { width: 18px; height: 18px; accent-color: #5567AE; }
+.obr-desc { font-size: 13px; margin-top: 4px; max-width: 640px; }
+.fin-table tr.obr-optional td { color: #6B6B68; background: #FCFCFA; }
+.obr-pre { white-space: pre-wrap; margin: 0; }
+.obr-thread { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.obr-thread li { padding: 12px 14px; border-radius: 10px; max-width: 720px; }
+.obr-thread li.is-team { background: #F2F4FA; }
+.obr-thread li.is-client { background: #FDF0F4; margin-left: auto; }
+.obr-mt { margin-top: 12px; }
+.obr-mb { margin: 0 0 12px; }
+.obr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.obr-span2 { grid-column: span 2; }
+.obr-totals { display: grid; grid-template-columns: auto auto; justify-content: end; gap: 6px 24px; font-size: 15px; }
+.obr-totals strong { text-align: right; }
+.obr-in { font: inherit; font-size: 14px; border: 1px solid #D9D9D9; border-radius: 8px; padding: 7px 9px; width: 100%; min-height: 36px; background: #fff; }
+.obr-in:focus { outline: 2px solid #5567AE; outline-offset: -1px; border-color: #5567AE; }
+.obr-in-desc { margin-top: 6px; resize: vertical; }
+.obr-in-code { width: 90px; }
+.obr-in-unit { width: 64px; }
+.obr-in-num { width: 110px; text-align: right; }
+.obr-edit-table td { vertical-align: top; }
+.obr-edit-table td:nth-child(2) { min-width: 260px; }
+.obr-click tbody tr { cursor: pointer; }
+.obr-click tbody tr:focus { outline: 2px solid #5567AE; outline-offset: -2px; }
+
+@media (max-width: 700px) {
+  .obr-row { flex-direction: column; align-items: flex-start; }
+  .obr-span2 { grid-column: auto; }
+  .obr-cards { grid-template-columns: 1fr; }
+}
