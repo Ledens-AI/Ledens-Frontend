@@ -45,6 +45,13 @@ export default function Detalle({ id, initialTab, readOnly, toast, onBack, onCha
 
   const v = doc.version;
   const can = readOnly ? {} : doc.can;
+  // The editor always starts from the latest version, even when an older one is on screen.
+  const editLatest = async () => {
+    if (v.id !== doc.versions[0]?.id) {
+      try { setDoc(await api.get(doc.id)); setVersionId(null); } catch (e) { setError(e.message); return; }
+    }
+    setEditing('edit');
+  };
   const options = v.chapters.flatMap((c) => c.items).filter((i) => i.kind === 'decision' || i.kind === 'opcion');
   const optionalChosen = options.filter((i) => selected.includes(i.id)).reduce((a, i) => a + Number(i.amount), 0);
   const tabs = [['presupuesto', 'Presupuesto'], ...(doc.obra ? [['obra', 'Obra en curso']] : []), ['conversacion', `Conversación${doc.comments.length ? ` (${doc.comments.length})` : ''}`]];
@@ -69,7 +76,7 @@ export default function Detalle({ id, initialTab, readOnly, toast, onBack, onCha
 
       {tab === 'presupuesto' ? (
         <>
-          <TeamActions doc={doc} can={can} busy={busy} onEdit={() => setEditing('edit')} onSend={() => { setDialogError(''); setDialog('send'); }} onAmpliar={() => setEditing('ampliacion')} />
+          <TeamActions doc={doc} can={can} busy={busy} onEdit={editLatest} onSend={() => { setDialogError(''); setDialog('send'); }} onAmpliar={() => setEditing('ampliacion')} />
           {can.decide && v.status === 'sent' ? (
             <div className="fin-card obr-decide">
               <div>

@@ -62,8 +62,6 @@ CREATE TABLE presupuesto_capitulos (
   UNIQUE (version_id, position)
 );
 
--- unit_price keeps 6 decimals so a VAT-inclusive price converted to net
--- (e.g. 200 / 1,21) adds back up to the original total.
 -- kind: confirmada and condicionada always count; decision and opcion count
 -- only when the client selects them on approval (selected).
 CREATE TABLE presupuesto_partidas (
@@ -76,7 +74,7 @@ CREATE TABLE presupuesto_partidas (
   description  text CHECK (length(description) <= 4000),
   unit         text NOT NULL CHECK (length(btrim(unit)) BETWEEN 1 AND 20),
   quantity     numeric(14, 3) NOT NULL CHECK (quantity > 0),
-  unit_price   numeric(14, 6) NOT NULL CHECK (unit_price >= 0),
+  unit_price   numeric(14, 2) NOT NULL CHECK (unit_price >= 0),
   kind         text NOT NULL DEFAULT 'confirmada' CHECK (kind IN ('confirmada', 'condicionada', 'decision', 'opcion')),
   selected     boolean NOT NULL DEFAULT false,
   CHECK (NOT selected OR kind IN ('decision', 'opcion')),
@@ -103,7 +101,7 @@ CREATE INDEX presupuesto_comentarios_idx ON presupuesto_comentarios (presupuesto
 CREATE TABLE presupuesto_produccion (
   id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   partida_id   uuid NOT NULL REFERENCES presupuesto_partidas (id) ON DELETE CASCADE,
-  executed     numeric(14, 4) NOT NULL CHECK (executed >= 0),
+  executed     numeric(14, 3) NOT NULL CHECK (executed >= 0),
   note         text CHECK (length(note) <= 1000),
   declared_by  uuid REFERENCES users (id),
   declared_at  timestamptz NOT NULL DEFAULT now()
