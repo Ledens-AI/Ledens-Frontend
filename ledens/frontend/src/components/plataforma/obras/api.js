@@ -35,6 +35,35 @@ export const api = {
   declare: (id, body) => request('PUT', `${base}/${id}/produccion`, body),
 };
 
+// Fotos y documentos de obra (backend: ledens/backend/src/routes/obras.js). An
+// upload is the raw file as the body with its metadata in headers; XHR rather
+// than fetch for the progress bar on slow mobile connections.
+const files = (id) => `/api/obras/${id}/archivos`;
+export const archivos = {
+  list: (id) => request('GET', files(id)),
+  remove: (id, fileId) => request('DELETE', `${files(id)}/${fileId}`),
+  upload: (id, file, { title, description, date } = {}, onProgress) => new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', files(id));
+    const meta = { 'X-Archivo-Nombre': encodeURIComponent(file.name), 'X-Archivo-Fecha': date || '', 'X-Archivo-Titulo': encodeURIComponent(title || ''), 'X-Archivo-Descripcion': encodeURIComponent(description || '') };
+    Object.entries({ ...meta, ...viewAsHeaders() }).forEach(([k, v]) => v && x.setRequestHeader(k, v));
+    x.setRequestHeader('Content-Type', 'application/octet-stream');
+    x.upload.onprogress = (e) => e.lengthComputable && onProgress?.(e.loaded / e.total);
+    x.onerror = () => reject(new ApiError(0, 'Error de conexión. Comprueba tu red e inténtalo de nuevo.'));
+    x.onload = () => {
+      let data = {};
+      try { data = JSON.parse(x.responseText); } catch { /* not JSON */ }
+      if (x.status >= 200 && x.status < 300) resolve(data);
+      else reject(new ApiError(x.status, data.error || (x.status === 413 ? 'El archivo es demasiado grande.' : 'No se pudo subir el archivo.'), data));
+    };
+    x.send(file);
+  }),
+  thumb: async (id, fileId, blob) => {
+    const r = await fetch(`${files(id)}/${fileId}/miniatura`, { method: 'PUT', headers: { 'Content-Type': 'image/jpeg', ...viewAsHeaders() }, body: blob });
+    if (!r.ok) throw new ApiError(r.status, 'No se pudo guardar la miniatura');
+  },
+};
+
 // Labels and colours from the platform design.
 export const PHASE = {
   borrador: { label: 'Borrador', bg: '#EDEDEA', fg: '#3A3A38', icon: 'ri-draft-line' },
