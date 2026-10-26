@@ -4,11 +4,16 @@ export class ApiError extends Error {
   constructor(status, message, data) { super(message); this.status = status; this.data = data; }
 }
 
+// «Ver como» (admins): every request then answers as that user, read-only.
+let viewAsId = null;
+export const setViewAs = (id) => { viewAsId = id || null; };
+export const viewAsHeaders = () => (viewAsId ? { 'X-Ledens-View-As': viewAsId } : {});
+
 async function request(method, url, body) {
   if(body&&method!=='GET')body={...body,request_id:body.request_id||crypto.randomUUID()};
   let r;
   try {
-    r = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
+    r = await fetch(url, { method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...viewAsHeaders() }, body: body ? JSON.stringify(body) : undefined });
   } catch {
     throw new ApiError(0, 'Error de conexión. Comprueba tu red e inténtalo de nuevo.');
   }

@@ -6,6 +6,7 @@ import { createApp } from '../src/app.js';
 import { runMigrations } from '../src/db/migrate.js';
 import { getPool, closePool, isDbConfigured } from '../src/db/pool.js';
 import { hashPassword } from '../src/auth/passwords.js';
+import { createSession, SESSION_COOKIE } from '../src/auth/sessions.js';
 
 // Needs a real Postgres, same as auth.test.js.
 const skip = !isDbConfigured() && 'DATABASE_URL not set — start the local db to run these';
@@ -48,7 +49,7 @@ async function loginAs(role) {
 }
 const cleanup = (...emails) => getPool().query('DELETE FROM users WHERE lower(email) = ANY($1)', [emails.map((e) => e.toLowerCase())]);
 
-test('migration 004 seeds the named accounts with their roles', { skip }, async () => {
+test('migrations 004 and 019 seed the named accounts with their roles', { skip }, async () => {
   const { rows } = await getPool().query(
     `SELECT lower(email) AS email, role FROM users
       WHERE lower(email) IN ('ajnavarrosilva@gmail.com', 'alvaro.navarro@ledens.es', 'ana.anzola@ledens.es', 'alvaronavarrosilva@outlook.es')`,
@@ -57,7 +58,7 @@ test('migration 004 seeds the named accounts with their roles', { skip }, async 
   assert.deepEqual(roles, {
     'ajnavarrosilva@gmail.com': 'admin',
     'alvaro.navarro@ledens.es': 'admin',
-    'ana.anzola@ledens.es': 'jefe',
+    'ana.anzola@ledens.es': 'admin', // jefe in 004, admin since 019
     'alvaronavarrosilva@outlook.es': 'client',
   });
 });
@@ -160,4 +161,33 @@ test('an admin changes a role with a reason, and it lands in the audit log', { s
   } finally {
     await cleanup(admin.email, target.email);
   }
+});
+
+test('«ver como»: an admin views a jefe read-only (audited); nobody else can, and a client target gets no finance', { skip }, async () => {
+  // Sessions straight from the session store: /api/auth/login allows 10 per
+  // IP every 15 minutes and the tests above already use most of them.
+  const sessionFor = async (role) => {
+    const { rows: [u] } = await getPool().query("INSERT INTO users (email, name, role) VALUES ($1, $2, $3) RETURNING id",
+      [`${role}-view-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@example.com`, `Test ${role}`, role]);
+    const { token } = await createSession(u.id);
+    return { id: u.id, cookie: `${SESSION_COOKIE}=${token}` };
+  };
+  const admin = await sessionFor('admin');
+  const jefe = await sessionFor('jefe');
+  const client = await sessionFor('client');
+  const view = (who, target, method = 'GET', path = '/api/finanzas/trabajadores') => fetch(`${base}${path}`, {
+    method, headers: { Cookie: who.cookie, 'X-Ledens-View-As': target.id, 'Content-Type': 'application/json', Origin: process.env.CORS_ORIGIN || 'http://localhost' },
+    body: method === 'GET' ? undefined : '{}' });
+  // Starting the view is recorded.
+  const start = await call('POST', '/api/admin/view-as', { userId: jefe.id }, admin.cookie);
+  assert.equal(start.status, 200);
+  assert.equal((await start.json()).user.role, 'jefe');
+  const { rows } = await getPool().query("SELECT detail FROM audit_log WHERE action='Vista como usuario' AND target_id=$1", [jefe.id]);
+  assert.equal(rows.length, 1);
+  assert.equal((await call('POST', '/api/admin/view-as', { userId: jefe.id }, jefe.cookie)).status, 403, 'only admins');
+  // Reads go through as the jefe; writes are refused; a client target has no finance.
+  assert.equal((await view(admin, jefe)).status, 200);
+  assert.equal((await view(admin, jefe, 'POST', '/api/finanzas/gestion-proyectos')).status, 403);
+  assert.equal((await view(admin, client)).status, 403);
+  assert.equal((await view(jefe, admin)).status, 403, 'a jefe cannot view as anyone');
 });
