@@ -104,6 +104,21 @@
 .hdr-ctas { display: flex; gap: 10px; align-items: center; flex: 0 0 auto; }
 .hdr-user { display: flex; align-items: center; gap: 10px; }
 .hdr-user-name { font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.hdr-right { display: flex; gap: 12px; align-items: center; flex: 0 0 auto; }
+
+/* ES / EN switch — site header and /plataforma top bar */
+.lang-switch {
+  display: inline-flex; flex: 0 0 auto;
+  border: 1px solid rgba(12,6,43,0.14); border-radius: 999px; padding: 2px;
+  background: #fff;
+}
+.lang-switch button {
+  font-family: var(--font-sans); font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em;
+  border: 0; background: transparent; color: #6b6880;
+  padding: 5px 9px; border-radius: 999px; cursor: pointer; line-height: 1;
+}
+.lang-switch button.active { background: var(--ledens-blue); color: #fff; }
+.lang-switch button:focus-visible { outline: 2px solid var(--ledens-blue); outline-offset: 1px; }
 /* Header buttons carry a long and a short label; phones swap them (≤560px). */
 .lbl-short, .hdr-logout i { display: none; }
 
@@ -488,6 +503,15 @@ footer { background: var(--ledens-navy); color: rgba(255,255,255,0.8); padding: 
 @media (max-width: 1560px) {
   .logo-sep, .logo-tag { display: none; }
 }
+/* Dead-centre only fits on wide screens: below that the nav sits in the flow
+   between logo and buttons (never on top of the language switch), and when
+   even that doesn't fit it hides, as it does on mobile. */
+@media (max-width: 1440px) {
+  .nav { position: static; transform: none; margin: 0 auto; padding: 0 16px; }
+}
+@media (max-width: 1240px) {
+  .nav { display: none; }
+}
 
 @media (max-width: 1000px) {
   .hdr-inner { height: auto; } /* already flex — just reset height */
@@ -565,6 +589,8 @@ footer { background: var(--ledens-navy); color: rgba(255,255,255,0.8); padding: 
   .hdr-user .btn-blue { padding: 0 14px; }
   .hero-eyebrow { font-size: 10.5px; letter-spacing: 0.1em; padding: 7px 12px; margin-bottom: 18px; }
   .hero-copy { padding-top: 32px; }
+  .hdr-right { gap: 8px; min-width: 0; }
+  .lang-switch button { padding: 5px 7px; font-size: 11px; }
   .hero h1 { font-size: 32px; }
   .hero-sub { font-size: 15px; }
 
@@ -1676,4 +1702,10 @@ footer { background: var(--ledens-navy); color: rgba(255,255,255,0.8); padding: 
   .cc-body, .cc-details { padding-left: 20px; padding-right: 20px; }
   .cc-actions, .cc-details-foot { padding-left: 20px; padding-right: 20px; }
   .cc-reopen { bottom: 16px; left: 16px; }
+}
+
+/* Narrow phones: logo mark only, so the language switch and both header
+   buttons still fit in one row ("REGÍSTRATE" is the longest label). */
+@media (max-width: 420px) {
+  .logo-word { display: none; }
 }

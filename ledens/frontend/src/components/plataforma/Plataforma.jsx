@@ -16,6 +16,9 @@ import { ROLE_VIEW, ROLE_LABEL, initials, firstName, fmtDate, userRow, signupBar
 import { FIN_TABS } from './finanzas/tabs.js';
 import { setViewAs, viewAsHeaders } from './finanzas/api.js';
 import { VerComoSelector, VerComoBanner } from './VerComo.jsx';
+import { useI18n } from '../../i18n/I18nContext.jsx';
+import LangSwitch from '../../i18n/LangSwitch.jsx';
+import { PLAT_TXT } from './i18n.js';
 const GestionFinanciera = React.lazy(() => import('./finanzas/GestionFinanciera.jsx'));
 const Obras = React.lazy(() => import('./obras/Obras.jsx'));
 import '../../styles/plataforma.css';
@@ -55,13 +58,13 @@ class PlataformaView extends React.Component {
   };
   flash=t=>{this.setState({toast:t});clearTimeout(this._t);this._t=setTimeout(()=>this.setState({toast:''}),3600);};
   renderVals(){
-    const s=this.state,role=s.role,view=role==='client'?'client':'internal';
+    const s=this.state,role=s.role,view=role==='client'?'client':'internal',L=this.props.L;
     const mk=(label,icon,screen,badge,match)=>({label,icon,badge,go:()=>this.go(screen),bg:(match||[screen]).includes(s.screen)?'#F2F4FA':'transparent',fg:(match||[screen]).includes(s.screen)?'#3E4D85':'#3A3A38',fw:(match||[screen]).includes(s.screen)?700:500});
     // admin: real users from /api/admin/users
     const now=new Date(),allU=s.adminUsers||[],rowsAll=allU.map(u=>userRow(u,allU,now));
     const user=rowsAll.find(u=>u.id===s.userId)||{id:null,name:s.adminUsers?'Usuario no encontrado':'Cargando…',email:'',role:'client',roleL:'',since:'',prov:'',ver:'',verBg:'#EDEDEA',verFg:'#3A3A38',profS:'',works:'—',last:'',phone:'—',city:'—',issues:[],initials:''};
     const pc=s.presu||{},obrasScreen=OBRAS_SCREEN[s.screen]||null;
-    const nav=role==='client'?[mk('Inicio','ri-home-5-line','c_home'),mk('Presupuestos','ri-file-list-3-line','c_presupuestos',pc.pendiente||0),mk('Obra en curso','ri-building-2-line','c_obras'),mk('Mi perfil','ri-user-3-line','c_perfil')]
+    const nav=role==='client'?[mk(L.nav.home,'ri-home-5-line','c_home'),mk(L.nav.presupuestos,'ri-file-list-3-line','c_presupuestos',pc.pendiente||0),mk(L.nav.obras,'ri-building-2-line','c_obras'),mk(L.nav.perfil,'ri-user-3-line','c_perfil')]
       :role==='worker'?[mk('Hoy','ri-sun-line','w_home'),mk('Obras asignadas','ri-building-2-line','w_obras',pc.cambios||0),mk('Actualizar avance','ri-bar-chart-horizontal-line','w_avance')]
       :[mk('Panel','ri-dashboard-3-line','a_home'),mk('Usuarios','ri-group-line','a_users',rowsAll.filter(u=>u.issues.length).length,['a_users','a_user']),mk('Auditoría','ri-history-line','a_audit'),mk('Presupuestos y obras','ri-file-list-3-line','a_presu',pc.cambios||0),mk('Actualizar avance','ri-bar-chart-horizontal-line','a_avance')];
     const finScreen=PREFIX[role]+'fin',isFin=s.screen===finScreen;
@@ -70,12 +73,12 @@ class PlataformaView extends React.Component {
     if(role!=='client')nav.push({header:'Gestión financiera'},...FIN_TABS.filter(t=>!t[3]||(role==='admin'&&this.props.user.role==='admin')).map(([k,label,icon])=>{const on=isFin&&s.finTab===k;
       return {label,icon,badge:k==='pendientes'?s.finPending:k==='conciliacion'?s.finConciliationPending:k==='pendiente-bridge'?s.finBridgePending:0,finConciliationPending:0,go:()=>this.go(finScreen,{finTab:k}),bg:on?'#F2F4FA':'transparent',fg:on?'#3E4D85':'#3A3A38',fw:on?700:500};}));
     const U=this.props.user,shown=s.viewAs||U,meName=shown.name||shown.email;
-    const me={name:meName,initials:initials(meName),role:ROLE_LABEL[shown.role]||'Cliente',avBg:role==='client'?'#EC6090':role==='worker'?'#68C0B5':'#0C062B'};
-    const titles={c_home:['Inicio'],c_obras:['Obra en curso'],c_presupuestos:['Presupuestos'],c_perfil:['Mi perfil'],w_home:['Hoy'],w_obras:['Obras asignadas'],a_home:['Panel de administración'],a_users:['Usuarios'],a_user:['Usuarios',user.name],a_audit:['Auditoría'],a_presu:['Presupuestos y obras'],w_avance:['Actualizar avance'],a_avance:['Actualizar avance']};
+    const me={name:meName,initials:initials(meName),role:shown.role&&shown.role!=='client'?ROLE_LABEL[shown.role]:L.clientRole,avBg:role==='client'?'#EC6090':role==='worker'?'#68C0B5':'#0C062B'};
+    const titles={c_home:[L.nav.home],c_obras:[L.nav.obras],c_presupuestos:[L.nav.presupuestos],c_perfil:[L.nav.perfil],w_home:['Hoy'],w_obras:['Obras asignadas'],a_home:['Panel de administración'],a_users:['Usuarios'],a_user:['Usuarios',user.name],a_audit:['Auditoría'],a_presu:['Presupuestos y obras'],w_avance:['Actualizar avance'],a_avance:['Actualizar avance']};
     titles[finScreen]=['Gestión financiera',(FIN_TABS.find(t=>t[0]===s.finTab)||FIN_TABS[0])[1]];
     const parent={a_user:'a_users'};
     const tt=titles[s.screen];const crumbs=tt.map((l,i)=>({label:l,sep:i>0,fg:i===tt.length-1?'#1D1D1B':'#6B6B68',fw:i===tt.length-1?700:500,go:()=>i<tt.length-1&&(isFin?this.go(finScreen,{finTab:'resumen'}):this.go(parent[s.screen]))}));
-    const NT=role==='client'&&pc.pendiente?[['ri-file-list-3-line',pc.pendiente===1?'Un presupuesto espera tu decisión':pc.pendiente+' presupuestos esperan tu decisión','Revísalos en Presupuestos',()=>this.go('c_presupuestos')]]
+    const NT=role==='client'&&pc.pendiente?[['ri-file-list-3-line',pc.pendiente===1?L.pendingOne:L.pendingMany(pc.pendiente),L.pendingSub,()=>this.go('c_presupuestos')]]
       :role!=='client'&&pc.cambios?[['ri-chat-3-line',pc.cambios===1?'Un cliente ha pedido cambios':pc.cambios+' presupuestos con cambios pedidos','Prepara la versión nueva',()=>this.go(role==='admin'?'a_presu':'w_obras')]]:[];
     const notifs=NT.map(n=>({icon:n[0],title:n[1],sub:n[2],bg:'#F8F9FC',fw:700,dot:'#EC6090',go:n[3]}));
     const unread=notifs.length;
@@ -102,20 +105,20 @@ class PlataformaView extends React.Component {
     const myIssues=user.issues.map(i=>({...i,done:false,open:false,tBg:ITYPE[i.type][0],tFg:ITYPE[i.type][1]}));
     return Object.assign({},is,{
       showDemo:role!=='admin'&&!isFin&&!obrasScreen,obrasScreen,isFin,finTab:s.finTab,finGo:k=>this.go(finScreen,{finTab:k}),finPending:n=>n!==s.finPending&&this.setState({finPending:n}),finBridgePending:(n,c=n)=>(n!==s.finBridgePending||c!==s.finConciliationPending)&&this.setState({finBridgePending:n,finConciliationPending:c}),flash:this.flash,isClient:role==='client',isWorker:role==='worker',isAdmin:role==='admin',isInternal:view==='internal',
-      areaLabel:role==='client'?'Área de cliente':role==='worker'?'Workspace':'Administración',nav,me,crumbs,notifs,unread,notifOpen:s.notifOpen,
-      firstName:firstName(shown),meFirst:(shown.name||'').trim().split(/\s+/)[0]||'',meLast:(shown.name||'').trim().split(/\s+/).slice(1).join(' '),meEmail:shown.email,meSince:shown.created_at?fmtDate(shown.created_at).replace(/^\d+ /,''):'',
+      areaLabel:role==='client'?L.area:role==='worker'?'Workspace':'Administración',nav,me,crumbs,notifs,unread,notifOpen:s.notifOpen,
+      firstName:firstName(shown),meFirst:(shown.name||'').trim().split(/\s+/)[0]||'',meLast:(shown.name||'').trim().split(/\s+/).slice(1).join(' '),meEmail:shown.email,meSince:shown.created_at?this.props.fmtDateL(shown.created_at,{month:'short',year:'numeric'}):'',
       logout:()=>this.props.onLogout(),
       isRealAdmin:U.role==='admin',panel:role,viewAs:s.viewAs||null,switching:!!s.switching,viewUsers:s.adminUsers||[],
       switchView:this.switchView,exitView:()=>this.switchView('admin',null),barsFrom:sb.from,barsTo:sb.to,roleOpts,
       toggleNotif:()=>this.setState({notifOpen:!s.notifOpen}),readAll:()=>this.setState({notifOpen:false}),
-      askBudget:()=>this.props.onOpenLead?this.props.onOpenLead():this.flash('Abriría el formulario de solicitud.'),
-      toast:s.toast,hasToast:!!s.toast,
+      askBudget:()=>this.props.onOpenLead?this.props.onOpenLead():this.flash(L.askBudgetFallback),
+      toast:s.toast,hasToast:!!s.toast,L,
       closeModal:()=>this.setState({modal:null}),
       mPerm:s.modal==='perm',
-      phone:s.phone,onPhone:e=>this.setState({phone:e.target.value,profErr:''}),profErr:s.profErr,hasProfErr:!!s.profErr,phoneBd:s.profErr?'#D14A4A':'#D9D9D9',
-      saveProfile:()=>{if(!phoneOk){this.setState({profErr:'Formato no válido. Usa 9 cifras, por ejemplo 655 638 219.'});return;}this.flash('Cambios guardados.');},
+      phone:s.phone,onPhone:e=>this.setState({phone:e.target.value,profErr:''}),profErr:s.profErr?L.phoneErr:'',hasProfErr:!!s.profErr,phoneBd:s.profErr?'#D14A4A':'#D9D9D9',
+      saveProfile:()=>{if(!phoneOk){this.setState({profErr:'phone'});return;}this.flash(L.saved);},
       isFisica:s.personType==='fisica',isEmpresa:s.personType==='empresa',
-      ptypes:[['fisica','Persona física'],['empresa','Empresa']].map(([k,l])=>({label:l,go:()=>this.setState({personType:k}),bg:s.personType===k?'#fff':'transparent',fg:s.personType===k?'#0C062B':'#6B6B68',sh:s.personType===k?'0 1px 2px rgba(12,6,43,0.08)':'none'})),
+      ptypes:[['fisica',L.person],['empresa',L.company]].map(([k,l])=>({label:l,go:()=>this.setState({personType:k}),bg:s.personType===k?'#fff':'transparent',fg:s.personType===k?'#0C062B':'#6B6B68',sh:s.personType===k?'0 1px 2px rgba(12,6,43,0.08)':'none'})),
       kpis:KPI,bars,queue,uf,urows,q:s.q,onQ:e=>this.setState({q:e.target.value}),noRows:urows.length===0,
       user,
       userIsClient:user.role==='client',userIsInternal:user.role!=='client',isSelf,notSelf:!isSelf,myIssues,hasIssues:myIssues.length>0,noIssues:myIssues.length===0,
@@ -175,13 +178,13 @@ class PlataformaView extends React.Component {
           <>
             <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "16px", borderRadius: "12px", background: "#F2F4FA" }}>
               <div style={{ fontSize: "14px", fontWeight: "700", color: "#0C062B" }}>
-                {"¿Otra reforma en mente?"}
+                {v.L.otherReno}
               </div>
               <div style={{ fontSize: "13px", color: "#3A3A38", lineHeight: "1.4" }}>
-                {"Pide presupuesto y lo verás aquí junto al resto."}
+                {v.L.otherRenoSub}
               </div>
               <button onClick={v.askBudget} style={{ background: "#EC6090", color: "#fff", border: "0", borderRadius: "8px", padding: "11px 12px", fontWeight: "700", fontSize: "13px", cursor: "pointer", letterSpacing: "0.02em" }}>
-                {"SOLICITAR PRESUPUESTO"}
+                {v.L.askBudget}
               </button>
             </div>
           </>
@@ -199,7 +202,7 @@ class PlataformaView extends React.Component {
               {v.me.role}
             </div>
           </div>
-          <button type="button" onClick={v.logout} aria-label="Cerrar sesi\u00f3n" title="Cerrar sesi\u00f3n" style={{ border: "0", background: "none", cursor: "pointer", width: "36px", height: "36px", borderRadius: "8px", display: "grid", placeItems: "center" }}>
+          <button type="button" onClick={v.logout} aria-label={v.L.logout} title={v.L.logout} style={{ border: "0", background: "none", cursor: "pointer", width: "36px", height: "36px", borderRadius: "8px", display: "grid", placeItems: "center" }}>
             <i className="ri-logout-box-r-line" style={{ fontSize: "18px", color: "#6B6B68" }}></i>
           </button>
         </div>
@@ -229,8 +232,9 @@ class PlataformaView extends React.Component {
               </span>
             </>
           ) : null}
+          <LangSwitch />
           <div style={{ position: "relative" }}>
-            <button onClick={v.toggleNotif} aria-label="Notificaciones" style={{ width: "44px", height: "44px", borderRadius: "10px", border: "1px solid #EDEDEA", background: "#fff", cursor: "pointer", position: "relative", display: "grid", placeItems: "center" }}>
+            <button onClick={v.toggleNotif} aria-label={v.L.notifications} style={{ width: "44px", height: "44px", borderRadius: "10px", border: "1px solid #EDEDEA", background: "#fff", cursor: "pointer", position: "relative", display: "grid", placeItems: "center" }}>
               <i className="ri-notification-3-line" style={{ fontSize: "20px", color: "#3A3A38" }}></i>
               {v.unread ? (
                 <>
@@ -245,10 +249,10 @@ class PlataformaView extends React.Component {
                 <div style={{ position: "absolute", right: "0", top: "52px", width: "400px", background: "#fff", border: "1px solid #EDEDEA", borderRadius: "12px", boxShadow: "0 12px 32px rgba(12,6,43,0.12),0 4px 8px rgba(12,6,43,0.06)", overflow: "hidden" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 18px", borderBottom: "1px solid #EDEDEA" }}>
                     <span style={{ fontWeight: "700", fontSize: "16px" }}>
-                      {"Notificaciones"}
+                      {v.L.notifications}
                     </span>
                     <button onClick={v.readAll} style={{ border: "0", background: "none", color: "#5567AE", fontSize: "13px", fontWeight: "600", cursor: "pointer" }}>
-                      {"Marcar todo como leído"}
+                      {v.L.readAll}
                     </button>
                   </div>
                   {(v.notifs || []).map((nt, nt_i) => (
@@ -268,7 +272,7 @@ class PlataformaView extends React.Component {
                     </React.Fragment>
                   ))}
                   <div style={{ padding: "12px 18px", fontSize: "12px", color: "#6B6B68", background: "#FAFAF8" }}>
-                    {"Avisos por email: próximamente. Hoy solo dentro de la plataforma."}
+                    {v.L.notifEmailSoon}
                   </div>
                 </div>
               </>
@@ -283,7 +287,7 @@ class PlataformaView extends React.Component {
             </React.Suspense>
           ) : null}
           {v.obrasScreen ? (
-            <React.Suspense fallback={<div style={{ padding: "32px", color: "#6B6B68" }}>{"Cargando…"}</div>}>
+            <React.Suspense fallback={<div style={{ padding: "32px", color: "#6B6B68" }}>{v.L.loading}</div>}>
               <Obras key={(v.viewAs?.id || 'self') + v.obrasPanel} panel={v.obrasPanel} screen={v.obrasScreen} readOnly={!!v.viewAs} toast={v.flash} firstName={v.firstName} onCount={v.presuChanged} />
             </React.Suspense>
           ) : null}
@@ -301,13 +305,13 @@ class PlataformaView extends React.Component {
                           {v.me.name}
                         </span>
                         <span style={{ fontSize: "13px", color: "#6B6B68" }}>
-                          {"Cliente desde "}{v.meSince}
+                          {v.L.since}{v.meSince}
                         </span>
                       </div>
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: "14px" }}>
                       <span style={{ fontWeight: "700" }}>
-                        {"Perfil completado"}
+                        {v.L.profileDone}
                       </span>
                       <span style={{ fontWeight: "700" }}>
                         {"80%"}
@@ -318,44 +322,44 @@ class PlataformaView extends React.Component {
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "14px", borderRadius: "10px", background: "#FBF1DE" }}>
                       <span style={{ fontSize: "13px", fontWeight: "700", color: "#7A4E0E" }}>
-                        {"Falta para facturar"}
+                        {v.L.missingBilling}
                       </span>
                       <span style={{ fontSize: "13px", color: "#3A3A38", lineHeight: "1.45" }}>
-                        {"DNI/NIE y dirección fiscal. Los necesitamos para emitir la certificación nº 2."}
+                        {v.L.missingBillingSub}
                       </span>
                     </div>
                   </div>
                   <div style={{ background: "#fff", border: "1px solid #EDEDEA", borderRadius: "16px", padding: "8px", display: "flex", flexDirection: "column" }}>
                     <a href="#perfil-personal" style={{ padding: "10px 12px", borderRadius: "8px", fontSize: "14px", fontWeight: "600", color: "#0C062B" }}>
-                      {"Información personal"}
+                      {v.L.personalInfo}
                     </a>
                     <a href="#perfil-fiscal" style={{ padding: "10px 12px", borderRadius: "8px", fontSize: "14px", fontWeight: "600", color: "#0C062B" }}>
-                      {"Facturación"}
+                      {v.L.billing}
                     </a>
                     <a href="#perfil-seguridad" style={{ padding: "10px 12px", borderRadius: "8px", fontSize: "14px", fontWeight: "600", color: "#0C062B" }}>
-                      {"Cuenta y seguridad"}
+                      {v.L.account}
                     </a>
                     <a href="#perfil-avisos" style={{ padding: "10px 12px", borderRadius: "8px", fontSize: "14px", fontWeight: "600", color: "#0C062B" }}>
-                      {"Notificaciones"}
+                      {v.L.notifications}
                     </a>
                   </div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
                   <div id="perfil-personal" style={{ background: "#fff", border: "1px solid #EDEDEA", borderRadius: "16px", padding: "26px", display: "flex", flexDirection: "column", gap: "18px" }}>
                     <h2 style={{ fontSize: "18px", fontWeight: "700" }}>
-                      {"Información personal"}
+                      {v.L.personalInfo}
                     </h2>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "16px" }}>
                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
-                        {"Nombre"}
+                        {v.L.firstName}
                         <input value={v.meFirst} readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px", background: "#fff" }} />
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
-                        {"Apellidos"}
+                        {v.L.lastName}
                         <input value={v.meLast} readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
-                        {"Teléfono "}
+                        {v.L.phone}
                         <input value={v.phone} onChange={v.onPhone} style={{ height: "46px", border: `1px solid ${v.phoneBd}`, borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                         {v.hasProfErr ? (
                           <>
@@ -370,31 +374,31 @@ class PlataformaView extends React.Component {
                         {"Email"}
                         <input value={v.meEmail} readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px", background: "#F7F7F5", color: "#3A3A38" }} />
                         <span style={{ fontSize: "12px", color: "#6B6B68", fontWeight: "500" }}>
-                          {"Cambiarlo requiere confirmar el nuevo email. Se cambia en Cuenta y seguridad."}
+                          {v.L.emailHint}
                         </span>
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600", gridColumn: "1 / -1" }}>
-                        {"Dirección"}
+                        {v.L.address}
                         <input defaultValue="C/ Mart\u00ednez de la Rosa, 41 \u00b7 3\u00ba B" readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
-                        {"Localidad"}
+                        {v.L.city}
                         <input defaultValue="M\u00e1laga" readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                       </label>
                       <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: "16px" }}>
                         <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
-                          {"Código postal"}
+                          {v.L.postcode}
                           <input defaultValue="29010" readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                         </label>
                         <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
-                          {"País"}
-                          <input defaultValue="Espa\u00f1a" readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
+                          {v.L.country}
+                          <input value={v.L.countryValue} readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                         </label>
                       </div>
                     </div>
                     <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
                       <button onClick={v.saveProfile} style={{ border: "0", background: "#5567AE", color: "#fff", borderRadius: "8px", padding: "12px 20px", fontWeight: "700", fontSize: "14px", cursor: "pointer" }}>
-                        {"Guardar cambios"}
+                        {v.L.save}
                       </button>
                     </div>
                   </div>
@@ -402,10 +406,10 @@ class PlataformaView extends React.Component {
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
                       <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                         <h2 style={{ fontSize: "18px", fontWeight: "700" }}>
-                          {"Facturación"}
+                          {v.L.billing}
                         </h2>
                         <span style={{ fontSize: "13px", color: "#6B6B68" }}>
-                          {"Solo se piden al contratar o facturar."}
+                          {v.L.billingSub}
                         </span>
                       </div>
                       <div style={{ display: "flex", gap: "4px", background: "#F7F7F5", border: "1px solid #EDEDEA", borderRadius: "10px", padding: "3px" }}>
@@ -422,22 +426,22 @@ class PlataformaView extends React.Component {
                       <>
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "16px" }}>
                           <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
-                            {"Nombre fiscal"}
+                            {v.L.taxName}
                             <input defaultValue="Luc\u00eda Fern\u00e1ndez Ortiz" readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                           </label>
                           <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
-                            {"DNI/NIE "}
+                            {v.L.taxId}
                             <span style={{ fontWeight: "500", color: "#7A4E0E" }}>
-                              {"Pendiente"}
+                              {v.L.pending}
                             </span>
                             <input placeholder="12345678Z" style={{ height: "46px", border: "1px solid #E0A94A", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                           </label>
                           <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600", gridColumn: "1 / -1" }}>
-                            {"Dirección fiscal "}
+                            {v.L.taxAddress}
                             <span style={{ fontWeight: "500", color: "#7A4E0E" }}>
-                              {"Pendiente"}
+                              {v.L.pending}
                             </span>
-                            <input placeholder="Igual que la direcci\u00f3n personal" style={{ height: "46px", border: "1px solid #E0A94A", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
+                            <input placeholder={v.L.taxAddressPh} style={{ height: "46px", border: "1px solid #E0A94A", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                           </label>
                         </div>
                       </>
@@ -446,19 +450,19 @@ class PlataformaView extends React.Component {
                       <>
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "16px" }}>
                           <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
-                            {"Razón social"}
-                            <input placeholder="Nombre de la empresa S.L." style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
+                            {v.L.companyName}
+                            <input placeholder={v.L.companyNamePh} style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                           </label>
                           <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
                             {"NIF/CIF"}
                             <input placeholder="B12345678" style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                           </label>
                           <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
-                            {"Dirección fiscal"}
+                            {v.L.taxAddressCo}
                             <input style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                           </label>
                           <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
-                            {"Persona de contacto"}
+                            {v.L.contact}
                             <input defaultValue="Luc\u00eda Fern\u00e1ndez" style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                           </label>
                         </div>
@@ -467,13 +471,13 @@ class PlataformaView extends React.Component {
                     <div style={{ display: "flex", gap: "10px", padding: "14px 16px", borderRadius: "10px", background: "#F7F7F5", fontSize: "13px", color: "#3A3A38", lineHeight: "1.5" }}>
                       <i className="ri-lock-line" style={{ fontSize: "18px", color: "#6B6B68" }}></i>
                       <span>
-                        {"Si cambias la identidad fiscal después de facturar, el cambio queda pendiente hasta que Ledens lo revise. Las facturas emitidas no se modifican."}
+                        {v.L.taxLock}
                       </span>
                     </div>
                   </div>
                   <div id="perfil-seguridad" style={{ background: "#fff", border: "1px solid #EDEDEA", borderRadius: "16px", padding: "26px", display: "flex", flexDirection: "column", gap: "14px" }}>
                     <h2 style={{ fontSize: "18px", fontWeight: "700" }}>
-                      {"Cuenta y seguridad"}
+                      {v.L.account}
                     </h2>
                     <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "12px 0", borderTop: "1px solid #F0F0EC" }}>
                       <i className="ri-mail-line" style={{ fontSize: "20px", color: "#3A3A38" }}></i>
@@ -483,7 +487,7 @@ class PlataformaView extends React.Component {
                         </strong>
                       </span>
                       <span style={{ background: "#DEF3F0", color: "#2F6B63", fontSize: "12px", fontWeight: "700", padding: "4px 10px", borderRadius: "99px" }}>
-                        {"Email verificado"}
+                        {v.L.emailVerified}
                       </span>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "12px 0", borderTop: "1px solid #F0F0EC" }}>
@@ -492,7 +496,7 @@ class PlataformaView extends React.Component {
                         {"Google"}
                       </span>
                       <span style={{ fontSize: "13px", color: "#2F6B63", fontWeight: "700" }}>
-                        {"Vinculado"}
+                        {v.L.linked}
                       </span>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "12px 0", borderTop: "1px solid #F0F0EC" }}>
@@ -501,19 +505,19 @@ class PlataformaView extends React.Component {
                         {"Microsoft"}
                       </span>
                       <button style={{ border: "1px solid #D9D9D9", background: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>
-                        {"Vincular"}
+                        {v.L.link}
                       </button>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "12px 0", borderTop: "1px solid #F0F0EC" }}>
                       <i className="ri-key-2-line" style={{ fontSize: "20px", color: "#3A3A38" }}></i>
                       <span style={{ flex: "1", fontSize: "14px" }}>
-                        {"Contraseña"}
+                        {v.L.password}
                         <span style={{ display: "block", fontSize: "12px", color: "#6B6B68" }}>
-                          {"No tienes contraseña: entras con Google"}
+                          {v.L.noPassword}
                         </span>
                       </span>
                       <button style={{ border: "1px solid #D9D9D9", background: "#fff", borderRadius: "8px", padding: "8px 12px", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>
-                        {"Crear contraseña"}
+                        {v.L.createPassword}
                       </button>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "12px 0", borderTop: "1px solid #F0F0EC" }}>
@@ -522,19 +526,19 @@ class PlataformaView extends React.Component {
                         {"Apple"}
                       </span>
                       <span style={{ fontSize: "12px", color: "#6B6B68", fontWeight: "700" }}>
-                        {"Próximamente"}
+                        {v.L.soon}
                       </span>
                     </div>
                   </div>
                   <div id="perfil-avisos" style={{ background: "#fff", border: "1px solid #EDEDEA", borderRadius: "16px", padding: "26px", display: "flex", flexDirection: "column", gap: "14px" }}>
                     <h2 style={{ fontSize: "18px", fontWeight: "700" }}>
-                      {"Notificaciones"}
+                      {v.L.notifications}
                     </h2>
                     <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "12px 0", borderTop: "1px solid #F0F0EC" }}>
                       <span style={{ flex: "1", fontSize: "14px" }}>
-                        {"Avances, fotos y documentos de tus obras"}
+                        {v.L.notifWorks}
                         <span style={{ display: "block", fontSize: "12px", color: "#6B6B68" }}>
-                          {"En la plataforma"}
+                          {v.L.inPlatform}
                         </span>
                       </span>
                       <span style={{ width: "40px", height: "22px", borderRadius: "99px", background: "#5567AE", position: "relative" }}>
@@ -543,9 +547,9 @@ class PlataformaView extends React.Component {
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "12px 0", borderTop: "1px solid #F0F0EC" }}>
                       <span style={{ flex: "1", fontSize: "14px" }}>
-                        {"Presupuestos y modificaciones"}
+                        {v.L.notifBudgets}
                         <span style={{ display: "block", fontSize: "12px", color: "#6B6B68" }}>
-                          {"En la plataforma"}
+                          {v.L.inPlatform}
                         </span>
                       </span>
                       <span style={{ width: "40px", height: "22px", borderRadius: "99px", background: "#5567AE", position: "relative" }}>
@@ -554,9 +558,9 @@ class PlataformaView extends React.Component {
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "12px 0", borderTop: "1px solid #F0F0EC", opacity: "0.6" }}>
                       <span style={{ flex: "1", fontSize: "14px" }}>
-                        {"Copia por email"}
+                        {v.L.notifEmail}
                         <span style={{ display: "block", fontSize: "12px", color: "#6B6B68" }}>
-                          {"Próximamente"}
+                          {v.L.soon}
                         </span>
                       </span>
                       <span style={{ width: "40px", height: "22px", borderRadius: "99px", background: "#D9D9D9", position: "relative" }}>
@@ -1149,6 +1153,7 @@ class PlataformaView extends React.Component {
 
 export default function Plataforma(props) {
   const { user, logout } = useAuth();
+  const { lang, fmtDate: fmtDateL } = useI18n();
   const navigate = useNavigate();
   // RequireAuth guarantees a user here; key remounts the view if it changes.
   return (
@@ -1156,6 +1161,8 @@ export default function Plataforma(props) {
       {...props}
       key={user.id}
       user={user}
+      L={PLAT_TXT[lang]}
+      fmtDateL={fmtDateL}
       onLogout={async () => { await logout(); navigate('/'); }}
     />
   );

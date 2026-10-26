@@ -1,27 +1,64 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import { useT } from '../i18n/I18nContext.jsx';
+import LangSwitch from '../i18n/LangSwitch.jsx';
 import logo from '../assets/logo-ledens-isotype.png';
 
-const SERVICES = [
-  { icon: 'ri-hammer-line',     slug: 'albanileria',   label: 'Albañilería',   desc: 'Obra, alicatado y solados' },
-  { icon: 'ri-flashlight-line', slug: 'electricidad',  label: 'Electricidad',  desc: 'Instalación, cuadro y domótica' },
-  { icon: 'ri-drop-line',       slug: 'fontaneria',    label: 'Fontanería',    desc: 'Tuberías, sanitarios, fugas' },
-  { icon: 'ri-temp-cold-line',  slug: 'climatizacion', label: 'Climatización', desc: 'Aire acondicionado y aerotermia' },
-  { icon: 'ri-layout-2-line',   slug: 'pladur',        label: 'Pladur',        desc: 'Tabiques, techos y armarios' },
-  { icon: 'ri-door-open-line',  slug: 'carpinteria',   label: 'Carpintería',   desc: 'Madera, puertas y a medida' },
-];
+const SERVICE_ICONS = {
+  albanileria: 'ri-hammer-line', electricidad: 'ri-flashlight-line', fontaneria: 'ri-drop-line',
+  climatizacion: 'ri-temp-cold-line', pladur: 'ri-layout-2-line', carpinteria: 'ri-door-open-line',
+};
 
-const SUCCESS_CASES = [
-  { label: 'Santa Marta',           desc: 'Piso completo · 90 m²' },
-  { label: 'Pasaje Pezuela',        desc: 'Cocina + baño · Centro histórico' },
-  { label: 'Martínez de la Rosa',   desc: 'Reforma integral · Málaga capital' },
-  { label: 'Paseo de Los Tilos',    desc: 'Cocina con isla · 24 m²' },
-  { label: 'Avenida de la Paloma',  desc: 'Baño principal · Microcemento' },
-];
+// Street names are proper nouns and stay as they are in both languages.
+const CASES = ['Santa Marta', 'Pasaje Pezuela', 'Martínez de la Rosa', 'Paseo de Los Tilos', 'Avenida de la Paloma'];
+
+const TXT = {
+  es: {
+    tag: 'Reformas inteligentes',
+    services: 'SERVICIOS', servicesAria: 'Servicios',
+    projects: 'PROYECTOS', how: 'CÓMO FUNCIONA',
+    cases: 'CASOS DE ÉXITO', casesAria: 'Casos de éxito',
+    about: 'QUIÉNES SOMOS',
+    myArea: 'MI ÁREA', logout: 'CERRAR SESIÓN', logoutAria: 'Cerrar sesión', login: 'INICIA SESIÓN', loginShort: 'ENTRAR', register: 'REGÍSTRATE',
+    serviceList: [
+      ['albanileria', 'Albañilería', 'Obra, alicatado y solados'],
+      ['electricidad', 'Electricidad', 'Instalación, cuadro y domótica'],
+      ['fontaneria', 'Fontanería', 'Tuberías, sanitarios, fugas'],
+      ['climatizacion', 'Climatización', 'Aire acondicionado y aerotermia'],
+      ['pladur', 'Pladur', 'Tabiques, techos y armarios'],
+      ['carpinteria', 'Carpintería', 'Madera, puertas y a medida'],
+    ],
+    caseDescs: [
+      'Piso completo · 90 m²', 'Cocina + baño · Centro histórico', 'Reforma integral · Málaga capital',
+      'Cocina con isla · 24 m²', 'Baño principal · Microcemento',
+    ],
+  },
+  en: {
+    tag: 'Smart renovations',
+    services: 'SERVICES', servicesAria: 'Services',
+    projects: 'PROJECTS', how: 'HOW IT WORKS',
+    cases: 'SUCCESS STORIES', casesAria: 'Success stories',
+    about: 'ABOUT US',
+    myArea: 'MY AREA', logout: 'LOG OUT', logoutAria: 'Log out', login: 'LOG IN', loginShort: 'LOG IN', register: 'SIGN UP',
+    serviceList: [
+      ['albanileria', 'Masonry', 'Building work, tiling and flooring'],
+      ['electricidad', 'Electrical', 'Wiring, fuse boards and home automation'],
+      ['fontaneria', 'Plumbing', 'Pipes, bathroom fittings, leaks'],
+      ['climatizacion', 'Heating & cooling', 'Air conditioning and heat pumps'],
+      ['pladur', 'Drywall', 'Partitions, ceilings and wardrobes'],
+      ['carpinteria', 'Carpentry', 'Woodwork, doors and bespoke pieces'],
+    ],
+    caseDescs: [
+      'Whole flat · 90 m²', 'Kitchen + bathroom · Historic centre', 'Full renovation · Málaga city',
+      'Kitchen with island · 24 m²', 'Main bathroom · Microcement',
+    ],
+  },
+};
 
 export default function Header() {
   const { user, loading, logout } = useAuth();
+  const t = useT(TXT);
 
   return (
     <header className="hdr">
@@ -32,67 +69,70 @@ export default function Header() {
             <span className="logo-word">Ledens</span>
           </a>
           <div className="logo-sep"></div>
-          <span className="logo-tag">Reformas inteligentes</span>
+          <span className="logo-tag">{t.tag}</span>
         </div>
 
         <nav className="nav">
           {/* Servicios dropdown */}
           <div className="nav-item nav-item-dropdown">
-            <a href="#compromisos">SERVICIOS <i className="ri-arrow-down-s-line chev"></i></a>
-            <div className="nav-menu nav-menu-services" aria-label="Servicios">
-              {SERVICES.map((s) => (
-                <Link key={s.slug} to={`/servicios/${s.slug}`} className="nav-menu-link">
-                  <span className="nm-ico"><i className={s.icon}></i></span>
+            <a href="#compromisos">{t.services} <i className="ri-arrow-down-s-line chev"></i></a>
+            <div className="nav-menu nav-menu-services" aria-label={t.servicesAria}>
+              {t.serviceList.map(([slug, label, desc]) => (
+                <Link key={slug} to={`/servicios/${slug}`} className="nav-menu-link">
+                  <span className="nm-ico"><i className={SERVICE_ICONS[slug]}></i></span>
                   <span className="nm-text">
-                    <span className="nm-t">{s.label}</span>
-                    <span className="nm-s">{s.desc}</span>
+                    <span className="nm-t">{label}</span>
+                    <span className="nm-s">{desc}</span>
                   </span>
                 </Link>
               ))}
             </div>
           </div>
 
-          <a href="#galeria">PROYECTOS</a>
-          <a href="#proceso">CÓMO FUNCIONA</a>
+          <a href="#galeria">{t.projects}</a>
+          <a href="#proceso">{t.how}</a>
 
           {/* Casos de éxito dropdown */}
           <div className="nav-item nav-item-dropdown">
-            <a href="#testimonios">CASOS DE ÉXITO <i className="ri-arrow-down-s-line chev"></i></a>
-            <div className="nav-menu nav-menu-cases" aria-label="Casos de éxito">
-              {SUCCESS_CASES.map((c) => (
-                <a key={c.label} href="#testimonios" className="nav-menu-link">
+            <a href="#testimonios">{t.cases} <i className="ri-arrow-down-s-line chev"></i></a>
+            <div className="nav-menu nav-menu-cases" aria-label={t.casesAria}>
+              {CASES.map((label, i) => (
+                <a key={label} href="#testimonios" className="nav-menu-link">
                   <span className="nm-ico"><i className="ri-home-smile-line"></i></span>
                   <span className="nm-text">
-                    <span className="nm-t">{c.label}</span>
-                    <span className="nm-s">{c.desc}</span>
+                    <span className="nm-t">{label}</span>
+                    <span className="nm-s">{t.caseDescs[i]}</span>
                   </span>
                 </a>
               ))}
             </div>
           </div>
 
-          <a href="#faq">QUIÉNES SOMOS</a>
+          <a href="#faq">{t.about}</a>
         </nav>
 
-        <div className="hdr-ctas">
-          {!loading && user ? (
-            <div className="hdr-user">
-              <span className="hdr-user-name">{(user.name || user.email).split(' ')[0]}</span>
-              <Link to="/plataforma" className="btn btn-sm btn-blue">MI ÁREA</Link>
-              {/* On phones only the icon shows (see .hdr-logout in app.css). */}
-              <button type="button" className="btn btn-sm btn-outline hdr-logout" onClick={logout} aria-label="Cerrar sesión">
-                <i className="ri-logout-box-r-line" aria-hidden="true"></i>
-                <span className="lbl-long">CERRAR SESIÓN</span>
-              </button>
-            </div>
-          ) : (
-            <>
-              <Link to="/auth" className="btn btn-sm btn-outline">
-                <span className="lbl-long">INICIA SESIÓN</span><span className="lbl-short">ENTRAR</span>
-              </Link>
-              <Link to="/registro" className="btn btn-sm btn-blue">REGÍSTRATE</Link>
-            </>
-          )}
+        <div className="hdr-right">
+          <LangSwitch />
+          <div className="hdr-ctas">
+            {!loading && user ? (
+              <div className="hdr-user">
+                <span className="hdr-user-name">{(user.name || user.email).split(' ')[0]}</span>
+                <Link to="/plataforma" className="btn btn-sm btn-blue">{t.myArea}</Link>
+                {/* On phones only the icon shows (see .hdr-logout in app.css). */}
+                <button type="button" className="btn btn-sm btn-outline hdr-logout" onClick={logout} aria-label={t.logoutAria}>
+                  <i className="ri-logout-box-r-line" aria-hidden="true"></i>
+                  <span className="lbl-long">{t.logout}</span>
+                </button>
+              </div>
+            ) : (
+              <>
+                <Link to="/auth" className="btn btn-sm btn-outline">
+                  <span className="lbl-long">{t.login}</span><span className="lbl-short">{t.loginShort}</span>
+                </Link>
+                <Link to="/registro" className="btn btn-sm btn-blue">{t.register}</Link>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </header>

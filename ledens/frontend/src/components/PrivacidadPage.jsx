@@ -1,22 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import Footer from './Footer.jsx';
+import { useI18n } from '../i18n/I18nContext.jsx';
+import useTocHighlight from './legal/useTocHighlight.js';
+import PrivacidadEn from './legal/PrivacidadEn.jsx';
 
-/* ── Scroll-spy hook ─────────────────────────────────────────────────────── */
-function useTocHighlight(ids) {
-  const [activeId, setActiveId] = useState(ids[0] || '');
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      entries => {
-        entries.forEach(e => { if (e.isIntersecting) setActiveId(e.target.id); });
-      },
-      { rootMargin: '-30% 0px -60% 0px' }
-    );
-    ids.forEach(id => { const el = document.getElementById(id); if (el) observer.observe(el); });
-    return () => observer.disconnect();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  return activeId;
-}
 
 const TOC = [
   { id: 'responsable',    label: 'Responsable del tratamiento' },
@@ -33,7 +21,13 @@ const TOC = [
   { id: 'cambios',        label: 'Cambios en esta política' },
 ];
 
+/* The English text lives in legal/PrivacidadEn.jsx — keep both in step. */
 export default function PrivacidadPage() {
+  const { lang } = useI18n();
+  return lang === 'en' ? <PrivacidadEn /> : <PrivacidadPageEs />;
+}
+
+function PrivacidadPageEs() {
   const activeId = useTocHighlight(TOC.map(t => t.id));
 
   return (
