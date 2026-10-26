@@ -9,6 +9,7 @@
     "migrate": "node src/db/migrate.js",
     "users": "node src/scripts/users.js",
     "presupuestos": "node src/scripts/presupuestos.js",
+    "schema": "node src/scripts/schema.js",
     "test": "node --test"
   },
   "dependencies": {

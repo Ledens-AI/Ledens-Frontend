@@ -180,6 +180,11 @@ Every user has one role in `users.role`; it decides what they get in `/plataform
   npm run users -- create <email> <role> <nombre completo>
   ```
   Every CLI change is also written to `audit_log` (actor "Sistema (consola)").
+- **Schema report** (`src/scripts/schema.js`): read-only Markdown dump of the real database structure — tables, columns, keys, relations, indexes, views, triggers; catalog only, never row data, inside a `READ ONLY` transaction. The accounting tables (documents, bank movements, cost/payment facts, projects) live in production but are **not defined in this repo**; anything built on them starts from this report:
+  ```bash
+  az containerapp exec -g rg-ledens -n ledens-backend --command "npm run -s schema"
+  npm run -s schema -- ledens            # only some schemas
+  ```
 - **Importing an already-approved budget** (`src/scripts/presupuestos.js`, `src/presupuestos/import.js`): `npm run presupuestos -- importar <fichero.json>` creates the presupuesto as approved, with its start date and, per line, the progress so far as the first production declaration (format in the script header; VAT-inclusive spreadsheet prices are converted to net with 6 decimals so totals match exactly). The file carries client data: keep it out of the repo; in production put it on the `/data` share, run the command through `az containerapp exec` and delete the file afterwards. The client account must exist (`npm run users -- create …`); an import never runs twice for the same client and title.
 
 ### Google &amp; Microsoft login (issues #11–12)
