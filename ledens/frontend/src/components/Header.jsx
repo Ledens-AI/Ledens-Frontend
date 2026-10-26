@@ -79,13 +79,17 @@ export default function Header() {
             <div className="hdr-user">
               <span className="hdr-user-name">{(user.name || user.email).split(' ')[0]}</span>
               <Link to="/plataforma" className="btn btn-sm btn-blue">MI ÁREA</Link>
-              <button type="button" className="btn btn-sm btn-outline" onClick={logout}>
-                CERRAR SESIÓN
+              {/* On phones only the icon shows (see .hdr-logout in app.css). */}
+              <button type="button" className="btn btn-sm btn-outline hdr-logout" onClick={logout} aria-label="Cerrar sesión">
+                <i className="ri-logout-box-r-line" aria-hidden="true"></i>
+                <span className="lbl-long">CERRAR SESIÓN</span>
               </button>
             </div>
           ) : (
             <>
-              <Link to="/auth" className="btn btn-sm btn-outline">INICIA SESIÓN</Link>
+              <Link to="/auth" className="btn btn-sm btn-outline">
+                <span className="lbl-long">INICIA SESIÓN</span><span className="lbl-short">ENTRAR</span>
+              </Link>
               <Link to="/registro" className="btn btn-sm btn-blue">REGÍSTRATE</Link>
             </>
           )}
