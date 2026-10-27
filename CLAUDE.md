@@ -329,6 +329,7 @@ DATABASE_URL=postgres://ledens:ledens_dev_password@localhost:5432/ledens npm tes
 | `ledens/infra/setup2.sh` | **Historical**, same reason as `setup.sh`. |
 | `ledens/infra/deploy-new-subscription.sh` | **Current.** Provisions the full stack from scratch in an empty subscription (`rg-ledens`, tagged `proyecto=ledens`) with cost guardrails: Log Analytics 0.5 GB/day cap, ACR Basic, 1–2 replicas, RG budget. Prints the two GitHub secrets at the end. This built what's running today. |
 | `ledens/infra/setup-database.sh` | **Current.** Adds PostgreSQL + Key Vault + the `id-ledens-backend` identity to `rg-ledens`, wires `DATABASE_URL`/`JWT_SECRET` into the Container App as secret references. Idempotent — safe to re-run. |
+| `ledens/infra/setup-capital-swa.sh` | **Current, not yet run.** Provisions a second Static Web App (`swa-ledens-capital`) in `rg-ledens` for the new `capital.ledens.es` business line, linking it to the *same* `ledens-backend` Container App (shared users/DB/API, no second backend). Prints the `AZURE_STATIC_WEB_APPS_API_TOKEN_CAPITAL` secret and the custom-domain CNAME to set up. Does not create the capital frontend app or its CI workflow — those come separately once this SWA exists. Idempotent — safe to re-run. |
 
 `deploy-new-subscription.sh` and `setup-database.sh` both auto-detect names dynamically (ACR login-server via `az acr list`, a deterministic suffix from the subscription id for globally-unique names) — no hardcoded values to go stale if the subscription changes again.
 
