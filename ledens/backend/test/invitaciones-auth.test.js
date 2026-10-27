@@ -139,6 +139,7 @@ test('with Google: the provider account must carry the invited email, and the li
   const me = await (await fetch(`${base}/api/auth/me`, { headers: { cookie: session } })).json();
   assert.equal(me.user.email, 'google.inv@auth.test');
   assert.equal(me.user.email_verified, true);
+  assert.equal(me.user.name, 'Gina', 'the provider name replaces the email standing in for one');
   assert.equal((await getPool().query("SELECT count(*)::int n FROM auth_identities ai JOIN users u ON u.id=ai.user_id WHERE u.email='google.inv@auth.test'")).rows[0].n, 1);
   assert.equal((await post('/api/invitaciones/aceptacion/consultar', { token })).status, 410, 'used');
 });

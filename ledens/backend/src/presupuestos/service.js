@@ -167,6 +167,8 @@ export class PresupuestosService {
       phase: this.phase(r, r.status), startDate: r.start_date, endDate: r.end_date,
       ...this.totals(r.base, r.optional, r.vat_rate),
       obra: obras.get(r.id) || null,
+      // A client invited to the obra (obra_clientes) sees it; only the titular decides.
+      decides: !this.isClient || r.client_id === this.user.id,
     }));
   }
 

@@ -154,7 +154,9 @@ test('the link: minted when the mail is claimed, only its hash stored, one use, 
   const seen = await new PresupuestosService(pool, { id: u.id, role: 'client' }).get(obraId);
   assert.equal(seen.can.decide, false);
   assert.equal(seen.can.comment, false);
-  assert.ok((await new PresupuestosService(pool, { id: u.id, role: 'client' }).list()).some((p) => p.id === obraId));
+  const row = (await new PresupuestosService(pool, { id: u.id, role: 'client' }).list()).find((p) => p.id === obraId);
+  assert.equal(row?.decides, false, 'listed, but not as waiting for their decision');
+  assert.equal((await new PresupuestosService(pool, { id: cliente.id, role: 'client' }).list()).find((p) => p.id === obraId).decides, true, 'the titular decides');
   await assert.rejects(new PresupuestosService(pool, { id: u.id, role: 'client' }).get(otraObraId), (e) => e.status === 404, 'not other obras');
 });
 
