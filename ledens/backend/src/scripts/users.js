@@ -53,7 +53,9 @@ const commands = {
     const name = nameParts.join(' ').trim();
     if (!email || !ROLES.includes(role) || !name) throw new Error(USAGE);
     const { rows } = await getPool().query(
-      'INSERT INTO users (email, name, role) VALUES ($1, $2, $3) RETURNING id, email, role',
+      // Staff created here count as registered; a client is pending until they get in (migration 024).
+      `INSERT INTO users (email, name, role, registered_at) VALUES ($1, $2, $3, CASE WHEN $3 = 'client' THEN NULL ELSE now() END)
+       RETURNING id, email, role`,
       [email.trim(), name, role],
     ).catch((err) => {
       throw err.code === '23505' ? new Error(`Ya existe una cuenta con el email ${email}`) : err;

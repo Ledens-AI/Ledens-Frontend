@@ -43,11 +43,25 @@ router.post('/register', async (req, res) => {
 
   try {
     const passwordHash = hashPassword(password);
-    const { rows } = await getPool().query(
-      'INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3) RETURNING id, email, name, role, created_at',
+    let user = (await getPool().query(
+      `INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3)
+       ON CONFLICT DO NOTHING RETURNING id, email, name, role, created_at`,
       [email.trim(), name.trim(), passwordHash],
-    );
-    const user = rows[0];
+    )).rows[0];
+    // The email belongs to a client the team invited or chose for an obra who
+    // never registered (migration 024): this registration takes that row, so
+    // the obra is waiting for them, but held — typing an email proves nothing,
+    // so they see no obra until the invitation link or a Google/Microsoft login
+    // proves it. Same answer as any registration either way.
+    if (!user) {
+      user = (await getPool().query(
+        `UPDATE users SET name = $2, password_hash = $3, access_held = true, registered_at = now(), updated_at = now()
+          WHERE lower(email) = lower($1) AND registered_at IS NULL
+          RETURNING id, email, name, role, created_at`,
+        [email.trim(), name.trim(), passwordHash],
+      )).rows[0];
+    }
+    if (!user) return res.status(409).json({ error: 'Ese email ya está registrado' });
     const { token } = await createSession(user.id, { userAgent: req.get('user-agent'), ip: req.ip });
     res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
     res.status(201).json({ user });

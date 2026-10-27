@@ -17,6 +17,9 @@ export async function createSession(userId, { userAgent, ip } = {}) {
     'INSERT INTO sessions (user_id, token_hash, expires_at, user_agent, ip) VALUES ($1, $2, $3, $4, $5)',
     [userId, hashToken(token), expiresAt, userAgent || null, ip || null],
   );
+  // The first session is what makes an account registered (migration 024): a
+  // client the team invited or chose for an obra isn't until they get in.
+  await getPool().query('UPDATE users SET registered_at = now() WHERE id = $1 AND registered_at IS NULL', [userId]);
   return { token, expiresAt };
 }
 

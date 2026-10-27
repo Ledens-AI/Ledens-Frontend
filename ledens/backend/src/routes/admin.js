@@ -18,7 +18,7 @@ router.use(requireRole('admin'));
 // last_seen comes from sessions.created_at (a login), which is what the
 // admin screen calls "último acceso".
 const USERS_SQL = `
-  SELECT u.id, u.email, u.name, u.role, u.email_verified, u.created_at,
+  SELECT u.id, u.email, u.name, u.role, u.email_verified, u.created_at, u.registered_at,
          (u.password_hash IS NOT NULL) AS has_password,
          COALESCE(array_agg(DISTINCT i.provider) FILTER (WHERE i.provider IS NOT NULL), '{}') AS providers,
          (SELECT max(s.created_at) FROM sessions s WHERE s.user_id = u.id) AS last_seen

@@ -35,7 +35,7 @@ before(async () => {
   pool = { query: (...a) => db.query(...a), connect: async () => ({ query: (...a) => db.query(...a), release() {} }) };
   await db.exec(`
     CREATE TABLE users(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), email text NOT NULL, name text NOT NULL, password_hash text,
-      email_verified boolean NOT NULL DEFAULT false, role text NOT NULL DEFAULT 'client', created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
+      email_verified boolean NOT NULL DEFAULT false, role text NOT NULL DEFAULT 'client', access_held boolean NOT NULL DEFAULT false, registered_at timestamptz, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
     CREATE UNIQUE INDEX users_email_lower_key ON users (lower(email));
     CREATE TABLE auth_identities(id bigint GENERATED ALWAYS AS IDENTITY, user_id uuid REFERENCES users(id) ON DELETE CASCADE, provider text, provider_user_id text);
     CREATE TABLE sessions(id bigint GENERATED ALWAYS AS IDENTITY, user_id uuid REFERENCES users(id) ON DELETE CASCADE, token_hash text);

@@ -16,7 +16,7 @@ import { AlertService } from '../src/notifications/service.js';
 // with Google — ending in a session, a verified email and the obra in sight.
 const skip = !isDbConfigured() && 'DATABASE_URL not set — start the local db to run these';
 const ORIGIN = 'http://ledens.local';
-const EMAILS = ['jefe.inv@auth.test', 'admin.inv@auth.test', 'titular.inv@auth.test', 'clave.inv@auth.test', 'google.inv@auth.test'];
+const EMAILS = ['jefe.inv@auth.test', 'admin.inv@auth.test', 'titular.inv@auth.test', 'clave.inv@auth.test', 'google.inv@auth.test', 'registro.inv@auth.test'];
 let server, base, google, googleBase, obraId, nextUserinfo;
 
 const cookieFrom = (res, name) => (res.headers.getSetCookie?.() || []).find((c) => c.startsWith(`${name}=`))?.split(';')[0] || null;
@@ -76,10 +76,11 @@ test('a jefe invites, the client sets a password through the link and lands with
   assert.equal((await post(`/api/invitaciones/obras/${obraId}`, { email: 'clave.inv@auth.test' })).status, 401, 'logged out');
   const r = await post(`/api/invitaciones/obras/${obraId}`, { email: 'clave.inv@auth.test', name: 'Clara' }, jefe);
   assert.equal(r.status, 201);
-  const created = (await getPool().query("SELECT role, password_hash, email_verified FROM users WHERE email='clave.inv@auth.test'")).rows[0];
-  assert.deepEqual(created, { role: 'client', password_hash: null, email_verified: false });
-  // No password yet: nobody can log in with one, nor register the email.
-  assert.equal((await post('/api/auth/register', { name: 'X', email: 'clave.inv@auth.test', password: 'cualquiera-123' })).status, 409);
+  const created = (await getPool().query("SELECT role, password_hash, email_verified, registered_at FROM users WHERE email='clave.inv@auth.test'")).rows[0];
+  assert.deepEqual(created, { role: 'client', password_hash: null, email_verified: false, registered_at: null }, 'invited is not registered');
+  // No password yet: nobody can log in with one (registering it on their own
+  // is the next test: the row is taken, held until the link).
+  assert.equal((await post('/api/auth/login', { email: 'clave.inv@auth.test', password: 'cualquiera-123' })).status, 401);
 
   const token = await linkFor('clave.inv@auth.test');
   const info = await (await post('/api/invitaciones/aceptacion/consultar', { token })).json();
@@ -94,6 +95,7 @@ test('a jefe invites, the client sets a password through the link and lands with
   const me = await (await fetch(`${base}/api/auth/me`, { headers: { cookie: session } })).json();
   assert.equal(me.user.email_verified, true);
   assert.equal(me.user.role, 'client');
+  assert.ok((await getPool().query("SELECT registered_at FROM users WHERE email='clave.inv@auth.test'")).rows[0].registered_at, 'registered once they get in');
   const list = await (await fetch(`${base}/api/presupuestos`, { headers: { cookie: session } })).json();
   assert.ok(list.presupuestos.some((p) => p.id === obraId), 'the obra is in their area');
   assert.equal((await post('/api/invitaciones/aceptacion/contrasena', { token, password: 'otra-vez-123' })).status, 410, 'one use');
@@ -142,6 +144,25 @@ test('with Google: the provider account must carry the invited email, and the li
   assert.equal(me.user.name, 'Gina', 'the provider name replaces the email standing in for one');
   assert.equal((await getPool().query("SELECT count(*)::int n FROM auth_identities ai JOIN users u ON u.id=ai.user_id WHERE u.email='google.inv@auth.test'")).rows[0].n, 1);
   assert.equal((await post('/api/invitaciones/aceptacion/consultar', { token })).status, 410, 'used');
+});
+
+test('registering on their own with the invited email takes the pending row, but shows no obra until the link proves the email', { skip }, async () => {
+  const jefe = await jefeCookie();
+  assert.equal((await post(`/api/invitaciones/obras/${obraId}`, { email: 'registro.inv@auth.test' }, jefe)).status, 201);
+  const reg = await post('/api/auth/register', { name: 'Rita Registro', email: 'registro.inv@auth.test', password: 'tecleada-sin-probar' });
+  assert.equal(reg.status, 201, 'same answer as any registration');
+  const held = cookieFrom(reg, 'ledens_session');
+  const list = await (await fetch(`${base}/api/presupuestos`, { headers: { cookie: held } })).json();
+  assert.ok(!list.presupuestos.some((p) => p.id === obraId), 'typing an email proves nothing: no obra yet');
+  assert.equal((await post('/api/auth/register', { name: 'Otra', email: 'registro.inv@auth.test', password: 'otra-mas-123' })).status, 409, 'registered now');
+
+  const token = await linkFor('registro.inv@auth.test');
+  assert.equal((await (await post('/api/invitaciones/aceptacion/consultar', { token })).json()).hasPassword, false, 'an unproven password does not count');
+  const accepted = await post('/api/invitaciones/aceptacion/contrasena', { token, password: 'la-buena-de-rita' });
+  assert.equal(accepted.status, 200);
+  assert.equal((await fetch(`${base}/api/auth/me`, { headers: { cookie: held } })).status, 401, 'the session of the unproven registration is closed');
+  const now = await (await fetch(`${base}/api/presupuestos`, { headers: { cookie: cookieFrom(accepted, 'ledens_session') } })).json();
+  assert.ok(now.presupuestos.some((p) => p.id === obraId), 'the link proves the email: the obra is there');
 });
 
 test('a client never reaches the team routes', { skip }, async () => {
