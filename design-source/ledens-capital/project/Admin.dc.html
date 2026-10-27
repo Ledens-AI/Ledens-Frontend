@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Back-office · Ledens Capital</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&amp;family=Manrope:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#5567ae}a:hover{color:#3e4d85}
+</style>
+</helmet>
+<div style="font-family: 'DM Sans', system-ui, sans-serif; color: #1d1d1b; background: #f7f7f5; min-height: 100vh; display: flex; flex-wrap: wrap;">
+
+  <aside style="flex: 1 1 248px; max-width: 100%; box-sizing: border-box; background: #161615; color: #e6e6e6; padding: 28px 16px; display: flex; flex-direction: column; gap: 28px;">
+    <div style="display: flex; flex-direction: column; gap: 8px; padding: 0 12px;">
+      <div style="display: flex; align-items: baseline; gap: 10px;"><span style="font-size: 30px; font-weight: 700; letter-spacing: -0.07em; color: #ffffff;">Ledens</span><span style="font-family: Manrope, sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 0.4em; color: #b8975a;">CAPITAL</span></div>
+      <span style="align-self: flex-start; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; background: #4a2433; color: #f398b7;">Back-office</span>
+    </div>
+    <nav aria-label="Back-office" style="display: flex; flex-direction: column; gap: 2px;">
+      <a href="Admin.dc.html" aria-current="page" style="padding: 11px 12px; border-radius: 8px; background: #262624; color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 600;">Panel operativo</a>
+      <a href="#solicitudes" style="padding: 11px 12px; border-radius: 8px; color: #bbb9ba; text-decoration: none; font-size: 14px;">Solicitudes y asignaciones</a>
+      <a href="#inversores" style="padding: 11px 12px; border-radius: 8px; color: #bbb9ba; text-decoration: none; font-size: 14px;">Inversores</a>
+      <a href="#operaciones" style="padding: 11px 12px; border-radius: 8px; color: #bbb9ba; text-decoration: none; font-size: 14px;">Operaciones</a>
+      <a href="#" style="padding: 11px 12px; border-radius: 8px; color: #bbb9ba; text-decoration: none; font-size: 14px;">Distribuciones</a>
+      <a href="#" style="padding: 11px 12px; border-radius: 8px; color: #bbb9ba; text-decoration: none; font-size: 14px;">Informes</a>
+      <a href="#auditoria" style="padding: 11px 12px; border-radius: 8px; color: #bbb9ba; text-decoration: none; font-size: 14px;">Auditoría</a>
+    </nav>
+    <div style="margin-top: auto; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08);">
+        <span style="font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #8f8e8e;">Vista previa de rol</span>
+        <div style="display: flex; gap: 4px; padding: 3px; border-radius: 8px; background: #1d1d1b;">
+          <a href="Dashboard.dc.html" style="flex: 1; text-align: center; padding: 8px; border-radius: 6px; color: #bbb9ba; text-decoration: none; font-size: 12px;">Inversor</a>
+          <a href="Admin.dc.html" style="flex: 1; text-align: center; padding: 8px; border-radius: 6px; background: #262624; color: #ffffff; text-decoration: none; font-size: 12px; font-weight: 600;">Administración</a>
+        </div>
+      </div>
+      <div style="padding: 0 12px; display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13px; color: #ffffff; font-weight: 600;">Responsable de inversiones</span><span style="font-size: 11px; color: #8f8e8e;">Sesión de administración · caduca en 14 min</span></div>
+    </div>
+  </aside>
+
+  <main style="flex: 999 1 560px; min-width: 0; padding: 40px 40px 72px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px; max-width: 1280px;">
+    <header style="display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap;">
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #5567ae;">Panel operativo</span>
+        <h1 style="margin: 0; font-size: 44px; line-height: 1.02; letter-spacing: -0.02em; color: #0c062b;">Capital bajo gestión</h1>
+      </div>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <button type="button" style="font: inherit; font-size: 14px; font-weight: 600; padding: 0 16px; min-height: 44px; border-radius: 8px; border: 1px solid rgba(12,6,43,0.12); background: #ffffff; color: #0c062b; cursor: pointer;">Invitar inversor</button>
+        <button type="button" style="font: inherit; font-size: 14px; font-weight: 600; padding: 0 16px; min-height: 44px; border-radius: 8px; border: 0; background: #5567ae; color: #ffffff; cursor: pointer;">Nueva operación</button>
+      </div>
+    </header>
+
+    <section style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px;">
+      <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 6px;"><span style="font-size: 13px; color: #3a3a38;">Capital comprometido</span><span style="font-family: Manrope, sans-serif; font-size: 26px; font-weight: 600; color: #0c062b;">630.000 €</span><span style="font-size: 12px; color: #6b6b68;">Contratos firmados · 4 operaciones</span></div>
+      <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 6px;"><span style="font-size: 13px; color: #3a3a38;">Fondos confirmados</span><span style="font-family: Manrope, sans-serif; font-size: 26px; font-weight: 600; color: #0c062b;">505.000 €</span><span style="font-size: 12px; color: #6b6b68;">Conciliados en cuentas segregadas</span></div>
+      <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 6px;"><span style="font-size: 13px; color: #3a3a38;">Pendiente de desembolso</span><span style="font-family: Manrope, sans-serif; font-size: 26px; font-weight: 600; color: #0c062b;">125.000 €</span><span style="font-size: 12px; color: #6b6b68;">Marbella 100.000 € · Nerja 25.000 €</span></div>
+      <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 6px;"><span style="font-size: 13px; color: #3a3a38;">Desviación de coste</span><span style="font-family: Manrope, sans-serif; font-size: 26px; font-weight: 600; color: #8b2a2a;">+3,1 %</span><span style="font-size: 12px; color: #6b6b68;">Mijas Costa · dentro de contingencia</span></div>
+      <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 6px;"><span style="font-size: 13px; color: #3a3a38;">Distribuciones a pagar</span><span style="font-family: Manrope, sans-serif; font-size: 26px; font-weight: 600; color: #0c062b;">2.400 €</span><span style="font-size: 12px; color: #6b6b68;">Málaga Centro T4 · 05/01/2027</span></div>
+    </section>
+
+    <section id="solicitudes" style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px;">
+      <div style="padding: 20px 24px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid #ededea;">
+        <div style="display: flex; flex-direction: column; gap: 2px;"><h2 style="margin: 0; font-size: 17px; color: #0c062b;">Solicitudes pendientes</h2><span style="font-size: 12px; color: #6b6b68;">Toda aprobación necesita una segunda firma de Cumplimiento</span></div>
+        <span style="font-family: Manrope, sans-serif; font-size: 13px; color: #3a3a38;">{{pending}} por revisar</span>
+      </div>
+      <div style="overflow-x: auto;">
+        <table style="width: 100%; min-width: 960px; border-collapse: collapse; font-size: 14px;">
+          <thead><tr style="text-align: left; background: #f7f7f5;">
+            <th style="padding: 12px 24px; font-size: 12px; font-weight: 600; color: #6b6b68;">Inversor</th>
+            <th style="padding: 12px; font-size: 12px; font-weight: 600; color: #6b6b68;">Operación</th>
+            <th style="padding: 12px; font-size: 12px; font-weight: 600; color: #6b6b68; text-align: right;">Solicitado</th>
+            <th style="padding: 12px; font-size: 12px; font-weight: 600; color: #6b6b68;">KYC</th>
+            <th style="padding: 12px; font-size: 12px; font-weight: 600; color: #6b6b68;">Estado</th>
+            <th style="padding: 12px 24px; font-size: 12px; font-weight: 600; color: #6b6b68; text-align: right;">Acción</th>
+          </tr></thead>
+          <tbody>
+            <sc-for list="{{reqs}}" as="r" hint-placeholder-count="4">
+              <tr style="border-top: 1px solid #ededea;">
+                <td style="padding: 14px 24px;"><div style="display: flex; flex-direction: column; gap: 2px;"><strong style="color: #0c062b;">{{r.name}}</strong><span style="font-size: 12px; color: #6b6b68;">{{r.type}}</span></div></td>
+                <td style="padding: 14px 12px; color: #3a3a38;">{{r.op}}</td>
+                <td style="padding: 14px 12px; text-align: right; font-family: Manrope, sans-serif; color: #0c062b;">{{r.amt}}</td>
+                <td style="padding: 14px 12px;"><span style="{{r.kycStyle}}">{{r.kyc}}</span></td>
+                <td style="padding: 14px 12px;"><span style="{{r.stStyle}}">{{r.st}}</span></td>
+                <td style="padding: 14px 24px; text-align: right;">
+                  <sc-if value="{{r.open}}" hint-placeholder-val="{{true}}">
+                    <div style="display: inline-flex; gap: 6px;">
+                      <button type="button" onClick="{{r.reject}}" style="font: inherit; font-size: 13px; font-weight: 600; padding: 0 12px; min-height: 36px; border-radius: 8px; border: 1px solid rgba(12,6,43,0.12); background: #ffffff; color: #8b2a2a; cursor: pointer;">Rechazar</button>
+                      <button type="button" onClick="{{r.approve}}" style="font: inherit; font-size: 13px; font-weight: 600; padding: 0 12px; min-height: 36px; border-radius: 8px; border: 0; background: #5567ae; color: #ffffff; cursor: pointer;">{{r.approveLabel}}</button>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{r.closed}}" hint-placeholder-val="{{false}}"><button type="button" onClick="{{r.undo}}" style="font: inherit; font-size: 13px; padding: 0 10px; min-height: 36px; border: 0; background: transparent; color: #5567ae; cursor: pointer;">Deshacer (demo)</button></sc-if>
+                </td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="operaciones" style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px;">
+      <div style="padding: 20px 24px; border-bottom: 1px solid #ededea;"><h2 style="margin: 0; font-size: 17px; color: #0c062b;">Operaciones · captación y presupuesto</h2></div>
+      <div style="overflow-x: auto;">
+        <table style="width: 100%; min-width: 980px; border-collapse: collapse; font-size: 14px;">
+          <thead><tr style="text-align: left; background: #f7f7f5;">
+            <th style="padding: 12px 24px; font-size: 12px; font-weight: 600; color: #6b6b68;">Operación</th>
+            <th style="padding: 12px; font-size: 12px; font-weight: 600; color: #6b6b68;">Captación de partícipes</th>
+            <th style="padding: 12px; font-size: 12px; font-weight: 600; color: #6b6b68; text-align: right;">Presupuesto</th>
+            <th style="padding: 12px; font-size: 12px; font-weight: 600; color: #6b6b68; text-align: right;">Coste real + previsto</th>
+            <th style="padding: 12px; font-size: 12px; font-weight: 600; color: #6b6b68; text-align: right;">Resultado previsto</th>
+            <th style="padding: 12px 24px; font-size: 12px; font-weight: 600; color: #6b6b68;">Plan</th>
+          </tr></thead>
+          <tbody>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 14px 24px;"><strong style="color: #0c062b;">Marbella Golden Mile</strong><div style="font-size: 12px; color: #6b6b68;">Abierta a compromisos</div></td><td style="padding: 14px 12px;"><div style="display: flex; flex-direction: column; gap: 6px; width: 220px;"><div style="display: flex; height: 6px; border-radius: 999px; overflow: hidden; background: #ededea;"><div style="width: 50%; background: #0c062b;"></div><div style="width: 12.5%; background: #5567ae;"></div><div style="width: 15%; background: #aab3d6;"></div></div><span style="font-family: Manrope, sans-serif; font-size: 12px; color: #3a3a38;">125.000 / 200.000 €</span></div></td><td style="padding: 14px 12px; text-align: right; font-family: Manrope, sans-serif;">340.000 €</td><td style="padding: 14px 12px; text-align: right; font-family: Manrope, sans-serif;">340.000 €</td><td style="padding: 14px 12px; text-align: right; font-family: Manrope, sans-serif;">70.000 €</td><td style="padding: 14px 24px; font-size: 13px; color: #3a3a38;">v3 · aprobado 14/10</td></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 14px 24px;"><strong style="color: #0c062b;">Mijas Costa</strong><div style="font-size: 12px; color: #6b6b68;">En ejecución · 64 %</div></td><td style="padding: 14px 12px;"><div style="display: flex; flex-direction: column; gap: 6px; width: 220px;"><div style="height: 6px; border-radius: 999px; background: #0c062b;"></div><span style="font-family: Manrope, sans-serif; font-size: 12px; color: #3a3a38;">150.000 / 150.000 €</span></div></td><td style="padding: 14px 12px; text-align: right; font-family: Manrope, sans-serif;">270.000 €</td><td style="padding: 14px 12px; text-align: right; font-family: Manrope, sans-serif; color: #8b2a2a;">271.100 €</td><td style="padding: 14px 12px; text-align: right; font-family: Manrope, sans-serif;">58.900 €</td><td style="padding: 14px 24px; font-size: 13px; color: #3a3a38;">v5 · reprevisión 20/10</td></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 14px 24px;"><strong style="color: #0c062b;">Málaga Centro</strong><div style="font-size: 12px; color: #6b6b68;">En explotación</div></td><td style="padding: 14px 12px;"><div style="display: flex; flex-direction: column; gap: 6px; width: 220px;"><div style="height: 6px; border-radius: 999px; background: #0c062b;"></div><span style="font-family: Manrope, sans-serif; font-size: 12px; color: #3a3a38;">120.000 / 120.000 €</span></div></td><td style="padding: 14px 12px; text-align: right; font-family: Manrope, sans-serif;">225.000 €</td><td style="padding: 14px 12px; text-align: right; font-family: Manrope, sans-serif;">224.300 €</td><td style="padding: 14px 12px; text-align: right; font-size: 13px; color: #3a3a38;">Renta neta 18.000 €/año</td><td style="padding: 14px 24px; font-size: 13px; color: #3a3a38;">v4 · 30/09</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px;">
+      <section id="inversores" style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 20px 24px; display: flex; flex-direction: column; gap: 4px;">
+        <h2 style="margin: 0 0 12px; font-size: 17px; color: #0c062b;">Inversores · verificación</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-top: 1px solid #ededea; font-size: 14px;"><span style="color: #0c062b;">Carmen Ortega</span><span style="padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #eef9f7; color: #1f4d47;">Miembro aprobado</span></div>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-top: 1px solid #ededea; font-size: 14px;"><span style="color: #0c062b;">Iberhold Patrimonio, S.L.</span><span style="padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #fff7e0; color: #8a6a00;">Titular real pendiente</span></div>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-top: 1px solid #ededea; font-size: 14px;"><span style="color: #0c062b;">Javier Molina</span><span style="padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #fff7e0; color: #8a6a00;">Aprobación pendiente</span></div>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-top: 1px solid #ededea; font-size: 14px;"><span style="color: #0c062b;">Lucía Ferrer</span><span style="padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #f2f4fa; color: #0c062b;">Invitación enviada</span></div>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-top: 1px solid #ededea; font-size: 14px;"><span style="color: #0c062b;">Henrik Dahl</span><span style="padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #ededea; color: #3a3a38;">Invitación caducada</span></div>
+      </section>
+      <section id="auditoria" style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 20px 24px; display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;"><h2 style="margin: 0; font-size: 17px; color: #0c062b;">Auditoría</h2><span style="font-size: 12px; color: #6b6b68;">Inmutable · solo lectura</span></div>
+        <sc-for list="{{audit}}" as="a" hint-placeholder-count="5">
+          <div style="display: flex; gap: 14px; padding: 11px 0; border-top: 1px solid #ededea; font-size: 13px;"><span style="width: 92px; flex-shrink: 0; font-family: Manrope, sans-serif; color: #6b6b68;">{{a.t}}</span><span style="color: #3a3a38;">{{a.msg}}</span></div>
+        </sc-for>
+      </section>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1800}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { st: { a: 'open', b: 'first', c: 'open', d: 'open' }, log: [] };
+  }
+  renderVals() {
+    const st = this.state.st;
+    const pill = (bg, fg) => 'padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; background: ' + bg + '; color: ' + fg + ';';
+    const base = [
+      { id: 'a', name: 'Javier Molina', type: 'Persona física', op: 'Marbella Golden Mile', amt: '30.000 €', kyc: 'Verificado', kycStyle: pill('#eef9f7', '#1f4d47') },
+      { id: 'b', name: 'Iberhold Patrimonio, S.L.', type: 'Persona jurídica', op: 'Fuengirola Los Boliches', amt: '60.000 €', kyc: 'Titular real pendiente', kycStyle: pill('#fff7e0', '#8a6a00') },
+      { id: 'c', name: 'Carmen Ortega', type: 'Persona física', op: 'Fuengirola Los Boliches', amt: '25.000 €', kyc: 'Verificado', kycStyle: pill('#eef9f7', '#1f4d47') },
+      { id: 'd', name: 'Teresa Lobo', type: 'Persona física', op: 'Fuengirola Los Boliches', amt: '40.000 €', kyc: 'Verificado', kycStyle: pill('#eef9f7', '#1f4d47') }
+    ];
+    const label = { open: ['En revisión', pill('#f2f4fa', '#0c062b')], first: ['1.ª firma · falta Cumplimiento', pill('#fff7e0', '#8a6a00')], ok: ['Asignación aprobada', pill('#eef9f7', '#1f4d47')], no: ['Rechazada', pill('#fef6f6', '#8b2a2a')] };
+    const now = '27/10 12:' + String(10 + this.state.log.length).padStart(2, '0');
+    const setSt = (id, v, msg) => this.setState({ st: { ...st, [id]: v }, log: [{ t: now, msg }].concat(this.state.log) });
+    const reqs = base.map((r) => {
+      const s = st[r.id];
+      return {
+        ...r, st: label[s][0], stStyle: label[s][1], open: s === 'open' || s === 'first', closed: s === 'ok' || s === 'no',
+        approveLabel: s === 'first' ? 'Segunda firma' : 'Aprobar (1.ª firma)',
+        approve: () => setSt(r.id, s === 'first' ? 'ok' : 'first', (s === 'first' ? 'Cumplimiento aprueba la asignación de ' : 'Inversiones firma la asignación de ') + r.amt + ' · ' + r.name),
+        reject: () => setSt(r.id, 'no', 'Solicitud rechazada · ' + r.name + ' · ' + r.op),
+        undo: () => setSt(r.id, 'open', 'Revertido en demo · ' + r.name)
+      };
+    });
+    const audit = this.state.log.concat([
+      { t: '27/10 09:12', msg: 'Plan financiero Marbella v3 consultado por Finanzas' },
+      { t: '26/10 18:40', msg: 'Conciliación: 30.000 € · Mijas Costa · ref. LC05-009' },
+      { t: '26/10 11:03', msg: 'Reprevisión de coste Mijas v5 (+1.100 €) aprobada' },
+      { t: '25/10 16:22', msg: 'Invitación enviada a Lucía Ferrer' },
+      { t: '24/10 10:05', msg: 'Instrucciones de pago verificadas · Marbella · C. Ortega' }
+    ]).slice(0, 7);
+    return { reqs, audit, pending: reqs.filter((r) => r.open).length };
+  }
+}
+</script>
+</body>
+</html>

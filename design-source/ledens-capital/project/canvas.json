@@ -1,0 +1,27 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-10-27T10:00:00Z"},
+  "title": "Ledens Capital",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 2300, "title": "01 · Dirección visual y componentes", "expand": "fill"},
+    "Arquitectura.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 2300, "title": "02 · Arquitectura de producto y roadmap", "expand": "fill"},
+    "Dashboard.dc.html": {"x": 0, "y": 2700, "w": 1440, "h": 2000, "title": "03 · Panel del inversor", "expand": "fill", "is_interactive": true},
+    "Oportunidades.dc.html": {"x": 1520, "y": 2700, "w": 1440, "h": 1800, "title": "04 · Oportunidades de inversión", "expand": "fill", "is_interactive": true},
+    "Proyecto.dc.html": {"x": 3040, "y": 2700, "w": 1440, "h": 3600, "title": "05 · Proyecto · Marbella Golden Mile", "expand": "fill", "is_interactive": true},
+    "Simulador.dc.html": {"x": 4560, "y": 2700, "w": 1440, "h": 1700, "title": "06 · Simulador avanzado", "expand": "fill", "is_interactive": true},
+    "Acceso.dc.html": {"x": 0, "y": 6700, "w": 1440, "h": 1900, "title": "07 · Acceso privado e invitación", "expand": "fill"},
+    "Compromiso.dc.html": {"x": 1520, "y": 6700, "w": 1440, "h": 1500, "title": "08 · Proceso de compromiso", "expand": "fill", "is_interactive": true},
+    "Admin.dc.html": {"x": 3040, "y": 6700, "w": 1440, "h": 1800, "title": "09 · Back-office · Capital", "expand": "fill", "is_interactive": true}
+  },
+  "order": ["Main.dc.html", "Arquitectura.dc.html", "Dashboard.dc.html", "Oportunidades.dc.html", "Proyecto.dc.html", "Simulador.dc.html", "Acceso.dc.html", "Compromiso.dc.html", "Admin.dc.html"],
+  "notes": {
+    "rowA": {"x": 0, "y": -280, "text": "Ledens Capital · dirección y arquitectura", "kind": "title1", "maxW": 2960},
+    "rowB": {"x": 0, "y": 2420, "text": "Pantallas prioritarias · panel, oportunidades, proyecto y simulador", "kind": "title1", "maxW": 6000},
+    "rowC": {"x": 0, "y": 6420, "text": "Acceso, compromiso y administración", "kind": "title1", "maxW": 4480}
+  },
+  "designSystems": [
+    {"title": "Ledens Design System", "namespace": "ledens", "artifact": "https://claude.ai/code/artifact/2c146412-b369-4133-aeee-d6599ca01e59", "version": "1793096383-33d5", "copiedAt": "2026-10-27T10:00:00Z"}
+  ]
+}

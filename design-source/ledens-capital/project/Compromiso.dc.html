@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Proceso de compromiso</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&amp;family=Manrope:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#5567ae}a:hover{color:#3e4d85}
+</style>
+</helmet>
+<div style="font-family: 'DM Sans', system-ui, sans-serif; color: #1d1d1b; background: #f7f7f5; min-height: 100vh;">
+  <div style="background: #1d1d1b; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;">
+    <a href="Dashboard.dc.html" style="display: flex; align-items: baseline; gap: 10px; text-decoration: none;">
+      <span style="font-size: 24px; font-weight: 700; letter-spacing: -0.07em; color: #ffffff;">Ledens</span>
+      <span style="font-family: Manrope, sans-serif; font-size: 10px; font-weight: 500; letter-spacing: 0.4em; color: #b8975a;">CAPITAL</span>
+    </a>
+    <a href="Proyecto.dc.html" style="font-size: 13px; color: #aab3d6;">Salir y volver al proyecto</a>
+  </div>
+  <div style="background: #fff7e0; border-bottom: 1px solid rgba(138,106,0,0.25); padding: 10px 24px; font-size: 13px; color: #8a6a00;"><strong>Recorrido de demostración.</strong> No es una inversión real, ni una firma legal, ni un pago.</div>
+
+  <div style="max-width: 1240px; margin: 0 auto; padding: 40px 24px 80px; display: flex; flex-direction: column; gap: 28px;">
+    <header style="display: flex; flex-direction: column; gap: 10px;">
+      <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #5567ae;">Marbella Golden Mile · LC-2026-07</span>
+      <h1 style="margin: 0; font-size: 44px; line-height: 1.02; letter-spacing: -0.02em; color: #0c062b;">Solicitud de participación</h1>
+    </header>
+
+    <section aria-label="Estado de tu participación" style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 18px 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px;">
+      <sc-for list="{{ledger}}" as="l" hint-placeholder-count="5">
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <span style="font-size: 12px; color: #6b6b68;">{{l.label}}</span>
+          <span style="{{l.style}}">{{l.value}}</span>
+        </div>
+      </sc-for>
+    </section>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;">
+      <nav aria-label="Etapas" style="flex: 1 1 260px; min-width: 0; background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 18px; padding: 12px;">
+        <ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px;">
+          <sc-for list="{{stages}}" as="st" hint-placeholder-count="9">
+            <li><button type="button" onClick="{{st.go}}" disabled="{{st.locked}}" aria-current="{{st.cur}}" style="{{st.style}}"><span style="{{st.dot}}">{{st.mark}}</span><span style="display: flex; flex-direction: column; gap: 1px; text-align: left;"><span style="font-size: 14px;">{{st.name}}</span><span style="font-size: 11px; color: #6b6b68;">{{st.who}}</span></span></button></li>
+          </sc-for>
+        </ol>
+      </nav>
+
+      <section style="flex: 3 1 560px; min-width: 0; background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 18px; padding: 32px; display: flex; flex-direction: column; gap: 22px;">
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <span style="font-family: Manrope, sans-serif; font-size: 13px; color: #6b6b68;">Etapa {{num}} de 9</span>
+          <h2 style="margin: 0; font-size: 26px; letter-spacing: -0.02em; color: #0c062b;">{{title}}</h2>
+        </div>
+
+        <sc-if value="{{s1}}" hint-placeholder-val="{{true}}">
+          <p style="margin: 0; font-size: 15px; line-height: 1.6; color: #3a3a38;">Propón el importe que quieres aportar. Es una solicitud: la asignación final depende de la disponibilidad y de la revisión de Ledens.</p>
+          <div role="group" aria-label="Importe" style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <sc-for list="{{amounts}}" as="a" hint-placeholder-count="4"><button type="button" onClick="{{a.pick}}" aria-pressed="{{a.on}}" style="{{a.style}}">{{a.label}}</button></sc-for>
+          </div>
+          <span style="font-size: 13px; color: #6b6b68;">Disponible: 45.000 € · mínimo 25.000 € · ya tienes 25.000 € firmados en esta operación.</span>
+        </sc-if>
+
+        <sc-if value="{{s2}}" hint-placeholder-val="{{false}}">
+          <dl style="margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1px; background: #ededea; border: 1px solid #ededea; border-radius: 12px; overflow: hidden;">
+            <div style="background: #ffffff; padding: 16px;"><dt style="font-size: 12px; color: #6b6b68;">Instrumento</dt><dd style="margin: 4px 0 0; font-size: 14px; color: #0c062b;">Cuentas en participación (arts. 239–243 CCom)</dd></div>
+            <div style="background: #ffffff; padding: 16px;"><dt style="font-size: 12px; color: #6b6b68;">Gestor</dt><dd style="margin: 4px 0 0; font-size: 14px; color: #0c062b;">Ledens Marbella I, S.L.</dd></div>
+            <div style="background: #ffffff; padding: 16px;"><dt style="font-size: 12px; color: #6b6b68;">Estructura de distribución</dt><dd style="margin: 4px 0 0; font-size: 14px; color: #0c062b;">Umbral 8 % anual simple · 80/20 sobre el exceso</dd></div>
+            <div style="background: #ffffff; padding: 16px;"><dt style="font-size: 12px; color: #6b6b68;">Duración prevista</dt><dd style="margin: 4px 0 0; font-size: 14px; color: #0c062b;">12 meses · prórroga de hasta 12 meses</dd></div>
+            <div style="background: #ffffff; padding: 16px;"><dt style="font-size: 12px; color: #6b6b68;">Transmisibilidad</dt><dd style="margin: 4px 0 0; font-size: 14px; color: #0c062b;">No transmisible sin consentimiento del gestor</dd></div>
+            <div style="background: #ffffff; padding: 16px;"><dt style="font-size: 12px; color: #6b6b68;">Titularidad del inmueble</dt><dd style="margin: 4px 0 0; font-size: 14px; color: #0c062b;">Del gestor. El partícipe no es propietario ni socio.</dd></div>
+          </dl>
+          <div style="display: flex; gap: 10px; padding: 12px 14px; border-radius: 10px; background: #fff7e0; border: 1px solid rgba(138,106,0,0.25); font-size: 13px; line-height: 1.5; color: #8a6a00;"><strong>Escenario base estimado:</strong><span>{{baseNote}}</span></div>
+        </sc-if>
+
+        <sc-if value="{{s3}}" hint-placeholder-val="{{false}}">
+          <p style="margin: 0; font-size: 15px; line-height: 1.6; color: #3a3a38;">Abre y confirma cada documento. Los registramos con fecha y hora; no basta con una casilla genérica.</p>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <sc-for list="{{docs}}" as="d" hint-placeholder-count="4">
+              <label style="{{d.style}}"><input type="checkbox" checked="{{d.on}}" onChange="{{d.toggle}}" style="width: 18px; height: 18px; accent-color: #5567ae;"><span style="flex: 1; display: flex; flex-direction: column; gap: 2px;"><strong style="font-size: 14px; color: #0c062b;">{{d.name}}</strong><span style="font-size: 12px; color: #6b6b68;">{{d.note}}</span></span></label>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{s4}}" hint-placeholder-val="{{false}}">
+          <div style="display: flex; flex-direction: column; gap: 10px; padding: 20px; border-radius: 12px; background: #f7f7f5;">
+            <div style="display: flex; justify-content: space-between; font-size: 14px;"><span style="color: #3a3a38;">Importe solicitado</span><strong style="font-family: Manrope, sans-serif; color: #0c062b;">{{amountTxt}}</strong></div>
+            <div style="display: flex; justify-content: space-between; font-size: 14px;"><span style="color: #3a3a38;">Documentos confirmados</span><strong style="font-family: Manrope, sans-serif; color: #0c062b;">4 de 4</strong></div>
+            <div style="display: flex; justify-content: space-between; font-size: 14px;"><span style="color: #3a3a38;">Origen de fondos</span><strong style="color: #0c062b;">Cuenta propia · ES·· ·· 4821</strong></div>
+          </div>
+          <p style="margin: 0; font-size: 13px; line-height: 1.55; color: #3a3a38;">Enviar la solicitud no te compromete ni activa ninguna inversión. Podrás retirarla hasta la firma.</p>
+        </sc-if>
+
+        <sc-if value="{{s5}}" hint-placeholder-val="{{false}}">
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; gap: 12px; align-items: center; padding: 14px; border-radius: 10px; background: #eef9f7; font-size: 14px; color: #1f4d47;"><strong>Hecho</strong><span>Elegibilidad y perfil vigentes</span></div>
+            <div style="display: flex; gap: 12px; align-items: center; padding: 14px; border-radius: 10px; background: #eef9f7; font-size: 14px; color: #1f4d47;"><strong>Hecho</strong><span>Disponibilidad de asignación</span></div>
+            <div style="display: flex; gap: 12px; align-items: center; padding: 14px; border-radius: 10px; background: #fff7e0; font-size: 14px; color: #8a6a00;"><strong>En curso</strong><span>Revisión de cumplimiento · origen de fondos</span></div>
+          </div>
+          <span style="font-size: 13px; color: #6b6b68;">Plazo habitual: 2 días hábiles. Te avisaremos por email y en Comunicaciones.</span>
+        </sc-if>
+
+        <sc-if value="{{s6}}" hint-placeholder-val="{{false}}">
+          <div style="border: 1px solid rgba(12,6,43,0.08); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 10px; background: #f7f7f5; max-height: 220px; overflow: auto;">
+            <strong style="font-size: 15px; color: #0c062b;">Contrato de cuentas en participación · LC-2026-07-014</strong>
+            <span style="font-size: 13px; line-height: 1.6; color: #3a3a38;">Primera. Objeto. El partícipe aporta al gestor la cantidad de {{amountTxt}} para su aplicación a la operación descrita en el Anexo I, participando en sus resultados positivos o negativos en los términos de la cláusula Quinta…</span>
+            <span style="font-size: 13px; line-height: 1.6; color: #3a3a38;">Quinta. Distribución. Los fondos disponibles a la liquidación se aplicarán en el orden del Anexo III. Ninguna cláusula garantiza la devolución del capital aportado…</span>
+          </div>
+          <span style="font-size: 13px; color: #6b6b68;">La firma se hará con un proveedor de firma electrónica avanzada. Recibirás una copia sellada.</span>
+        </sc-if>
+
+        <sc-if value="{{s7}}" hint-placeholder-val="{{false}}">
+          <div style="display: flex; flex-direction: column; gap: 10px; padding: 20px; border-radius: 12px; border: 1px solid rgba(12,6,43,0.08);">
+            <div style="display: flex; justify-content: space-between; gap: 12px; font-size: 14px; flex-wrap: wrap;"><span style="color: #3a3a38;">Beneficiario</span><strong style="color: #0c062b;">Ledens Marbella I, S.L. · cuenta segregada</strong></div>
+            <div style="display: flex; justify-content: space-between; gap: 12px; font-size: 14px; flex-wrap: wrap;"><span style="color: #3a3a38;">IBAN</span><strong style="font-family: Manrope, sans-serif; color: #0c062b;">[IBAN verificado · se muestra tras MFA]</strong></div>
+            <div style="display: flex; justify-content: space-between; gap: 12px; font-size: 14px; flex-wrap: wrap;"><span style="color: #3a3a38;">Concepto obligatorio</span><strong style="font-family: Manrope, sans-serif; color: #0c062b;">LC07-014-ORTEGA</strong></div>
+            <div style="display: flex; justify-content: space-between; gap: 12px; font-size: 14px; flex-wrap: wrap;"><span style="color: #3a3a38;">Importe y plazo</span><strong style="font-family: Manrope, sans-serif; color: #0c062b;">{{amountTxt}} · hasta el 25/11/2026</strong></div>
+          </div>
+          <div style="display: flex; gap: 10px; padding: 12px 14px; border-radius: 10px; background: #fef6f6; border: 1px solid rgba(209,74,74,0.25); font-size: 13px; line-height: 1.5; color: #8b2a2a;"><strong>Atención.</strong><span>Ledens nunca cambia los datos bancarios por email ni por teléfono. Si recibes otros datos, no transfieras y avísanos.</span></div>
+        </sc-if>
+
+        <sc-if value="{{s8}}" hint-placeholder-val="{{false}}">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px;">
+            <sc-for list="{{fund}}" as="f" hint-placeholder-count="5"><div style="{{f.style}}"><strong style="font-size: 13px;">{{f.name}}</strong><span style="font-size: 12px;">{{f.note}}</span></div></sc-for>
+          </div>
+          <span style="font-size: 13px; color: #6b6b68;">Una transferencia rechazada o devuelta se comunica con su motivo y no altera tu contrato hasta que lo resolvamos contigo.</span>
+        </sc-if>
+
+        <sc-if value="{{s9}}" hint-placeholder-val="{{false}}">
+          <div style="display: flex; flex-direction: column; gap: 10px; padding: 24px; border-radius: 12px; background: #eef9f7; border: 1px solid rgba(104,192,181,0.4);">
+            <strong style="font-size: 18px; color: #1f4d47;">Participación efectiva</strong>
+            <span style="font-size: 14px; line-height: 1.55; color: #1f4d47;">Contrato firmado, fondos conciliados y requisitos cumplidos. La operación aparece ya como activa en tu cartera, con su confirmación en Documentos.</span>
+          </div>
+          <a href="Dashboard.dc.html" style="align-self: flex-start; font-size: 14px; font-weight: 600;">Ir a mi panel</a>
+        </sc-if>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-top: 1px solid #ededea; padding-top: 20px;">
+          <button type="button" onClick="{{back}}" disabled="{{first}}" style="font: inherit; font-size: 14px; font-weight: 600; padding: 0 18px; min-height: 44px; border-radius: 8px; border: 1px solid rgba(12,6,43,0.12); background: #ffffff; color: #0c062b; cursor: pointer;">Atrás</button>
+          <sc-if value="{{showNext}}" hint-placeholder-val="{{true}}">
+            <button type="button" onClick="{{next}}" disabled="{{blocked}}" style="{{nextStyle}}">{{nextLabel}}</button>
+          </sc-if>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { step: 0, amount: 25000, docs: [false, false, false, false] };
+  }
+  renderVals() {
+    const s = this.state;
+    const step = s.step;
+    const eur = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' €';
+    const names = [
+      ['Importe', 'Tú'], ['Términos', 'Tú'], ['Riesgos y documentos', 'Tú'], ['Enviar solicitud', 'Tú'], ['Revisión', 'Ledens'],
+      ['Firma del contrato', 'Tú y Ledens'], ['Instrucciones de pago', 'Ledens'], ['Verificación de fondos', 'Ledens'], ['Confirmación', 'Ledens']
+    ];
+    const titles = ['¿Cuánto quieres aportar?', 'Revisa los términos de la operación', 'Riesgos y documentación', 'Revisa y envía tu solicitud', 'Ledens revisa tu solicitud', 'Firma del contrato', 'Instrucciones de pago verificadas', 'Verificación de fondos', 'Tu participación es efectiva'];
+    const stages = names.map(([name, who], i) => {
+      const done = i < step, cur = i === step;
+      return {
+        name, who, mark: done ? '✓' : String(i + 1), locked: i > step, cur: cur ? 'step' : 'false',
+        go: () => { if (i <= step) this.setState({ step: i }); },
+        style: 'font: inherit; width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 12px; min-height: 48px; border: 0; border-radius: 10px; cursor: ' + (i > step ? 'default' : 'pointer') + '; ' + (cur ? 'background: #f2f4fa; color: #0c062b; font-weight: 600;' : done ? 'background: transparent; color: #0c062b;' : 'background: transparent; color: #6b6b68;'),
+        dot: 'width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: Manrope, sans-serif; font-size: 12px; font-weight: 700; ' + (done ? 'background: #437f77; color: #ffffff;' : cur ? 'background: #5567ae; color: #ffffff;' : 'background: #ededea; color: #6b6b68;')
+      };
+    });
+    const v = (on, label, onVal, offVal) => ({ label, value: on ? onVal : offVal, style: 'font-family: Manrope, sans-serif; font-size: 16px; font-weight: 600; color: ' + (on ? '#0c062b;' : '#9a9a96;') });
+    const amountTxt = eur(s.amount);
+    const ledger = [
+      v(step >= 4, 'Importe solicitado', amountTxt, 'Pendiente'),
+      v(step >= 5, 'Asignación aprobada', amountTxt, 'Pendiente'),
+      v(step >= 6, 'Compromiso firmado', amountTxt, 'Pendiente'),
+      v(step >= 8, 'Pago recibido', amountTxt, 'Pendiente'),
+      v(step >= 8, 'Participación efectiva', 'Sí · desde 21/11/2026', 'No')
+    ];
+    const chip = (on) => 'font: inherit; font-family: Manrope, sans-serif; font-size: 18px; font-weight: 600; padding: 14px 20px; min-height: 52px; border-radius: 10px; cursor: pointer; ' + (on ? 'background: #f2f4fa; color: #0c062b; border: 1px solid #5567ae; box-shadow: 0 0 0 3px rgba(85,103,174,0.12);' : 'background: #ffffff; color: #3a3a38; border: 1px solid rgba(12,6,43,0.12);');
+    const amounts = [25000, 30000, 35000, 45000].map((a) => ({ label: eur(a), on: s.amount === a ? 'true' : 'false', style: chip(s.amount === a), pick: () => this.setState({ amount: a }) }));
+    const docNames = [
+      ['Memorándum de inversión v3', 'Abierto el 27/10/2026 · 11:42'],
+      ['Divulgación de riesgos de la operación', 'Incluye la posibilidad de pérdida total del capital'],
+      ['Borrador de contrato y Anexo III (distribución)', 'Versión 2 · revisada por asesoría externa'],
+      ['Política de privacidad y condiciones de miembro', 'Aceptadas en tu alta · se confirman de nuevo']
+    ];
+    const docs = docNames.map(([name, note], i) => ({
+      name, note, on: s.docs[i],
+      toggle: () => { const d = s.docs.slice(); d[i] = !d[i]; this.setState({ docs: d }); },
+      style: 'display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 12px; cursor: pointer; ' + (s.docs[i] ? 'background: #f2f4fa; border: 1px solid rgba(85,103,174,0.25);' : 'background: #ffffff; border: 1px solid rgba(12,6,43,0.12);')
+    }));
+    const fs = (state) => 'display: flex; flex-direction: column; gap: 4px; padding: 14px; border-radius: 10px; ' + (state === 'ok' ? 'background: #eef9f7; color: #1f4d47;' : state === 'cur' ? 'background: #fff7e0; color: #8a6a00;' : 'background: #f7f7f5; color: #6b6b68;');
+    const fund = [
+      { name: 'Pendiente', note: 'Esperando transferencia', style: fs('ok') },
+      { name: 'Recibida', note: '20/11/2026 · ' + amountTxt, style: fs('ok') },
+      { name: 'Conciliada', note: 'Concepto y titular coinciden', style: fs('cur') },
+      { name: 'Rechazada', note: 'No aplica', style: fs('off') },
+      { name: 'Devuelta', note: 'No aplica', style: fs('off') }
+    ];
+    const r = 0.1807 * s.amount;
+    const baseNote = 'para ' + amountTxt + ', distribución total de unos ' + eur(Math.round(s.amount + r)) + ' en 12 meses (+18,1 %). Es una estimación, no una promesa; el escenario de estrés supone pérdida de capital.';
+    const blocked = step === 2 && s.docs.some((d) => !d);
+    const labels = ['Continuar', 'Continuar', 'Continuar', 'Enviar solicitud (demo)', 'Simular aprobación', 'Firmar (demo)', 'He realizado la transferencia', 'Simular conciliación', ''];
+    const pink = step === 3;
+    return {
+      stages, ledger, amounts, docs, fund, amountTxt, baseNote, num: step + 1, title: titles[step],
+      s1: step === 0, s2: step === 1, s3: step === 2, s4: step === 3, s5: step === 4, s6: step === 5, s7: step === 6, s8: step === 7, s9: step === 8,
+      first: step === 0, showNext: step < 8, blocked, nextLabel: labels[step],
+      nextStyle: 'font: inherit; font-size: ' + (pink ? '16px; font-weight: 700;' : '14px; font-weight: 600;') + ' padding: 0 20px; min-height: 44px; border-radius: 8px; border: 0; color: #ffffff; cursor: ' + (blocked ? 'not-allowed' : 'pointer') + '; background: ' + (blocked ? '#9a9a96;' : pink ? '#ec6090;' : '#5567ae;'),
+      next: () => { if (!blocked) this.setState({ step: Math.min(8, step + 1) }); },
+      back: () => this.setState({ step: Math.max(0, step - 1) })
+    };
+  }
+}
+</script>
+</body>
+</html>

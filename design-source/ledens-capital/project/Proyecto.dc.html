@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Marbella Golden Mile · Proyecto</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&amp;family=Manrope:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#5567ae}a:hover{color:#3e4d85}
+</style>
+</helmet>
+<div style="font-family: 'DM Sans', system-ui, sans-serif; color: #1d1d1b; background: #f7f7f5; min-height: 100vh;">
+
+  <div style="background: #1d1d1b; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;">
+    <a href="Dashboard.dc.html" style="display: flex; align-items: baseline; gap: 10px; text-decoration: none;">
+      <span style="font-size: 24px; font-weight: 700; letter-spacing: -0.07em; color: #ffffff;">Ledens</span>
+      <span style="font-family: Manrope, sans-serif; font-size: 10px; font-weight: 500; letter-spacing: 0.4em; color: #b8975a;">CAPITAL</span>
+    </a>
+    <nav aria-label="Secciones del proyecto" style="display: flex; gap: 4px; flex-wrap: wrap;">
+      <a href="#resumen" style="padding: 10px 12px; font-size: 13px; color: #e6e6e6; text-decoration: none;">Resumen</a>
+      <a href="#finanzas" style="padding: 10px 12px; font-size: 13px; color: #bbb9ba; text-decoration: none;">Finanzas</a>
+      <a href="#plan" style="padding: 10px 12px; font-size: 13px; color: #bbb9ba; text-decoration: none;">Plan</a>
+      <a href="#escenarios" style="padding: 10px 12px; font-size: 13px; color: #bbb9ba; text-decoration: none;">Escenarios</a>
+      <a href="#simulador" style="padding: 10px 12px; font-size: 13px; color: #bbb9ba; text-decoration: none;">Simulador</a>
+      <a href="#riesgos" style="padding: 10px 12px; font-size: 13px; color: #bbb9ba; text-decoration: none;">Riesgos</a>
+      <a href="#documentos" style="padding: 10px 12px; font-size: 13px; color: #bbb9ba; text-decoration: none;">Documentos</a>
+    </nav>
+    <a href="Oportunidades.dc.html" style="font-size: 13px; color: #aab3d6;">Volver a oportunidades</a>
+  </div>
+  <div style="background: #fff7e0; border-bottom: 1px solid rgba(138,106,0,0.25); padding: 10px 24px; font-size: 13px; color: #8a6a00;"><strong>Prototipo de demostración.</strong> Proyecto ficticio. Las cifras proyectadas son estimaciones, no rentabilidades prometidas.</div>
+
+  <section id="resumen" style="padding: 40px 24px 64px;">
+    <div style="max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 32px;">
+      <div style="height: 420px; border-radius: 20px; background: #e3e7f3; position: relative; display: flex; align-items: flex-end; padding: 24px; box-sizing: border-box;">
+        <span style="position: absolute; top: 20px; left: 20px; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #ffffff; color: #0c062b;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #5567ae;"></span>Abierta a compromisos</span>
+        <span style="font-size: 13px; color: #3a3a38; background: rgba(255,255,255,0.86); padding: 6px 10px; border-radius: 6px;">[Fotografía principal · fachada a jardín, luz de tarde]</span>
+      </div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start;">
+        <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 20px;">
+          <div style="display: flex; align-items: center; gap: 10px;"><span style="width: 18px; height: 2px; background: #ec6090;"></span><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #5567ae;">Reforma y venta · LC-2026-07</span></div>
+          <h1 style="margin: 0; font-size: 62px; line-height: 1.02; letter-spacing: -0.03em; color: #0c062b;">Marbella Golden Mile</h1>
+          <p style="margin: 0; font-size: 15px; color: #6b6b68;">Marbella · Milla de Oro, lado montaña. La dirección completa se comparte tras aprobar tu asignación.</p>
+          <p style="margin: 0; font-size: 18px; line-height: 1.6; color: #3a3a38; max-width: 760px;">Apartamento de 128 m² en urbanización cerrada con jardín comunitario, sin reformar desde 1998. La tesis es simple: llevarlo al estándar de las unidades reformadas del mismo complejo, que se han vendido entre 3.100 y 3.400 €/m² en los últimos 18 meses.</p>
+          <dl style="margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1px; background: #ededea; border: 1px solid #ededea; border-radius: 12px; overflow: hidden;">
+            <div style="background: #ffffff; padding: 16px;"><dt style="font-size: 12px; color: #6b6b68;">Superficie</dt><dd style="margin: 4px 0 0; font-family: Manrope, sans-serif; font-size: 17px; color: #0c062b;">128 m² + 22 m² terraza</dd></div>
+            <div style="background: #ffffff; padding: 16px;"><dt style="font-size: 12px; color: #6b6b68;">Distribución</dt><dd style="margin: 4px 0 0; font-size: 15px; color: #0c062b;">3 dormitorios · 2 baños</dd></div>
+            <div style="background: #ffffff; padding: 16px;"><dt style="font-size: 12px; color: #6b6b68;">Estado actual</dt><dd style="margin: 4px 0 0; font-size: 15px; color: #0c062b;">Original de 1998</dd></div>
+            <div style="background: #ffffff; padding: 16px;"><dt style="font-size: 12px; color: #6b6b68;">Reforma prevista</dt><dd style="margin: 4px 0 0; font-size: 15px; color: #0c062b;">Integral · 5 meses</dd></div>
+            <div style="background: #ffffff; padding: 16px;"><dt style="font-size: 12px; color: #6b6b68;">Duración estimada</dt><dd style="margin: 4px 0 0; font-family: Manrope, sans-serif; font-size: 17px; color: #0c062b;">12 meses</dd></div>
+            <div style="background: #ffffff; padding: 16px;"><dt style="font-size: 12px; color: #6b6b68;">Gestor</dt><dd style="margin: 4px 0 0; font-size: 15px; color: #0c062b;">Ledens Marbella I, S.L.</dd></div>
+          </dl>
+          <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #3a3a38; max-width: 760px;">Reforma: redistribución de cocina abierta al salón, dos baños nuevos, carpintería exterior con rotura de puente térmico, aerotermia y suelo radiante, y cerramiento parcial de la terraza. Estrategia: venta a comprador final en la primavera de 2027, con comercialización desde el fin de obra.</p>
+        </div>
+
+        <aside style="flex: 1 1 340px; min-width: 0; background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 18px; padding: 24px; display: flex; flex-direction: column; gap: 18px;">
+          <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #6b6b68;">Captación de partícipes</span>
+          <div style="display: flex; flex-direction: column; gap: 4px;"><span style="font-family: Manrope, sans-serif; font-size: 34px; font-weight: 600; letter-spacing: -0.02em; color: #0c062b;">125.000 €</span><span style="font-size: 13px; color: #3a3a38;">firmados o asignados de 200.000 € objetivo</span></div>
+          <div style="display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: #ededea;"><div style="width: 50%; background: #0c062b;"></div><div style="width: 12.5%; background: #5567ae;"></div><div style="width: 15%; background: repeating-linear-gradient(135deg,#aab3d6 0 3px,#e3e7f3 3px 6px);"></div></div>
+          <dl style="margin: 0; display: flex; flex-direction: column; gap: 8px; font-size: 13px;">
+            <div style="display: flex; justify-content: space-between;"><dt style="color: #3a3a38;">Firmado</dt><dd style="margin: 0; font-family: Manrope, sans-serif; color: #0c062b;">100.000 €</dd></div>
+            <div style="display: flex; justify-content: space-between;"><dt style="color: #3a3a38;">Asignado, pendiente de firma</dt><dd style="margin: 0; font-family: Manrope, sans-serif; color: #0c062b;">25.000 €</dd></div>
+            <div style="display: flex; justify-content: space-between;"><dt style="color: #3a3a38;">Solicitudes en revisión</dt><dd style="margin: 0; font-family: Manrope, sans-serif; color: #0c062b;">30.000 €</dd></div>
+            <div style="display: flex; justify-content: space-between; border-top: 1px solid #ededea; padding-top: 8px;"><dt style="color: #0c062b; font-weight: 600;">Disponible</dt><dd style="margin: 0; font-family: Manrope, sans-serif; font-weight: 600; color: #0c062b;">45.000 €</dd></div>
+          </dl>
+          <div style="display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 10px; background: #f2f4fa; font-size: 13px; color: #0c062b;">
+            <span>Tu posición: <strong>25.000 € firmados</strong>, desembolso pendiente.</span>
+            <span style="color: #3a3a38;">Aportación mínima 25.000 € · compromisos hasta el 25/11/2026.</span>
+          </div>
+          <a href="#simulador" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 8px; border: 1px solid rgba(12,6,43,0.12); color: #0c062b; text-decoration: none; font-size: 14px; font-weight: 600;">Simular mi aportación</a>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section id="finanzas" style="padding: 64px 24px; background: #ffffff;">
+    <div style="max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 32px;">
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #5567ae;">B · Resumen financiero</span>
+        <h2 style="margin: 0; font-size: 26px; letter-spacing: -0.02em; color: #0c062b;">340.000 € de coste total estimado, sin deuda bancaria</h2>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; height: 44px; border-radius: 10px; overflow: hidden; font-family: Manrope, sans-serif; font-size: 12px; color: #ffffff;">
+          <div style="width: 76.5%; background: #0c062b; display: flex; align-items: center; padding: 0 12px;">Adquisición 260.000</div>
+          <div style="width: 13.2%; background: #5567ae; display: flex; align-items: center; padding: 0 8px;">Reforma 45.000</div>
+          <div style="width: 10.3%; background: #aab3d6; color: #0c062b; display: flex; align-items: center; padding: 0 6px;">35.000</div>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 12px; color: #6b6b68;"><span>0 €</span><span>Coste total 340.000 € · venta estimada 410.000 €</span></div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px;">
+        <div style="border: 1px solid rgba(12,6,43,0.08); border-radius: 12px; overflow: hidden;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <caption style="text-align: left; padding: 16px 20px; font-size: 15px; font-weight: 700; color: #0c062b;">Costes del proyecto</caption>
+            <tbody>
+              <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; color: #3a3a38;">Precio de adquisición</td><td style="padding: 11px 20px; text-align: right; font-family: Manrope, sans-serif; color: #0c062b;">260.000 €</td></tr>
+              <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; color: #3a3a38;">ITP (7 %), notaría y registro</td><td style="padding: 11px 20px; text-align: right; font-family: Manrope, sans-serif; color: #0c062b;">20.000 €</td></tr>
+              <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; color: #3a3a38;">Reforma (ejecución)</td><td style="padding: 11px 20px; text-align: right; font-family: Manrope, sans-serif; color: #0c062b;">41.000 €</td></tr>
+              <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; color: #3a3a38;">Contingencia de obra (≈ 10 %)</td><td style="padding: 11px 20px; text-align: right; font-family: Manrope, sans-serif; color: #0c062b;">4.000 €</td></tr>
+              <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; color: #3a3a38;">Honorarios técnicos y licencia</td><td style="padding: 11px 20px; text-align: right; font-family: Manrope, sans-serif; color: #0c062b;">4.500 €</td></tr>
+              <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; color: #3a3a38;">Tenencia: IBI, comunidad, seguros (12 meses)</td><td style="padding: 11px 20px; text-align: right; font-family: Manrope, sans-serif; color: #0c062b;">3.000 €</td></tr>
+              <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; color: #3a3a38;">Comercialización y gastos de venta</td><td style="padding: 11px 20px; text-align: right; font-family: Manrope, sans-serif; color: #0c062b;">7.500 €</td></tr>
+              <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; color: #3a3a38;">Gastos financieros</td><td style="padding: 11px 20px; text-align: right; font-family: Manrope, sans-serif; color: #0c062b;">0 €</td></tr>
+              <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; color: #3a3a38;">Comisión fija de gestión</td><td style="padding: 11px 20px; text-align: right; font-family: Manrope, sans-serif; color: #0c062b;">0 €</td></tr>
+              <tr style="border-top: 1px solid #d9d9d9; background: #f7f7f5;"><td style="padding: 13px 20px; font-weight: 700; color: #0c062b;">Coste total estimado</td><td style="padding: 13px 20px; text-align: right; font-family: Manrope, sans-serif; font-weight: 600; color: #0c062b;">340.000 €</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <div style="border: 1px solid rgba(12,6,43,0.08); border-radius: 12px; overflow: hidden;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+              <caption style="text-align: left; padding: 16px 20px; font-size: 15px; font-weight: 700; color: #0c062b;">Estructura de capital</caption>
+              <tbody>
+                <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; color: #3a3a38;">Aportación de Ledens (gestor)</td><td style="padding: 11px 20px; text-align: right; font-family: Manrope, sans-serif; color: #0c062b;">140.000 € · 41,2 %</td></tr>
+                <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; color: #3a3a38;">Partícipes externos (objetivo)</td><td style="padding: 11px 20px; text-align: right; font-family: Manrope, sans-serif; color: #0c062b;">200.000 € · 58,8 %</td></tr>
+                <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; color: #3a3a38;">Deuda bancaria</td><td style="padding: 11px 20px; text-align: right; font-family: Manrope, sans-serif; color: #0c062b;">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="border: 1px dashed #aab3d6; background: #f2f4fa; border-radius: 12px; overflow: hidden;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+              <caption style="text-align: left; padding: 16px 20px; font-size: 15px; font-weight: 700; color: #3e4d85;">Estimado · resultado del proyecto</caption>
+              <tbody>
+                <tr style="border-top: 1px solid rgba(85,103,174,0.25);"><td style="padding: 11px 20px; color: #3a3a38;">Precio de venta estimado</td><td style="padding: 11px 20px; text-align: right; font-family: Manrope, sans-serif; color: #0c062b;">410.000 € · 3.203 €/m²</td></tr>
+                <tr style="border-top: 1px solid rgba(85,103,174,0.25);"><td style="padding: 11px 20px; color: #3a3a38;">Coste total estimado</td><td style="padding: 11px 20px; text-align: right; font-family: Manrope, sans-serif; color: #0c062b;">−340.000 €</td></tr>
+                <tr style="border-top: 1px solid rgba(85,103,174,0.25);"><td style="padding: 13px 20px; font-weight: 700; color: #0c062b;">Resultado antes de asignación e impuestos</td><td style="padding: 13px 20px; text-align: right; font-family: Manrope, sans-serif; font-weight: 600; color: #0c062b;">70.000 €</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p style="margin: 0; font-size: 12px; line-height: 1.55; color: #6b6b68;">Ledens no cobra comisión fija: su retribución como gestor es la participación de resultados por encima del umbral (ver estructura de distribución). Modelo ilustrativo, pendiente de validación legal y fiscal.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="plan" style="padding: 64px 24px; background: #f7f7f5;">
+    <div style="max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 32px;">
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #5567ae;">C · Plan de negocio</span>
+        <h2 style="margin: 0; font-size: 26px; letter-spacing: -0.02em; color: #0c062b;">Ocho fases, de la búsqueda a la liquidación</h2>
+      </div>
+      <ol style="list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0;">
+        <li style="display: flex; flex-direction: column; gap: 8px; padding: 16px 12px 0 0; border-top: 3px solid #437f77;"><span style="font-family: Manrope, sans-serif; font-size: 12px; color: #437f77; font-weight: 600;">01 · Hecho</span><strong style="font-size: 14px; color: #0c062b;">Búsqueda</strong><span style="font-size: 12px; color: #6b6b68;">06/2026</span></li>
+        <li style="display: flex; flex-direction: column; gap: 8px; padding: 16px 12px 0 0; border-top: 3px solid #437f77;"><span style="font-family: Manrope, sans-serif; font-size: 12px; color: #437f77; font-weight: 600;">02 · Hecho</span><strong style="font-size: 14px; color: #0c062b;">Due diligence</strong><span style="font-size: 12px; color: #6b6b68;">07–09/2026</span></li>
+        <li style="display: flex; flex-direction: column; gap: 8px; padding: 16px 12px 0 0; border-top: 3px solid #5567ae;"><span style="font-family: Manrope, sans-serif; font-size: 12px; color: #5567ae; font-weight: 600;">03 · Siguiente</span><strong style="font-size: 14px; color: #0c062b;">Adquisición</strong><span style="font-size: 12px; color: #6b6b68;">Escritura 01/12/2026</span></li>
+        <li style="display: flex; flex-direction: column; gap: 8px; padding: 16px 12px 0 0; border-top: 3px solid #d9d9d9;"><span style="font-family: Manrope, sans-serif; font-size: 12px; color: #6b6b68;">04</span><strong style="font-size: 14px; color: #0c062b;">Diseño y licencia</strong><span style="font-size: 12px; color: #6b6b68;">12/2026–01/2027</span></li>
+        <li style="display: flex; flex-direction: column; gap: 8px; padding: 16px 12px 0 0; border-top: 3px solid #d9d9d9;"><span style="font-family: Manrope, sans-serif; font-size: 12px; color: #6b6b68;">05</span><strong style="font-size: 14px; color: #0c062b;">Reforma</strong><span style="font-size: 12px; color: #6b6b68;">02–06/2027</span></li>
+        <li style="display: flex; flex-direction: column; gap: 8px; padding: 16px 12px 0 0; border-top: 3px solid #d9d9d9;"><span style="font-family: Manrope, sans-serif; font-size: 12px; color: #6b6b68;">06</span><strong style="font-size: 14px; color: #0c062b;">Comercialización</strong><span style="font-size: 12px; color: #6b6b68;">06–09/2027</span></li>
+        <li style="display: flex; flex-direction: column; gap: 8px; padding: 16px 12px 0 0; border-top: 3px solid #d9d9d9;"><span style="font-family: Manrope, sans-serif; font-size: 12px; color: #6b6b68;">07</span><strong style="font-size: 14px; color: #0c062b;">Salida</strong><span style="font-size: 12px; color: #6b6b68;">Venta 10/2027</span></li>
+        <li style="display: flex; flex-direction: column; gap: 8px; padding: 16px 12px 0 0; border-top: 3px solid #d9d9d9;"><span style="font-family: Manrope, sans-serif; font-size: 12px; color: #6b6b68;">08</span><strong style="font-size: 14px; color: #0c062b;">Liquidación</strong><span style="font-size: 12px; color: #6b6b68;">Hasta 30/11/2027</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="escenarios" style="padding: 64px 24px; background: #ffffff;">
+    <div style="max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px;">
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #5567ae;">D · Escenarios de inversión</span>
+        <h2 style="margin: 0; font-size: 26px; letter-spacing: -0.02em; color: #0c062b;">Cuatro escenarios, con los supuestos a la vista</h2>
+        <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #3a3a38; max-width: 820px;">Cada escenario cambia solo tres supuestos: precio de venta, desviación de la reforma y duración (cada mes extra suma 1.200 € de tenencia). El reparto aplica la estructura de distribución del contrato; ejemplo para una aportación de 25.000 €.</p>
+      </div>
+      <div style="border: 1px solid rgba(12,6,43,0.08); border-radius: 12px; overflow-x: auto;">
+        <table style="width: 100%; min-width: 900px; border-collapse: collapse; font-size: 14px;">
+          <thead>
+            <tr style="background: #f7f7f5; text-align: right;">
+              <th style="padding: 12px 20px; text-align: left; font-size: 12px; font-weight: 600; color: #6b6b68;">Estimado</th>
+              <sc-for list="{{scen}}" as="x" hint-placeholder-count="4"><th style="padding: 12px 20px; font-size: 13px; font-weight: 700; color: #0c062b;">{{x.name}}</th></sc-for>
+            </tr>
+          </thead>
+          <tbody style="font-family: Manrope, sans-serif; font-variant-numeric: tabular-nums; text-align: right; color: #0c062b;">
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; text-align: left; font-family: 'DM Sans', sans-serif; color: #3a3a38;">Precio de venta</td><sc-for list="{{scen}}" as="x" hint-placeholder-count="4"><td style="padding: 11px 20px;">{{x.sale}}</td></sc-for></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; text-align: left; font-family: 'DM Sans', sans-serif; color: #3a3a38;">Desviación de reforma</td><sc-for list="{{scen}}" as="x" hint-placeholder-count="4"><td style="padding: 11px 20px;">{{x.over}}</td></sc-for></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; text-align: left; font-family: 'DM Sans', sans-serif; color: #3a3a38;">Duración</td><sc-for list="{{scen}}" as="x" hint-placeholder-count="4"><td style="padding: 11px 20px;">{{x.months}}</td></sc-for></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; text-align: left; font-family: 'DM Sans', sans-serif; color: #3a3a38;">Costes del proyecto</td><sc-for list="{{scen}}" as="x" hint-placeholder-count="4"><td style="padding: 11px 20px;">{{x.costs}}</td></sc-for></tr>
+            <tr style="border-top: 1px solid #ededea; background: #f7f7f5;"><td style="padding: 11px 20px; text-align: left; font-family: 'DM Sans', sans-serif; font-weight: 700;">Resultado del proyecto</td><sc-for list="{{scen}}" as="x" hint-placeholder-count="4"><td style="{{x.profitStyle}}">{{x.profit}}</td></sc-for></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; text-align: left; font-family: 'DM Sans', sans-serif; color: #3a3a38;">Asignado a partícipes externos</td><sc-for list="{{scen}}" as="x" hint-placeholder-count="4"><td style="padding: 11px 20px;">{{x.pool}}</td></sc-for></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; text-align: left; font-family: 'DM Sans', sans-serif; color: #3a3a38;">Distribución total (25.000 €)</td><sc-for list="{{scen}}" as="x" hint-placeholder-count="4"><td style="padding: 11px 20px;">{{x.total}}</td></sc-for></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; text-align: left; font-family: 'DM Sans', sans-serif; color: #3a3a38;">Rentabilidad simple</td><sc-for list="{{scen}}" as="x" hint-placeholder-count="4"><td style="{{x.retStyle}}">{{x.ret}}</td></sc-for></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 20px; text-align: left; font-family: 'DM Sans', sans-serif; color: #3a3a38;">Anualizada simple</td><sc-for list="{{scen}}" as="x" hint-placeholder-count="4"><td style="padding: 11px 20px;">{{x.ann}}</td></sc-for></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="simulador" style="padding: 64px 24px; background: #1d1d1b; color: #e6e6e6;">
+    <div style="max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap;">
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #aab3d6;">Simulador de inversión</span>
+          <h2 style="margin: 0; font-size: 44px; line-height: 1.02; letter-spacing: -0.02em; color: #ffffff;">¿Qué supondría tu aportación?</h2>
+        </div>
+        <a href="Simulador.dc.html" style="color: #aab3d6; font-size: 14px; font-weight: 600;">Abrir simulación avanzada</a>
+      </div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 16px;">
+        <div style="flex: 1 1 380px; min-width: 0; background: #262624; border-radius: 18px; padding: 28px; display: flex; flex-direction: column; gap: 24px;">
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <label for="sim-amt" style="font-size: 13px; font-weight: 600; color: #e6e6e6;">Aportación propuesta</label>
+            <div style="display: flex; align-items: center; gap: 8px; border: 1px solid #7a7979; border-radius: 10px; padding: 4px 14px; background: #1d1d1b;">
+              <input id="sim-amt" type="number" min="25000" max="100000" step="5000" value="{{amount}}" onChange="{{onAmount}}" style="flex: 1; min-width: 0; font-family: Manrope, sans-serif; font-size: 30px; font-weight: 600; letter-spacing: -0.02em; background: transparent; border: 0; color: #ffffff; outline: none; padding: 8px 0;">
+              <span style="font-family: Manrope, sans-serif; font-size: 22px; color: #bbb9ba;">€</span>
+            </div>
+            <input type="range" aria-label="Aportación propuesta" min="25000" max="100000" step="5000" value="{{amount}}" onChange="{{onAmount}}" style="width: 100%; accent-color: #aab3d6;">
+            <div style="display: flex; justify-content: space-between; font-family: Manrope, sans-serif; font-size: 12px; color: #8f8e8e;"><span>25.000 € mínimo</span><span>45.000 € disponible · 100.000 € máx.</span></div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <span style="font-size: 13px; font-weight: 600; color: #e6e6e6;">Escenario</span>
+            <div role="group" aria-label="Escenario" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 10px; background: #161615;">
+              <sc-for list="{{scenBtns}}" as="b" hint-placeholder-count="4">
+                <button type="button" onClick="{{b.pick}}" aria-pressed="{{b.on}}" style="{{b.style}}">{{b.name}}</button>
+              </sc-for>
+            </div>
+            <span style="font-size: 13px; line-height: 1.5; color: #bbb9ba;">{{sel.desc}}</span>
+          </div>
+        </div>
+
+        <div style="flex: 2 1 520px; min-width: 0; background: #262624; border-radius: 18px; padding: 28px; display: flex; flex-direction: column; gap: 20px;">
+          <div style="display: flex; align-items: center; gap: 8px;"><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #aab3d6;">Estimado · escenario {{sel.lower}}</span></div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px;">
+            <div style="padding: 16px; border-radius: 12px; background: #2f2f2d; display: flex; flex-direction: column; gap: 6px;"><span style="font-size: 12px; color: #bbb9ba;">Aportación de capital</span><span style="font-family: Manrope, sans-serif; font-size: 24px; font-weight: 600; color: #ffffff;">{{out.amt}}</span></div>
+            <div style="padding: 16px; border-radius: 12px; background: #2f2f2d; display: flex; flex-direction: column; gap: 6px;"><span style="font-size: 12px; color: #bbb9ba;">Capital devuelto estimado</span><span style="font-family: Manrope, sans-serif; font-size: 24px; font-weight: 600; color: #ffffff;">{{out.capital}}</span></div>
+            <div style="padding: 16px; border-radius: 12px; background: #2f2f2d; display: flex; flex-direction: column; gap: 6px;"><span style="font-size: 12px; color: #bbb9ba;">Beneficio o pérdida estimada</span><span style="{{out.plStyle}}">{{out.pl}}</span></div>
+            <div style="padding: 16px; border-radius: 12px; background: #2f2f2d; display: flex; flex-direction: column; gap: 6px;"><span style="font-size: 12px; color: #bbb9ba;">Distribución total estimada</span><span style="font-family: Manrope, sans-serif; font-size: 24px; font-weight: 600; color: #ffffff;">{{out.total}}</span></div>
+            <div style="padding: 16px; border-radius: 12px; background: #2f2f2d; display: flex; flex-direction: column; gap: 6px;"><span style="font-size: 12px; color: #bbb9ba;">Rentabilidad simple</span><span style="font-family: Manrope, sans-serif; font-size: 24px; font-weight: 600; color: #ffffff;">{{out.ret}}</span></div>
+            <div style="padding: 16px; border-radius: 12px; background: #2f2f2d; display: flex; flex-direction: column; gap: 6px;"><span style="font-size: 12px; color: #bbb9ba;">Anualizada simple · duración</span><span style="font-family: Manrope, sans-serif; font-size: 24px; font-weight: 600; color: #ffffff;">{{out.ann}} · {{out.months}}</span></div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <span style="font-size: 12px; color: #bbb9ba;">Distribución estimada por escenario para tu aportación</span>
+            <sc-for list="{{bars}}" as="b" hint-placeholder-count="4">
+              <div style="display: flex; align-items: center; gap: 12px; font-size: 13px;">
+                <span style="width: 96px; color: #bbb9ba;">{{b.name}}</span>
+                <div style="flex: 1; height: 10px; border-radius: 999px; background: #161615; overflow: hidden;"><div style="{{b.style}}"></div></div>
+                <span style="width: 96px; text-align: right; font-family: Manrope, sans-serif; color: #e6e6e6;">{{b.total}}</span>
+              </div>
+            </sc-for>
+          </div>
+          <p style="margin: 0; font-size: 12px; line-height: 1.55; color: #8f8e8e;">Cálculo: resultado × 58,8 % (peso de los partícipes externos) → 100 % a partícipes hasta un umbral del 8 % anual simple sobre su capital → por encima, 80 % partícipes y 20 % gestor. En pérdida, se asigna a prorrata y nunca supera el capital aportado. No es una oferta ni una promesa de rentabilidad.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding: 64px 24px; background: #f7f7f5;">
+    <div style="max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap;">
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #5567ae;">E · Galería</span>
+          <h2 style="margin: 0; font-size: 26px; letter-spacing: -0.02em; color: #0c062b;">Estado actual, planos y propuesta</h2>
+        </div>
+        <div role="group" aria-label="Comparar" style="display: flex; gap: 4px; padding: 3px; border-radius: 8px; background: #ffffff; border: 1px solid rgba(12,6,43,0.08);">
+          <sc-for list="{{baBtns}}" as="b" hint-placeholder-count="2"><button type="button" onClick="{{b.pick}}" aria-pressed="{{b.on}}" style="{{b.style}}">{{b.name}}</button></sc-for>
+        </div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px;">
+        <div style="{{ba.mainStyle}}"><span style="font-size: 13px; color: #3a3a38; background: rgba(255,255,255,0.86); padding: 6px 10px; border-radius: 6px;">{{ba.main}}</span></div>
+        <div style="height: 240px; border-radius: 12px; background: #ededea; display: flex; align-items: flex-end; padding: 14px; box-sizing: border-box;"><span style="font-size: 12px; color: #3a3a38; background: rgba(255,255,255,0.86); padding: 4px 8px; border-radius: 6px;">{{ba.second}}</span></div>
+        <div style="height: 240px; border-radius: 12px; background: #ffffff; border: 1px solid #d9d9d9; box-sizing: border-box; display: flex; align-items: flex-end; padding: 14px;"><span style="font-size: 12px; color: #3a3a38;">[Plano · estado reformado, E 1:100]</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="riesgos" style="padding: 64px 24px; background: #ffffff;">
+    <div style="max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px;">
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #5567ae;">F · Riesgos</span>
+        <h2 style="margin: 0; font-size: 26px; letter-spacing: -0.02em; color: #0c062b;">Lo que puede salir mal, y cómo se gestiona</h2>
+      </div>
+      <div style="display: flex; gap: 12px; padding: 16px 18px; border-radius: 10px; background: #fef6f6; border: 1px solid rgba(209,74,74,0.25); font-size: 14px; line-height: 1.55; color: #8b2a2a;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8b2a2a" stroke-width="1.8" aria-hidden="true" style="flex-shrink: 0; margin-top: 2px;"><path d="M12 3l10 18H2z"></path><path d="M12 10v5"></path><path d="M12 18v.01"></path></svg>
+        <span><strong>Puedes perder parte o la totalidad del capital aportado.</strong> La participación no es un depósito, no está garantizada, no da derecho a la propiedad del inmueble y no puede venderse libremente antes de la liquidación.</span>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px;">
+        <div style="border: 1px solid rgba(12,6,43,0.08); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 6px;"><strong style="font-size: 15px; color: #0c062b;">Mercado</strong><span style="font-size: 13px; line-height: 1.55; color: #3a3a38;">El precio de venta puede caer. El escenario de estrés asume −16 % sobre el base.</span></div>
+        <div style="border: 1px solid rgba(12,6,43,0.08); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 6px;"><strong style="font-size: 15px; color: #0c062b;">Liquidez</strong><span style="font-size: 13px; line-height: 1.55; color: #3a3a38;">No hay mercado secundario. El capital se recupera solo en la liquidación.</span></div>
+        <div style="border: 1px solid rgba(12,6,43,0.08); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 6px;"><strong style="font-size: 15px; color: #0c062b;">Ejecución y sobrecostes</strong><span style="font-size: 13px; line-height: 1.55; color: #3a3a38;">Contingencia del 10 % y contrato de obra a precio cerrado con el contratista de Ledens.</span></div>
+        <div style="border: 1px solid rgba(12,6,43,0.08); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 6px;"><strong style="font-size: 15px; color: #0c062b;">Plazos</strong><span style="font-size: 13px; line-height: 1.55; color: #3a3a38;">Licencia o venta pueden retrasarse; cada mes suma tenencia y reduce la rentabilidad anualizada.</span></div>
+        <div style="border: 1px solid rgba(12,6,43,0.08); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 6px;"><strong style="font-size: 15px; color: #0c062b;">Financiación</strong><span style="font-size: 13px; line-height: 1.55; color: #3a3a38;">Sin deuda. Si faltan fondos, el gestor puede pedir aportaciones adicionales voluntarias.</span></div>
+        <div style="border: 1px solid rgba(12,6,43,0.08); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 6px;"><strong style="font-size: 15px; color: #0c062b;">Fiscal y regulatorio</strong><span style="font-size: 13px; line-height: 1.55; color: #3a3a38;">Cambios en ITP, plusvalía o en la regulación pueden alterar el resultado. Consulta a tu asesor.</span></div>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; padding: 24px; border-radius: 18px; background: #f7f7f5;">
+        <div style="display: flex; flex-direction: column; gap: 4px;"><strong style="font-size: 17px; color: #0c062b;">¿Quieres ampliar tu participación?</strong><span style="font-size: 14px; color: #3a3a38;">Revisarás términos, riesgos y documentos antes de enviar la solicitud. No se compromete nada en este paso.</span></div>
+        <a href="Compromiso.dc.html" style="display: inline-flex; align-items: center; min-height: 48px; padding: 0 22px; border-radius: 8px; background: #ec6090; color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 700;">Solicitar participación</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="documentos" style="padding: 64px 24px 96px; background: #f7f7f5;">
+    <div style="max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px;">
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #5567ae;">G · Centro de documentos</span>
+        <h2 style="margin: 0; font-size: 26px; letter-spacing: -0.02em; color: #0c062b;">Documentación de la operación</h2>
+        <p style="margin: 0; font-size: 13px; color: #6b6b68;">Cifrados en reposo. Cada apertura queda registrada a tu nombre.</p>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px;"><span style="width: 36px; height: 44px; border-radius: 6px; background: #f2f4fa; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #3e4d85;">PDF</span><div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;"><strong style="font-size: 14px; color: #0c062b;">Memorándum de inversión</strong><span style="font-size: 12px; color: #6b6b68;">v3 · 14/10/2026 · 2,4 MB</span></div><a href="#" style="font-size: 13px; font-weight: 600;">Ver</a></div>
+        <div style="display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px;"><span style="width: 36px; height: 44px; border-radius: 6px; background: #f2f4fa; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #3e4d85;">XLS</span><div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;"><strong style="font-size: 14px; color: #0c062b;">Plan de negocio y supuestos</strong><span style="font-size: 12px; color: #6b6b68;">v3 · 14/10/2026</span></div><a href="#" style="font-size: 13px; font-weight: 600;">Ver</a></div>
+        <div style="display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px;"><span style="width: 36px; height: 44px; border-radius: 6px; background: #f2f4fa; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #3e4d85;">PDF</span><div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;"><strong style="font-size: 14px; color: #0c062b;">Presupuesto de reforma</strong><span style="font-size: 12px; color: #6b6b68;">41.000 € + contingencia · 02/10/2026</span></div><a href="#" style="font-size: 13px; font-weight: 600;">Ver</a></div>
+        <div style="display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px;"><span style="width: 36px; height: 44px; border-radius: 6px; background: #f2f4fa; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #3e4d85;">PDF</span><div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;"><strong style="font-size: 14px; color: #0c062b;">Borrador de contrato de cuentas en participación</strong><span style="font-size: 12px; color: #6b6b68;">Pendiente de revisión legal · v2</span></div><a href="#" style="font-size: 13px; font-weight: 600;">Ver</a></div>
+        <div style="display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px;"><span style="width: 36px; height: 44px; border-radius: 6px; background: #eef9f7; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #1f4d47;">PDF</span><div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;"><strong style="font-size: 14px; color: #0c062b;">Tu contrato firmado · 25.000 €</strong><span style="font-size: 12px; color: #6b6b68;">Firma electrónica cualificada · 15/10/2026</span></div><a href="#" style="font-size: 13px; font-weight: 600;">Ver</a></div>
+        <div style="display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: #f7f7f5; border: 1px dashed #cfc0c0; border-radius: 12px;"><span style="width: 36px; height: 44px; border-radius: 6px; background: #ededea; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b6b68" stroke-width="1.8" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg></span><div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;"><strong style="font-size: 14px; color: #3a3a38;">Due diligence registral y técnica</strong><span style="font-size: 12px; color: #6b6b68;">Se libera tras la conciliación de tu desembolso</span></div></div>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":3600}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { amount: 25000, scen: 'base', ba: 'antes' };
+  }
+  calc(sc, amount) {
+    const acq = 260000, renov = 45000, other = 35000, hold = 1200, pool = 200000, share = 200000 / 340000, hurdle = 0.08, carry = 0.2;
+    const costs = acq + renov * (1 + sc.over) + other + (sc.months - 12) * hold;
+    const profit = sc.sale - costs;
+    const poolProfit = profit * share;
+    let poolDist;
+    if (poolProfit <= 0) poolDist = Math.max(poolProfit, -pool);
+    else {
+      const h = hurdle * sc.months / 12 * pool;
+      poolDist = poolProfit <= h ? poolProfit : h + (1 - carry) * (poolProfit - h);
+    }
+    const pl = poolDist * amount / pool;
+    const ret = pl / amount;
+    return { costs, profit, poolDist, pl, total: amount + pl, capital: Math.min(amount, amount + pl), ret, ann: ret * 12 / sc.months };
+  }
+  renderVals() {
+    const S = [
+      { id: 'cons', name: 'Conservador', sale: 385000, over: 0.15, months: 15, desc: 'Venta a 385.000 € (−6 %), reforma +15 % y 3 meses de retraso.' },
+      { id: 'base', name: 'Base', sale: 410000, over: 0, months: 12, desc: 'Supuestos del plan de negocio: venta a 410.000 €, reforma en presupuesto, 12 meses.' },
+      { id: 'opt', name: 'Optimista', sale: 430000, over: -0.05, months: 11, desc: 'Venta a 430.000 € (+5 %), reforma −5 % y un mes de adelanto.' },
+      { id: 'stress', name: 'Estrés', sale: 345000, over: 0.3, months: 20, desc: 'Venta a 345.000 € (−16 %), reforma +30 % y 8 meses de retraso. Pérdida de capital.' }
+    ];
+    const eur = (n) => (n < 0 ? '−' : '') + String(Math.round(Math.abs(n))).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' €';
+    const eurS = (n) => (n > 0 ? '+' : '') + eur(n);
+    const pct = (n) => (n < 0 ? '−' : n > 0 ? '+' : '') + (Math.abs(n) * 100).toFixed(1).replace('.', ',') + ' %';
+    const amount = this.state.amount;
+    const num = 'padding: 11px 20px; ';
+    const scen = S.map((sc) => {
+      const r = this.calc(sc, 25000);
+      return {
+        name: sc.name, sale: eur(sc.sale), over: sc.over === 0 ? '0 %' : pct(sc.over), months: sc.months + ' meses', costs: eur(r.costs),
+        profit: eurS(r.profit), profitStyle: num + 'font-weight: 600; color: ' + (r.profit < 0 ? '#8b2a2a;' : '#0c062b;'),
+        pool: eurS(r.poolDist), total: eur(r.total), ret: pct(r.ret), retStyle: num + 'color: ' + (r.ret < 0 ? '#8b2a2a;' : '#0c062b;'),
+        ann: r.ret > 0 ? pct(r.ann) : 'No aplica'
+      };
+    });
+    const sel = S.find((s) => s.id === this.state.scen);
+    const r = this.calc(sel, amount);
+    const seg = (on) => 'font: inherit; font-size: 13px; padding: 10px 6px; min-height: 40px; border: 0; border-radius: 7px; cursor: pointer; ' + (on ? 'background: #2f2f2d; color: #ffffff; font-weight: 600;' : 'background: transparent; color: #bbb9ba;');
+    const scenBtns = S.map((s) => ({ name: s.name, on: s.id === this.state.scen ? 'true' : 'false', style: seg(s.id === this.state.scen), pick: () => this.setState({ scen: s.id }) }));
+    const totals = S.map((s) => ({ s, t: this.calc(s, amount).total }));
+    const max = Math.max(...totals.map((x) => x.t));
+    const bars = totals.map(({ s, t }) => ({
+      name: s.name, total: eur(t),
+      style: 'height: 100%; border-radius: 999px; width: ' + (t / max * 100).toFixed(1) + '%; background: ' + (s.id === this.state.scen ? (t < amount ? '#ec7a7a' : '#aab3d6') : '#515050') + ';'
+    }));
+    const lightSeg = (on) => 'font: inherit; font-size: 13px; padding: 8px 14px; min-height: 36px; border: 0; border-radius: 6px; cursor: pointer; ' + (on ? 'background: #0c062b; color: #ffffff; font-weight: 600;' : 'background: transparent; color: #3a3a38;');
+    const baBtns = [['antes', 'Estado actual'], ['despues', 'Propuesta']].map(([id, name]) => ({ name, on: this.state.ba === id ? 'true' : 'false', style: lightSeg(this.state.ba === id), pick: () => this.setState({ ba: id }) }));
+    const after = this.state.ba === 'despues';
+    const ba = {
+      mainStyle: 'grid-column: span 2; height: 360px; border-radius: 12px; display: flex; align-items: flex-end; padding: 16px; box-sizing: border-box; background: ' + (after ? '#e3e7f3;' : '#ededea;'),
+      main: after ? '[Render · salón y cocina abierta, propuesta]' : '[Fotografía · salón en estado actual]',
+      second: after ? '[Render · baño principal]' : '[Fotografía · cocina original]'
+    };
+    return {
+      amount, scen, scenBtns, bars, baBtns, ba,
+      sel: { desc: sel.desc, lower: sel.name.toLowerCase() },
+      out: {
+        amt: eur(amount), capital: eur(r.capital), pl: eurS(r.pl), total: eur(r.total), ret: pct(r.ret),
+        ann: r.ret > 0 ? pct(r.ann) : 'No aplica', months: sel.months + ' meses',
+        plStyle: 'font-family: Manrope, sans-serif; font-size: 24px; font-weight: 600; color: ' + (r.pl < 0 ? '#ec7a7a;' : '#68c0b5;')
+      },
+      onAmount: (e) => {
+        const v = Math.round(Number(e.target.value) / 5000) * 5000;
+        if (!isNaN(v)) this.setState({ amount: Math.min(100000, Math.max(25000, v)) });
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

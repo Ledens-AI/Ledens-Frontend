@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Acceso privado e invitación</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&amp;family=Manrope:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#aab3d6}a:hover{color:#e3e7f3}
+</style>
+</helmet>
+<div style="font-family: 'DM Sans', system-ui, sans-serif; color: #1d1d1b; background: #f7f7f5; min-height: 100vh;">
+
+  <section style="background: #1d1d1b; color: #e6e6e6; padding: 32px 24px 96px;">
+    <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 72px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: baseline; gap: 10px;"><span style="font-size: 28px; font-weight: 700; letter-spacing: -0.07em; color: #ffffff;">Ledens</span><span style="font-family: Manrope, sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 0.4em; color: #b8975a;">CAPITAL</span></div>
+        <span style="font-size: 12px; color: #8f8e8e;">ES · EN</span>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 48px; align-items: center;">
+        <div style="flex: 999 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 24px;">
+          <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #aab3d6;">Private Real Estate Investments</span>
+          <h1 style="margin: 0; font-size: 62px; line-height: 1.02; letter-spacing: -0.03em; color: #ffffff; max-width: 680px;">Una nueva forma de participar en oportunidades inmobiliarias seleccionadas.</h1>
+          <p style="margin: 0; font-size: 18px; color: #bbb9ba;">Acceso privado para inversores invitados.</p>
+          <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 13px; color: #8f8e8e;"><span>Málaga · Marbella · Costa del Sol</span><span>Cuentas en participación</span><span>Gestión Ledens</span></div>
+        </div>
+        <div style="flex: 1 1 380px; min-width: 0; background: #262624; border-radius: 20px; padding: 32px; display: flex; flex-direction: column; gap: 18px;">
+          <h2 style="margin: 0; font-size: 22px; color: #ffffff;">Acceder a mi cuenta</h2>
+          <div style="display: flex; flex-direction: column; gap: 6px;"><label for="lg-email" style="font-size: 13px; font-weight: 600; color: #e6e6e6;">Email</label><input id="lg-email" type="email" placeholder="nombre@dominio.com" style="font: inherit; font-size: 15px; padding: 12px 14px; border-radius: 10px; border: 1px solid #7a7979; background: #1d1d1b; color: #ffffff;"></div>
+          <div style="display: flex; flex-direction: column; gap: 6px;"><label for="lg-pass" style="font-size: 13px; font-weight: 600; color: #e6e6e6;">Contraseña</label><input id="lg-pass" type="password" value="••••••••••••" style="font: inherit; font-size: 15px; padding: 12px 14px; border-radius: 10px; border: 1px solid #7a7979; background: #1d1d1b; color: #ffffff;"></div>
+          <button type="button" style="font: inherit; font-size: 15px; font-weight: 600; min-height: 48px; border-radius: 8px; border: 0; background: #5567ae; color: #ffffff; cursor: pointer;">Continuar</button>
+          <div style="display: flex; justify-content: space-between; font-size: 13px; flex-wrap: wrap; gap: 8px;"><a href="#">He olvidado mi contraseña</a><a href="#solicitar">Solicitar acceso</a></div>
+          <p style="margin: 0; font-size: 12px; line-height: 1.5; color: #8f8e8e;">Después se te pedirá un segundo factor (app de autenticación o llave de seguridad).</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding: 64px 24px;">
+    <div style="max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px;">
+
+      <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 18px; padding: 28px; display: flex; flex-direction: column; gap: 16px;">
+        <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #6b6b68;">Verificación en dos pasos</span>
+        <h3 style="margin: 0; font-size: 20px; color: #0c062b;">Introduce el código de tu app</h3>
+        <div style="display: flex; gap: 8px;">
+          <span style="width: 44px; height: 52px; border-radius: 10px; border: 1px solid #5567ae; box-shadow: 0 0 0 4px rgba(85,103,174,0.12); display: flex; align-items: center; justify-content: center; font-family: Manrope, sans-serif; font-size: 22px; font-weight: 600; color: #0c062b;">4</span>
+          <span style="width: 44px; height: 52px; border-radius: 10px; border: 1px solid rgba(12,6,43,0.12); display: flex; align-items: center; justify-content: center; font-family: Manrope, sans-serif; font-size: 22px; font-weight: 600; color: #0c062b;">8</span>
+          <span style="width: 44px; height: 52px; border-radius: 10px; border: 1px solid rgba(12,6,43,0.12); display: flex; align-items: center; justify-content: center; font-family: Manrope, sans-serif; font-size: 22px; font-weight: 600; color: #0c062b;">1</span>
+          <span style="width: 44px; height: 52px; border-radius: 10px; border: 1px solid rgba(12,6,43,0.12);"></span>
+          <span style="width: 44px; height: 52px; border-radius: 10px; border: 1px solid rgba(12,6,43,0.12);"></span>
+          <span style="width: 44px; height: 52px; border-radius: 10px; border: 1px solid rgba(12,6,43,0.12);"></span>
+        </div>
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #3a3a38;"><input type="checkbox">Confiar en este dispositivo 30 días</label>
+        <a href="#" style="font-size: 13px; color: #5567ae;">Usar un código de recuperación</a>
+      </div>
+
+      <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 18px; padding: 28px; display: flex; flex-direction: column; gap: 16px;">
+        <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #6b6b68;">Activación por invitación</span>
+        <h3 style="margin: 0; font-size: 20px; color: #0c062b;">Carmen, te damos la bienvenida</h3>
+        <p style="margin: 0; font-size: 14px; line-height: 1.55; color: #3a3a38;">El equipo de relación con inversores te ha invitado a Ledens Capital. El enlace caduca el 03/11/2026 a las 18:00.</p>
+        <div style="display: flex; flex-direction: column; gap: 6px;"><label for="iv-email" style="font-size: 13px; font-weight: 600; color: #0c062b;">Email verificado</label><input id="iv-email" value="carmen.ortega@ejemplo.es" readonly style="font: inherit; font-size: 15px; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(12,6,43,0.12); background: #f7f7f5; color: #3a3a38;"></div>
+        <div style="display: flex; flex-direction: column; gap: 6px;"><label for="iv-pass" style="font-size: 13px; font-weight: 600; color: #0c062b;">Crea una contraseña</label><input id="iv-pass" type="password" value="•••••••••••••••" style="font: inherit; font-size: 15px; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(12,6,43,0.12);"><div style="display: flex; gap: 4px;"><span style="flex: 1; height: 4px; border-radius: 2px; background: #437f77;"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: #437f77;"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: #437f77;"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: #ededea;"></span></div><span style="font-size: 12px; color: #6b6b68;">Mínimo 12 caracteres. Siguiente paso: configurar el segundo factor.</span></div>
+        <button type="button" style="font: inherit; font-size: 15px; font-weight: 600; min-height: 48px; border-radius: 8px; border: 0; background: #5567ae; color: #ffffff; cursor: pointer;">Activar cuenta</button>
+      </div>
+
+      <div id="solicitar" style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 18px; padding: 28px; display: flex; flex-direction: column; gap: 16px;">
+        <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #6b6b68;">Solicitar acceso</span>
+        <h3 style="margin: 0; font-size: 20px; color: #0c062b;">Cuéntanos quién eres</h3>
+        <p style="margin: 0; font-size: 14px; line-height: 1.55; color: #3a3a38;">Registramos tu interés. No concede acceso ni muestra información de operaciones.</p>
+        <div style="display: flex; flex-direction: column; gap: 6px;"><label for="rq-name" style="font-size: 13px; font-weight: 600; color: #0c062b;">Nombre completo</label><input id="rq-name" style="font: inherit; font-size: 15px; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(12,6,43,0.12);"></div>
+        <div style="display: flex; flex-direction: column; gap: 6px;"><label for="rq-ref" style="font-size: 13px; font-weight: 600; color: #0c062b;">¿Quién te recomienda? (opcional)</label><input id="rq-ref" style="font: inherit; font-size: 15px; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(12,6,43,0.12);"></div>
+        <button type="button" style="font: inherit; font-size: 15px; font-weight: 600; min-height: 48px; border-radius: 8px; border: 1px solid rgba(12,6,43,0.12); background: #ffffff; color: #0c062b; cursor: pointer;">Enviar solicitud</button>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding: 0 24px 64px;">
+    <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px;">
+      <h2 style="margin: 0; font-size: 26px; letter-spacing: -0.02em; color: #0c062b;">Alta del inversor · paso 3 de 5</h2>
+      <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 18px; padding: 28px; display: flex; flex-direction: column; gap: 24px;">
+        <ol style="list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px;">
+          <li style="display: flex; flex-direction: column; gap: 6px;"><span style="height: 4px; border-radius: 2px; background: #437f77;"></span><span style="font-size: 12px; color: #1f4d47; font-weight: 600;">Datos personales</span></li>
+          <li style="display: flex; flex-direction: column; gap: 6px;"><span style="height: 4px; border-radius: 2px; background: #437f77;"></span><span style="font-size: 12px; color: #1f4d47; font-weight: 600;">Perfil inversor</span></li>
+          <li style="display: flex; flex-direction: column; gap: 6px;"><span style="height: 4px; border-radius: 2px; background: #5567ae;"></span><span style="font-size: 12px; color: #0c062b; font-weight: 700;">Verificación</span></li>
+          <li style="display: flex; flex-direction: column; gap: 6px;"><span style="height: 4px; border-radius: 2px; background: #ededea;"></span><span style="font-size: 12px; color: #6b6b68;">Acuerdos</span></li>
+          <li style="display: flex; flex-direction: column; gap: 6px;"><span style="height: 4px; border-radius: 2px; background: #ededea;"></span><span style="font-size: 12px; color: #6b6b68;">Activación</span></li>
+        </ol>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px;">
+          <div style="border: 1px solid rgba(104,192,181,0.4); background: #eef9f7; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 6px;"><strong style="font-size: 14px; color: #1f4d47;">DNI · anverso y reverso</strong><span style="font-size: 13px; color: #1f4d47;">Validado automáticamente · 27/10/2026</span></div>
+          <div style="border: 1px solid rgba(138,106,0,0.25); background: #fff7e0; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 6px;"><strong style="font-size: 14px; color: #8a6a00;">Prueba de vida</strong><span style="font-size: 13px; color: #8a6a00;">En revisión manual · suele tardar menos de 24 h</span></div>
+          <div style="border: 1px dashed #cfc0c0; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 10px;"><strong style="font-size: 14px; color: #0c062b;">Justificante de domicilio</strong><span style="font-size: 13px; color: #3a3a38;">PDF, JPG o PNG · máx. 10 MB · menos de 3 meses</span><button type="button" style="align-self: flex-start; font: inherit; font-size: 13px; font-weight: 600; padding: 8px 14px; min-height: 40px; border-radius: 8px; border: 1px solid rgba(12,6,43,0.12); background: #ffffff; color: #0c062b; cursor: pointer;">Subir documento</button></div>
+        </div>
+        <p style="margin: 0; font-size: 12px; line-height: 1.55; color: #6b6b68;">Para personas jurídicas se piden además escritura, CIF, titular real y poderes del firmante. Las respuestas del perfil inversor no constituyen una clasificación regulatoria.</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding: 0 24px 96px;">
+    <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px;">
+      <h2 style="margin: 0; font-size: 26px; letter-spacing: -0.02em; color: #0c062b;">Estados de la cuenta</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px;">
+        <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 8px;"><span style="align-self: flex-start; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #f2f4fa; color: #0c062b;">Invitación enviada</span><span style="font-size: 13px; line-height: 1.5; color: #3a3a38;">Revisa tu correo. El enlace es personal y caduca en 7 días.</span></div>
+        <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 8px;"><span style="align-self: flex-start; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #eef9f7; color: #1f4d47;">Invitación aceptada</span><span style="font-size: 13px; line-height: 1.5; color: #3a3a38;">Email verificado. Completa tu alta para continuar.</span></div>
+        <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 8px;"><span style="align-self: flex-start; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #ededea; color: #3a3a38;">Invitación caducada</span><span style="font-size: 13px; line-height: 1.5; color: #3a3a38;">Este enlace ya no es válido. Pide uno nuevo a tu contacto en Ledens.</span></div>
+        <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 8px;"><span style="align-self: flex-start; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #fff7e0; color: #8a6a00;">Verificación pendiente</span><span style="font-size: 13px; line-height: 1.5; color: #3a3a38;">Estamos comprobando tu documentación. Te avisaremos por email.</span></div>
+        <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 8px;"><span style="align-self: flex-start; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #fff7e0; color: #8a6a00;">Aprobación pendiente</span><span style="font-size: 13px; line-height: 1.5; color: #3a3a38;">Cumplimiento revisa tu alta. Aún no ves oportunidades.</span></div>
+        <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 8px;"><span style="align-self: flex-start; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #eef9f7; color: #1f4d47;">Miembro aprobado</span><span style="font-size: 13px; line-height: 1.5; color: #3a3a38;">Ya puedes ver las operaciones a las que has sido invitado.</span></div>
+        <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 8px;"><span style="align-self: flex-start; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #fef6f6; color: #8b2a2a;">Cuenta suspendida</span><span style="font-size: 13px; line-height: 1.5; color: #3a3a38;">Mantienes acceso de lectura a tus documentos. Contacta con Ledens.</span></div>
+        <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 8px;"><span style="align-self: flex-start; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #ededea; color: #3a3a38;">Acceso revocado</span><span style="font-size: 13px; line-height: 1.5; color: #3a3a38;">Tus participaciones vivas siguen vigentes; recibirás extractos por email.</span></div>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

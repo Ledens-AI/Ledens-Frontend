@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Arquitectura de producto</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&amp;family=Manrope:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#5567ae}a:hover{color:#3e4d85}
+</style>
+</helmet>
+<div style="font-family: 'DM Sans', system-ui, sans-serif; color: #1d1d1b; background: #ffffff; min-height: 100vh;">
+
+  <section style="padding: 80px 24px 56px; background: #f7f7f5;">
+    <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; align-items: center; gap: 10px;"><span style="width: 18px; height: 2px; background: #ec6090;"></span><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #5567ae;">Arquitectura de producto</span></div>
+      <h1 style="margin: 0; font-size: 44px; line-height: 1.05; letter-spacing: -0.02em; color: #0c062b; max-width: 900px;">Dos interfaces separadas, un mismo registro de verdad</h1>
+      <p style="margin: 0; font-size: 18px; line-height: 1.6; color: #3a3a38; max-width: 780px;">El inversor ve únicamente sus datos y las operaciones a las que ha sido invitado. El equipo de Ledens trabaja en un back-office distinto, con permisos por función. Todo cálculo financiero vive en el backend y se versiona.</p>
+    </div>
+  </section>
+
+  <section style="padding: 64px 24px;">
+    <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px;">
+      <h2 style="margin: 0; font-size: 26px; letter-spacing: -0.02em; color: #0c062b;">Mapa del sitio</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px;">
+        <div style="border: 1px solid rgba(12,6,43,0.08); border-radius: 12px; padding: 22px; display: flex; flex-direction: column; gap: 12px;">
+          <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #6b6b68;">Público · sin indexar</span>
+          <ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: #3a3a38;">
+            <li>Acceso privado (landing)</li><li>Acceder a mi cuenta · MFA</li><li>Solicitar acceso (solo interés)</li><li>Activación por invitación</li><li>Recuperar cuenta</li><li>Aviso legal · privacidad · cookies</li>
+          </ul>
+        </div>
+        <div style="border: 1px solid rgba(12,6,43,0.08); border-radius: 12px; padding: 22px; display: flex; flex-direction: column; gap: 12px;">
+          <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #6b6b68;">Alta del inversor</span>
+          <ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: #3a3a38;">
+            <li>1 · Datos personales</li><li>2 · Perfil inversor</li><li>3 · Verificación de identidad (KYC/KYB)</li><li>4 · Acuerdos y riesgos</li><li>5 · Revisión de cumplimiento</li><li>Estados: pendiente, aprobado, suspendido, revocado</li>
+          </ul>
+        </div>
+        <div style="border: 1px solid rgba(12,6,43,0.08); border-radius: 12px; padding: 22px; display: flex; flex-direction: column; gap: 12px; background: #f2f4fa;">
+          <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #3e4d85;">Área del inversor</span>
+          <ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: #0c062b;">
+            <li>Panel</li><li>Oportunidades → ficha de proyecto → simulador</li><li>Proceso de compromiso (9 etapas)</li><li>Mi cartera → panel de cada inversión</li><li>Movimientos y extractos (CSV · PDF)</li><li>Documentos</li><li>Comunicaciones · mensajes seguros</li><li>Relación con inversores</li><li>Perfil y seguridad</li>
+          </ul>
+        </div>
+        <div style="border-radius: 12px; padding: 22px; display: flex; flex-direction: column; gap: 12px; background: #1d1d1b;">
+          <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #aab3d6;">Back-office</span>
+          <ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: #e6e6e6;">
+            <li>Panel operativo</li><li>Inversores · invitaciones · KYC</li><li>Operaciones · plan financiero · escenarios</li><li>Estructuras de distribución</li><li>Capital: solicitudes, asignaciones, conciliación</li><li>Distribuciones y liquidaciones</li><li>Informes y publicaciones</li><li>Auditoría</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding: 64px 24px; background: #f7f7f5;">
+    <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px;">
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <h2 style="margin: 0; font-size: 26px; letter-spacing: -0.02em; color: #0c062b;">Roles y permisos</h2>
+        <p style="margin: 0; font-size: 14px; color: #3a3a38;">Control de acceso por rol en el backend. Las aprobaciones financieras requieren dos personas distintas (cuatro ojos).</p>
+      </div>
+      <div style="background: #ffffff; border: 1px solid rgba(12,6,43,0.08); border-radius: 12px; overflow-x: auto;">
+        <table style="width: 100%; min-width: 980px; border-collapse: collapse; font-size: 13px;">
+          <thead>
+            <tr style="background: #f7f7f5;">
+              <th style="padding: 12px 16px; text-align: left; font-size: 12px; font-weight: 600; color: #6b6b68;">Capacidad</th>
+              <th style="padding: 12px 10px; font-size: 12px; font-weight: 600; color: #6b6b68;">Super admin</th>
+              <th style="padding: 12px 10px; font-size: 12px; font-weight: 600; color: #6b6b68;">Inversiones</th>
+              <th style="padding: 12px 10px; font-size: 12px; font-weight: 600; color: #6b6b68;">Proyecto</th>
+              <th style="padding: 12px 10px; font-size: 12px; font-weight: 600; color: #6b6b68;">Finanzas</th>
+              <th style="padding: 12px 10px; font-size: 12px; font-weight: 600; color: #6b6b68;">Cumplimiento</th>
+              <th style="padding: 12px 10px; font-size: 12px; font-weight: 600; color: #6b6b68;">Rel. inversores</th>
+              <th style="padding: 12px 10px; font-size: 12px; font-weight: 600; color: #6b6b68;">Inversor</th>
+            </tr>
+          </thead>
+          <tbody style="text-align: center; color: #0c062b;">
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 16px; text-align: left; color: #3a3a38;">Invitar inversores</td><td>●</td><td>●</td><td>—</td><td>—</td><td>○</td><td>●</td><td>—</td></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 16px; text-align: left; color: #3a3a38;">Aprobar KYC y alta</td><td>●</td><td>—</td><td>—</td><td>—</td><td>●</td><td>—</td><td>—</td></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 16px; text-align: left; color: #3a3a38;">Crear operación y plan financiero</td><td>●</td><td>●</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 16px; text-align: left; color: #3a3a38;">Publicar a inversores</td><td>●</td><td>●</td><td>—</td><td>—</td><td>● visto bueno</td><td>—</td><td>—</td></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 16px; text-align: left; color: #3a3a38;">Aprobar asignaciones</td><td>●</td><td>●</td><td>—</td><td>○</td><td>●</td><td>—</td><td>—</td></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 16px; text-align: left; color: #3a3a38;">Conciliar desembolsos</td><td>●</td><td>—</td><td>—</td><td>●</td><td>—</td><td>—</td><td>—</td></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 16px; text-align: left; color: #3a3a38;">Costes reales y avance de obra</td><td>●</td><td>○</td><td>●</td><td>●</td><td>—</td><td>—</td><td>—</td></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 16px; text-align: left; color: #3a3a38;">Calcular y aprobar distribuciones</td><td>●</td><td>○</td><td>—</td><td>●</td><td>● segundo firmante</td><td>—</td><td>—</td></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 16px; text-align: left; color: #3a3a38;">Ver datos de un inversor</td><td>●</td><td>●</td><td>—</td><td>●</td><td>●</td><td>●</td><td>solo los suyos</td></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 16px; text-align: left; color: #3a3a38;">Mensajes y comunicaciones</td><td>●</td><td>○</td><td>○</td><td>—</td><td>—</td><td>●</td><td>●</td></tr>
+            <tr style="border-top: 1px solid #ededea;"><td style="padding: 11px 16px; text-align: left; color: #3a3a38;">Registro de auditoría</td><td>● lectura</td><td>—</td><td>—</td><td>—</td><td>● lectura</td><td>—</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <span style="font-size: 12px; color: #6b6b68;">● acceso completo · ○ lectura o propuesta · — sin acceso. Nadie, ni el super admin, edita un registro de auditoría.</span>
+    </div>
+  </section>
+
+  <section style="padding: 64px 24px;">
+    <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px;">
+      <h2 style="margin: 0; font-size: 26px; letter-spacing: -0.02em; color: #0c062b;">Recorridos principales</h2>
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5567ae;">Inversor · de la invitación a la participación efectiva</span>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <span style="padding: 10px 14px; border-radius: 10px; background: #f2f4fa; font-size: 13px; color: #0c062b;">Invitación</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #f2f4fa; font-size: 13px; color: #0c062b;">Email verificado + MFA</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #f2f4fa; font-size: 13px; color: #0c062b;">Alta y KYC</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #fff7e0; font-size: 13px; color: #8a6a00;">Aprobación</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #f2f4fa; font-size: 13px; color: #0c062b;">Oportunidad + simulador</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #f2f4fa; font-size: 13px; color: #0c062b;">Solicitud</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #fff7e0; font-size: 13px; color: #8a6a00;">Asignación</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #f2f4fa; font-size: 13px; color: #0c062b;">Firma</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #f2f4fa; font-size: 13px; color: #0c062b;">Desembolso</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #eef9f7; font-size: 13px; color: #1f4d47;">Participación efectiva</span>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5567ae;">Equipo · ciclo de vida de una operación</span>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <span style="padding: 10px 14px; border-radius: 10px; background: #ededea; font-size: 13px; color: #1d1d1b;">Alta de operación</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #ededea; font-size: 13px; color: #1d1d1b;">Plan financiero v1</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #ededea; font-size: 13px; color: #1d1d1b;">Escenarios y estructura de distribución</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #fff7e0; font-size: 13px; color: #8a6a00;">Visto bueno legal</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #ededea; font-size: 13px; color: #1d1d1b;">Publicación a invitados</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #ededea; font-size: 13px; color: #1d1d1b;">Asignaciones y contratos</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #ededea; font-size: 13px; color: #1d1d1b;">Conciliación</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #ededea; font-size: 13px; color: #1d1d1b;">Informes mensuales</span><span style="align-self: center; color: #6b6b68;">→</span>
+          <span style="padding: 10px 14px; border-radius: 10px; background: #ededea; font-size: 13px; color: #1d1d1b;">Liquidación final</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding: 64px 24px; background: #1d1d1b; color: #e6e6e6;">
+    <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px;">
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #aab3d6;">Encaje técnico</span>
+        <h2 style="margin: 0; font-size: 26px; letter-spacing: -0.02em; color: #ffffff;">Sobre la infraestructura Ledens que ya existe</h2>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px;">
+        <div style="background: #262624; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 6px;"><strong style="font-size: 14px; color: #ffffff;">PostgreSQL</strong><span style="font-size: 13px; line-height: 1.55; color: #bbb9ba;">Esquema propio para Capital: operaciones, versiones de plan, compromisos, contratos, movimientos y distribuciones, aislado del de reformas.</span></div>
+        <div style="background: #262624; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 6px;"><strong style="font-size: 14px; color: #ffffff;">API en Azure Container Apps</strong><span style="font-size: 13px; line-height: 1.55; color: #bbb9ba;">Motor de cálculo de cascadas en el backend, con supuestos versionados; la interfaz solo muestra resultados validados.</span></div>
+        <div style="background: #262624; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 6px;"><strong style="font-size: 14px; color: #ffffff;">Identidad</strong><span style="font-size: 13px; line-height: 1.55; color: #bbb9ba;">Sesiones propias con MFA obligatorio, o Microsoft Entra External ID. Solo cuentas creadas por invitación.</span></div>
+        <div style="background: #262624; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 6px;"><strong style="font-size: 14px; color: #ffffff;">Azure Blob privado</strong><span style="font-size: 13px; line-height: 1.55; color: #bbb9ba;">Documentos cifrados, URLs de un solo uso y registro de cada descarga.</span></div>
+        <div style="background: #262624; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 6px;"><strong style="font-size: 14px; color: #ffffff;">Firma electrónica</strong><span style="font-size: 13px; line-height: 1.55; color: #bbb9ba;">Proveedor de firma avanzada o cualificada (eIDAS), integrado por webhook.</span></div>
+        <div style="background: #262624; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 6px;"><strong style="font-size: 14px; color: #ffffff;">Conciliación bancaria</strong><span style="font-size: 13px; line-height: 1.55; color: #bbb9ba;">Manual en la fase 1; después, con el puente bancario que ya alimenta la gestión financiera.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding: 64px 24px 96px;">
+    <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px;">
+      <h2 style="margin: 0; font-size: 26px; letter-spacing: -0.02em; color: #0c062b;">Roadmap</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;">
+        <div style="border: 1px solid rgba(12,6,43,0.08); border-top: 3px solid #5567ae; border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 12px;">
+          <span style="font-family: Manrope, sans-serif; font-size: 13px; font-weight: 600; color: #5567ae;">Fase 1 · MVP</span>
+          <h3 style="margin: 0; font-size: 20px; color: #0c062b;">Operar la primera operación con partícipes</h3>
+          <ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: #3a3a38;">
+            <li>Acceso por invitación, MFA y alta con KYC</li><li>Oportunidades, ficha y simulador con escenarios fijos</li><li>Solicitud, asignación y contrato firmado</li><li>Conciliación manual de desembolsos</li><li>Cartera, documentos y avisos</li>
+          </ul>
+        </div>
+        <div style="border: 1px solid rgba(12,6,43,0.08); border-top: 3px solid #0c062b; border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 12px;">
+          <span style="font-family: Manrope, sans-serif; font-size: 13px; font-weight: 600; color: #0c062b;">Fase 2 · Gestión financiera avanzada</span>
+          <h3 style="margin: 0; font-size: 20px; color: #0c062b;">Cascadas configurables y distribuciones</h3>
+          <ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: #3a3a38;">
+            <li>Editor de estructuras de distribución A–E</li><li>Informes financieros por operación</li><li>Cálculo, aprobación y pago de distribuciones</li><li>Extractos CSV y PDF, analítica del inversor</li>
+          </ul>
+        </div>
+        <div style="border: 1px solid rgba(12,6,43,0.08); border-top: 3px solid #68c0b5; border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 12px;">
+          <span style="font-family: Manrope, sans-serif; font-size: 13px; font-weight: 600; color: #437f77;">Fase 3 · Escala</span>
+          <h3 style="margin: 0; font-size: 20px; color: #0c062b;">Automatización e integración</h3>
+          <ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: #3a3a38;">
+            <li>Analítica de cartera avanzada</li><li>Conciliación automática con el puente bancario</li><li>Informes estructurados y anuales para inversores</li><li>Integración con la contabilidad de Ledens</li>
+          </ul>
+        </div>
+      </div>
+      <div style="display: flex; gap: 10px; padding: 14px 16px; border-radius: 10px; background: #fff7e0; border: 1px solid rgba(138,106,0,0.25); font-size: 13px; line-height: 1.55; color: #8a6a00;"><strong>Antes de lanzar.</strong><span>La estructura de cuentas en participación (arts. 239–243 del Código de Comercio), la elegibilidad de inversores, las obligaciones regulatorias, los flujos de pago y las plantillas de contrato deben validarlos asesores legales y financieros españoles. El acceso restringido no exime por sí solo de obligaciones regulatorias.</span></div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2300}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

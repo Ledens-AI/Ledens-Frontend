@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Simulador avanzado</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&amp;family=Manrope:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#5567ae}a:hover{color:#3e4d85}
+</style>
+</helmet>
+<div style="font-family: 'DM Sans', system-ui, sans-serif; color: #1d1d1b; background: #f7f7f5; min-height: 100vh;">
+  <div style="background: #1d1d1b; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;">
+    <a href="Dashboard.dc.html" style="display: flex; align-items: baseline; gap: 10px; text-decoration: none;">
+      <span style="font-size: 24px; font-weight: 700; letter-spacing: -0.07em; color: #ffffff;">Ledens</span>
+      <span style="font-family: Manrope, sans-serif; font-size: 10px; font-weight: 500; letter-spacing: 0.4em; color: #b8975a;">CAPITAL</span>
+    </a>
+    <a href="Proyecto.dc.html" style="font-size: 13px; color: #aab3d6;">Volver al proyecto</a>
+  </div>
+  <div style="background: #fff7e0; border-bottom: 1px solid rgba(138,106,0,0.25); padding: 10px 24px; font-size: 13px; color: #8a6a00;"><strong>Simulación de demostración.</strong> Cálculo local con supuestos explícitos. En producción, los resultados los calcula y versiona el motor financiero del backend.</div>
+
+  <div style="max-width: 1280px; margin: 0 auto; padding: 40px 24px 80px; display: flex; flex-direction: column; gap: 28px;">
+    <header style="display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap;">
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 10px;"><span style="width: 18px; height: 2px; background: #ec6090;"></span><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #5567ae;">Simulación avanzada</span></div>
+        <h1 style="margin: 0; font-size: 44px; line-height: 1.02; letter-spacing: -0.02em; color: #0c062b;">Mueve los supuestos, mira el reparto</h1>
+        <p style="margin: 0; font-size: 16px; color: #3a3a38; max-width: 720px;">Cada palanca recalcula el resultado del proyecto y lo pasa por la estructura de distribución elegida, en el orden del contrato.</p>
+      </div>
+      <div role="group" aria-label="Proyecto" style="display: flex; gap: 4px; padding: 4px; border-radius: 10px; background: #ffffff; border: 1px solid rgba(12,6,43,0.08);">
+        <sc-for list="{{projBtns}}" as="b" hint-placeholder-count="2"><button type="button" onClick="{{b.pick}}" aria-pressed="{{b.on}}" style="{{b.style}}">{{b.name}}</button></sc-for>
+      </div>
+    </header>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;">
+      <section aria-label="Supuestos" style="flex: 1 1 360px; min-width: 0; background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 18px; padding: 24px; display: flex; flex-direction: column; gap: 22px;">
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <label for="adv-amt" style="font-size: 13px; font-weight: 600; color: #0c062b;">Tu aportación</label>
+          <div style="display: flex; align-items: center; gap: 8px; border: 1px solid rgba(12,6,43,0.12); border-radius: 10px; padding: 2px 14px;">
+            <input id="adv-amt" type="number" min="10000" max="200000" step="5000" value="{{amount}}" onChange="{{onAmount}}" style="flex: 1; min-width: 0; font-family: Manrope, sans-serif; font-size: 24px; font-weight: 600; border: 0; outline: none; padding: 10px 0; color: #0c062b; background: transparent;">
+            <span style="font-family: Manrope, sans-serif; color: #6b6b68;">€</span>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <span style="font-size: 13px; font-weight: 600; color: #0c062b;">Estructura de distribución</span>
+          <div role="group" aria-label="Estructura de distribución" style="display: flex; flex-direction: column; gap: 6px;">
+            <sc-for list="{{modelBtns}}" as="m" hint-placeholder-count="3">
+              <button type="button" onClick="{{m.pick}}" aria-pressed="{{m.on}}" style="{{m.style}}"><strong style="font-size: 13px; color: #0c062b;">{{m.name}}</strong><span style="font-size: 12px; color: #3a3a38;">{{m.desc}}</span></button>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 18px; border-top: 1px solid #ededea; padding-top: 18px;">
+          <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #6b6b68;">Supuestos del proyecto</span>
+          <sc-for list="{{sliders}}" as="s" hint-placeholder-count="7">
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <div style="display: flex; justify-content: space-between; gap: 12px; font-size: 13px;"><label for="{{s.id}}" style="color: #3a3a38;">{{s.label}}</label><span style="font-family: Manrope, sans-serif; font-weight: 600; color: #0c062b;">{{s.display}}</span></div>
+              <input id="{{s.id}}" type="range" min="{{s.min}}" max="{{s.max}}" step="{{s.step}}" value="{{s.value}}" onChange="{{s.onChange}}" style="width: 100%; accent-color: #5567ae;">
+              <span style="font-size: 11px; color: #6b6b68;">{{s.hint}}</span>
+            </div>
+          </sc-for>
+          <button type="button" onClick="{{reset}}" style="align-self: flex-start; font: inherit; font-size: 13px; font-weight: 600; padding: 8px 12px; min-height: 40px; border-radius: 8px; border: 1px solid rgba(12,6,43,0.12); background: #ffffff; color: #0c062b; cursor: pointer;">Volver al plan base</button>
+        </div>
+      </section>
+
+      <div style="flex: 2 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
+        <section aria-label="Resultado para ti" style="background: #1d1d1b; color: #e6e6e6; border-radius: 18px; padding: 28px; display: flex; flex-direction: column; gap: 20px;">
+          <div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;"><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #aab3d6;">Estimado para tu aportación</span><span style="font-size: 12px; color: #8f8e8e;">{{modelTag}}</span></div>
+          <div style="display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;">
+            <span style="font-family: Manrope, sans-serif; font-size: 52px; font-weight: 600; letter-spacing: -0.03em; color: #ffffff;">{{out.total}}</span>
+            <span style="{{out.plStyle}}">{{out.pl}}</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
+            <div style="padding: 14px; border-radius: 12px; background: #262624; display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 12px; color: #bbb9ba;">Capital devuelto</span><span style="font-family: Manrope, sans-serif; font-size: 20px; font-weight: 600; color: #ffffff;">{{out.capital}}</span></div>
+            <div style="padding: 14px; border-radius: 12px; background: #262624; display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 12px; color: #bbb9ba;">{{out.interimLabel}}</span><span style="font-family: Manrope, sans-serif; font-size: 20px; font-weight: 600; color: #ffffff;">{{out.interim}}</span></div>
+            <div style="padding: 14px; border-radius: 12px; background: #262624; display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 12px; color: #bbb9ba;">Rentabilidad simple</span><span style="font-family: Manrope, sans-serif; font-size: 20px; font-weight: 600; color: #ffffff;">{{out.ret}}</span></div>
+            <div style="padding: 14px; border-radius: 12px; background: #262624; display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 12px; color: #bbb9ba;">Anualizada simple</span><span style="font-family: Manrope, sans-serif; font-size: 20px; font-weight: 600; color: #ffffff;">{{out.ann}}</span></div>
+            <div style="padding: 14px; border-radius: 12px; background: #262624; display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 12px; color: #bbb9ba;">Duración</span><span style="font-family: Manrope, sans-serif; font-size: 20px; font-weight: 600; color: #ffffff;">{{out.dur}}</span></div>
+          </div>
+          <sc-if value="{{isRent}}" hint-placeholder-val="{{false}}">
+            <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 13px; color: #bbb9ba; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 14px;">
+              <span>Rentabilidad bruta de alquiler <strong style="font-family: Manrope, sans-serif; color: #ffffff;">{{yields.gross}}</strong></span>
+              <span>Rentabilidad neta de caja <strong style="font-family: Manrope, sans-serif; color: #ffffff;">{{yields.net}}</strong></span>
+              <span>Rentabilidad total estimada <strong style="font-family: Manrope, sans-serif; color: #ffffff;">{{yields.total}}</strong></span>
+            </div>
+          </sc-if>
+        </section>
+
+        <section aria-label="Cascada de distribución" style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 18px; padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;"><h2 style="margin: 0; font-size: 17px; color: #0c062b;">Cascada de distribución del proyecto</h2><span style="font-size: 12px; color: #6b6b68;">Orden de pago según contrato · importes del proyecto</span></div>
+          <sc-for list="{{fall}}" as="f" hint-placeholder-count="7">
+            <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+              <span style="width: 22px; font-family: Manrope, sans-serif; font-size: 12px; color: #6b6b68;">{{f.n}}</span>
+              <span style="flex: 1 1 220px; font-size: 13px; color: #3a3a38;">{{f.label}}</span>
+              <div style="flex: 2 1 240px; height: 14px; border-radius: 4px; background: #f7f7f5; position: relative; overflow: hidden;"><div style="{{f.bar}}"></div></div>
+              <span style="width: 110px; text-align: right; font-family: Manrope, sans-serif; font-size: 13px; font-weight: 600; color: #0c062b;">{{f.amt}}</span>
+            </div>
+          </sc-for>
+          <sc-if value="{{shortfall}}" hint-placeholder-val="{{false}}">
+            <div style="display: flex; gap: 10px; padding: 12px 14px; border-radius: 10px; background: #fef6f6; border: 1px solid rgba(209,74,74,0.25); font-size: 13px; line-height: 1.5; color: #8b2a2a;"><strong>Caja insuficiente.</strong><span>Lo distribuible no cubre el capital aportado: recuperación parcial de capital. {{shortNote}}</span></div>
+          </sc-if>
+        </section>
+
+        <section aria-label="Sensibilidad" style="background: #ffffff; border: 1px solid rgba(12,6,43,0.06); border-radius: 18px; padding: 24px; display: flex; flex-direction: column; gap: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;"><h2 style="margin: 0; font-size: 17px; color: #0c062b;">Sensibilidad de tu rentabilidad simple</h2><span style="font-size: 12px; color: #6b6b68;">{{sens.caption}}</span></div>
+          <div style="overflow-x: auto;">
+            <table style="width: 100%; min-width: 520px; border-collapse: collapse; font-family: Manrope, sans-serif; font-size: 13px; font-variant-numeric: tabular-nums;">
+              <thead><tr><th style="padding: 10px; text-align: left; font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 600; color: #6b6b68;">{{sens.corner}}</th><sc-for list="{{sens.cols}}" as="c" hint-placeholder-count="4"><th style="padding: 10px; text-align: right; font-size: 12px; font-weight: 600; color: #6b6b68;">{{c}}</th></sc-for></tr></thead>
+              <tbody>
+                <sc-for list="{{sens.rows}}" as="r" hint-placeholder-count="5">
+                  <tr style="border-top: 1px solid #ededea;">
+                    <th style="padding: 10px; text-align: left; font-weight: 600; color: #0c062b;">{{r.label}}</th>
+                    <sc-for list="{{r.cells}}" as="c" hint-placeholder-count="4"><td style="{{c.style}}">{{c.v}}</td></sc-for>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+          <p style="margin: 0; font-size: 12px; line-height: 1.55; color: #6b6b68;">Resultados antes de impuestos. La estructura de distribución es un modelo comercial ilustrativo pendiente de validación legal, contable y fiscal; el contrato firmado prevalece siempre. No hay derecho garantizado a recuperar el capital.</p>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = this.base('venta');
+  }
+  base(proj) {
+    return proj === 'venta'
+      ? { proj, model: 'C', amount: 25000, sale: 410000, over: 0, months: 12, exitPct: 1.83, fin: 0, hold: 1200, hurdle: 8, carry: 20 }
+      : { proj, model: 'C', amount: 20000, rent: 24000, occ: 100, opex: 25, years: 5, exitPrice: 260000, exitPct: 3, fin: 0, hurdle: 8, carry: 20 };
+  }
+  run(p) {
+    const venta = p.proj === 'venta';
+    const capital = venta ? 340000 : 225000;
+    const poolCap = venta ? 200000 : 120000;
+    const share = poolCap / capital;
+    const years = venta ? p.months / 12 : p.years;
+    let income, obligations, interim = 0;
+    if (venta) {
+      income = p.sale;
+      obligations = 45000 * p.over / 100 + p.sale * p.exitPct / 100 - 7500 + p.fin + (p.months - 12) * p.hold;
+    } else {
+      const net = p.rent * p.occ / 100 * (1 - p.opex / 100);
+      interim = net * p.years;
+      income = p.exitPrice + interim;
+      obligations = p.exitPrice * p.exitPct / 100 + p.fin;
+    }
+    const D = income - obligations;
+    let pc, gc, pp = 0, gp = 0;
+    if (p.model === 'B') {
+      pc = Math.min(poolCap, Math.max(D, 0));
+      gc = Math.min(capital - poolCap, Math.max(D - pc, 0));
+      const ex = Math.max(D - capital, 0);
+      pp = ex * share; gp = ex - pp;
+    } else if (D <= capital) {
+      pc = Math.max(D, 0) * share; gc = Math.max(D, 0) - pc;
+    } else {
+      pc = poolCap; gc = capital - poolCap;
+      const P = D - capital, poolP = P * share;
+      if (p.model === 'C') {
+        const h = p.hurdle / 100 * years * poolCap;
+        pp = Math.min(poolP, h) + (1 - p.carry / 100) * Math.max(0, poolP - h);
+      } else pp = poolP;
+      gp = P - pp;
+    }
+    const k = p.amount / poolCap;
+    const total = k * (pc + pp);
+    const ret = total / p.amount - 1;
+    return { income, obligations, D, capital, poolCap, pc, gc, pp, gp, total, capitalBack: k * pc, ret, ann: ret / years, years, interimInv: k * interim * share };
+  }
+  renderVals() {
+    const s = this.state;
+    const venta = s.proj === 'venta';
+    const eur = (n) => (n < 0 ? '−' : '') + String(Math.round(Math.abs(n))).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' €';
+    const pct = (n, d) => (n < 0 ? '−' : n > 0 ? '+' : '') + (Math.abs(n) * 100).toFixed(d == null ? 1 : d).replace('.', ',') + ' %';
+    const r = this.run(s);
+    const set = (key) => (e) => this.setState({ [key]: Number(e.target.value) });
+    const seg = (on) => 'font: inherit; font-size: 13px; padding: 9px 14px; min-height: 40px; border: 0; border-radius: 7px; cursor: pointer; ' + (on ? 'background: #0c062b; color: #ffffff; font-weight: 600;' : 'background: transparent; color: #3a3a38;');
+    const projBtns = [['venta', 'Marbella Golden Mile'], ['alquiler', 'Málaga Centro']].map(([id, name]) => ({ name, on: s.proj === id ? 'true' : 'false', style: seg(s.proj === id), pick: () => this.setState(this.base(id)) }));
+    const card = (on) => 'font: inherit; text-align: left; display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; min-height: 44px; border-radius: 10px; cursor: pointer; ' + (on ? 'background: #f2f4fa; border: 1px solid #5567ae; box-shadow: 0 0 0 3px rgba(85,103,174,0.12);' : 'background: #ffffff; border: 1px solid rgba(12,6,43,0.12);');
+    const models = [
+      ['A', 'A · Proporcional', 'Resultado y pérdidas a prorrata del capital aportado.'],
+      ['B', 'B · Preferencia de capital', 'Primero se devuelve el capital de los partícipes; luego el del gestor; el resto, a prorrata. Prioridad, no garantía.'],
+      ['C', venta ? 'C · Umbral y participación del gestor' : 'D · Rentas + liquidación con umbral', 'A prorrata hasta un umbral anual simple; por encima, el gestor recibe una participación del exceso.']
+    ];
+    const modelBtns = models.map(([id, name, desc]) => ({ name, desc, on: s.model === id ? 'true' : 'false', style: card(s.model === id), pick: () => this.setState({ model: id }) }));
+    const sl = (key, label, min, max, step, display, hint) => ({ id: 'sl-' + key, key, label, min, max, step, value: s[key], display, hint, onChange: set(key) });
+    let sliders = venta ? [
+      sl('sale', 'Precio de venta', 330000, 470000, 5000, eur(s.sale), 'Plan: 410.000 € · 3.203 €/m²'),
+      sl('over', 'Desviación de la reforma', -10, 40, 1, (s.over > 0 ? '+' : '') + s.over + ' %', 'Sobre 45.000 € · contingencia incluida en el plan'),
+      sl('months', 'Duración del proyecto', 9, 24, 1, s.months + ' meses', 'Plan: 12 meses'),
+      sl('hold', 'Coste por mes de retraso', 0, 3000, 100, eur(s.hold), 'Tenencia, seguros y gestión del retraso'),
+      sl('exitPct', 'Gastos de salida', 0, 5, 0.01, String(s.exitPct).replace('.', ',') + ' %', 'Comercialización y gastos de venta sobre precio'),
+      sl('fin', 'Gastos financieros', 0, 20000, 500, eur(s.fin), 'Plan: sin deuda')
+    ] : [
+      sl('rent', 'Renta bruta anual', 16000, 30000, 500, eur(s.rent), 'Plan: 24.000 €'),
+      sl('occ', 'Ocupación', 60, 100, 1, s.occ + ' %', 'Media del periodo'),
+      sl('opex', 'Gastos de explotación', 10, 45, 1, s.opex + ' %', 'IBI, comunidad, seguro, mantenimiento y gestión'),
+      sl('years', 'Periodo de tenencia', 3, 10, 1, s.years + ' años', 'Plan: 5 años'),
+      sl('exitPrice', 'Precio de venta a la salida', 190000, 320000, 5000, eur(s.exitPrice), 'Plan: 260.000 €'),
+      sl('exitPct', 'Gastos de salida', 0, 6, 0.1, String(s.exitPct).replace('.', ',') + ' %', 'Sobre precio de venta'),
+      sl('fin', 'Gastos financieros', 0, 20000, 500, eur(s.fin), 'Plan: sin deuda')
+    ];
+    sliders = sliders.concat(s.model === 'C' ? [
+      sl('hurdle', 'Umbral anual simple', 0, 12, 0.5, String(s.hurdle).replace('.', ',') + ' %', 'Un umbral no es una rentabilidad prometida'),
+      sl('carry', 'Participación del gestor sobre el exceso', 0, 40, 1, s.carry + ' %', 'Solo por encima del umbral')
+    ] : []);
+    const max = Math.max(r.income, r.capital) || 1;
+    const bar = (v, bg) => 'position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; width: ' + Math.max(0, Math.min(100, v / max * 100)).toFixed(1) + '%; background: ' + bg + ';';
+    const hatch = 'repeating-linear-gradient(135deg,#aab3d6 0 3px,#e3e7f3 3px 6px)';
+    const fall = [
+      { n: '1', label: venta ? 'Ingresos por la venta' : 'Rentas netas acumuladas + venta', amt: eur(r.income), bar: bar(r.income, '#0c062b') },
+      { n: '2', label: 'Obligaciones del proyecto (desviaciones y gastos)', amt: eur(-r.obligations), bar: bar(Math.abs(r.obligations), '#d14a4a') },
+      { n: '3', label: 'Devolución de capital a partícipes', amt: eur(r.pc), bar: bar(r.pc, '#5567ae') },
+      { n: '4', label: 'Devolución de capital al gestor (Ledens)', amt: eur(r.gc), bar: bar(r.gc, '#aab3d6') },
+      { n: '5', label: 'Resultado asignado a partícipes', amt: eur(r.pp), bar: bar(r.pp, '#68c0b5') },
+      { n: '6', label: 'Resultado y participación del gestor', amt: eur(r.gp), bar: bar(r.gp, hatch) }
+    ];
+    const shortfall = r.D < r.capital;
+    const shortNote = s.model === 'B' ? 'Con preferencia de capital, la pérdida la absorbe primero el capital del gestor.' : 'La pérdida se reparte a prorrata entre partícipes y gestor.';
+    let sens;
+    if (venta) {
+      const cols = [10, 12, 15, 18];
+      const rows = [-0.1, -0.05, 0, 0.05, 0.1];
+      sens = {
+        caption: 'Precio de venta × duración', corner: 'Venta \\ meses', cols: cols.map((c) => c + ' m'),
+        rows: rows.map((d) => ({ label: eur(s.sale * (1 + d)), cells: cols.map((m) => { const x = this.run({ ...s, sale: s.sale * (1 + d), months: m }).ret; return { v: pct(x), style: 'padding: 10px; text-align: right; ' + (x < 0 ? 'background: #fef6f6; color: #8b2a2a;' : d === 0 && m === s.months ? 'background: #f2f4fa; color: #0c062b; font-weight: 700;' : 'color: #0c062b;') }; }) }))
+      };
+    } else {
+      const cols = [80, 90, 95, 100];
+      const rows = [-0.15, -0.075, 0, 0.075, 0.15];
+      sens = {
+        caption: 'Precio de salida × ocupación', corner: 'Salida \\ ocupación', cols: cols.map((c) => c + ' %'),
+        rows: rows.map((d) => ({ label: eur(s.exitPrice * (1 + d)), cells: cols.map((o) => { const x = this.run({ ...s, exitPrice: s.exitPrice * (1 + d), occ: o }).ret; return { v: pct(x), style: 'padding: 10px; text-align: right; ' + (x < 0 ? 'background: #fef6f6; color: #8b2a2a;' : d === 0 && o === s.occ ? 'background: #f2f4fa; color: #0c062b; font-weight: 700;' : 'color: #0c062b;') }; }) }))
+      };
+    }
+    const pl = r.total - s.amount;
+    const netRent = s.rent * (s.occ || 0) / 100 * (1 - (s.opex || 0) / 100);
+    return {
+      amount: s.amount, projBtns, modelBtns, sliders, fall, shortfall, shortNote, sens, isRent: !venta,
+      modelTag: models.find((m) => m[0] === s.model)[1],
+      out: {
+        total: eur(r.total), pl: (pl >= 0 ? '+' : '') + eur(pl) + (pl >= 0 ? ' de resultado' : ' de pérdida'),
+        plStyle: 'font-family: Manrope, sans-serif; font-size: 20px; font-weight: 600; color: ' + (pl < 0 ? '#ec7a7a;' : '#68c0b5;'),
+        capital: eur(r.capitalBack), interimLabel: venta ? 'Distribuciones intermedias' : 'De ello, rentas',
+        interim: venta ? '—' : eur(r.interimInv), ret: pct(r.ret), ann: r.ret > 0 ? pct(r.ann) : 'No aplica',
+        dur: venta ? s.months + ' meses' : s.years + ' años'
+      },
+      yields: venta ? {} : { gross: pct(s.rent / 225000), net: pct(netRent / 225000), total: pct(r.ret) },
+      onAmount: (e) => { const v = Math.round(Number(e.target.value) / 5000) * 5000; if (!isNaN(v)) this.setState({ amount: Math.min(200000, Math.max(10000, v)) }); },
+      reset: () => this.setState(this.base(s.proj))
+    };
+  }
+}
+</script>
+</body>
+</html>
