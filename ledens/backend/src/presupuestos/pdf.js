@@ -70,13 +70,17 @@ export function buildBudget(records, { includesVat, vatRate, notes, title, addre
 
 // ---- 1. Text layer ---------------------------------------------------------
 
+export const MAX_PAGES = 200;
+
 async function textLines(content) {
   let pdf;
   try {
     pdf = await getDocument({ data: new Uint8Array(content), isEvalSupported: false, useSystemFonts: true, disableFontFace: true }).promise;
   } catch { fail(400, 'El fichero no es un PDF válido'); }
+  // Every page is read: dropping some would leave whole chapters out unnoticed.
+  if (pdf.numPages > MAX_PAGES) fail(400, `El PDF tiene ${pdf.numPages} páginas; el máximo es ${MAX_PAGES}. Divídelo en varios presupuestos.`);
   const pages = [];
-  for (let n = 1; n <= Math.min(pdf.numPages, 30); n++) {
+  for (let n = 1; n <= pdf.numPages; n++) {
     const items = (await (await pdf.getPage(n)).getTextContent()).items
       .filter((i) => i.str && i.str.trim())
       .map((i) => ({ str: i.str, x: i.transform[4], y: i.transform[5], w: i.width || 0 }));
@@ -142,7 +146,8 @@ function fromText(pages, fullText) {
     const anchors = [];
     for (const r of rows) {
       const q = parseNumber(r.f.quantity), p = parseNumber(r.f.unitPrice), t = parseNumber(r.f.total);
-      if (q != null && q > 0 && (p != null || t != null) && (p == null || t == null || matches(q, p, t) || r.f.unit)) {
+      // A line with figures is kept even if they do not add up: buildBudget flags it for review.
+      if (q != null && q > 0 && (p != null || t != null)) {
         r.anchor = { quantity: q, unitPrice: p, total: t, parts: {} };
         anchors.push(r);
       } else if (q == null && p == null && (t != null || /^\s*\d+(\.\d+)*\.?\s+\S/.test(r.f.chapter || r.f.code || r.f.name || '')) && !r.f.unit) {

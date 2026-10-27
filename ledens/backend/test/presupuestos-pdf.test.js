@@ -169,3 +169,19 @@ test('a jefe uploads the PDF, reviews it and sends it: the client finds it pendi
     assert.deepEqual(seen.version.chapters.map((c) => c.items.map((i) => i.kind)), [['confirmada', 'confirmada'], ['condicionada']]);
   } finally { s.close(); }
 });
+
+test('every page is read, and a line without unit whose figures do not add up is kept and flagged', async () => {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = (draw) => { const p = doc.addPage([842, 595]); draw((s, x, y) => p.drawText(s, { x, y, size: 8, font })); };
+  const header = (t) => [['Código', 30], ['Partida', 100], ['Cantidad', 470], ['Precio', 540], ['Importe', 620]].forEach(([s, x]) => t(s, x, 500));
+  page((t) => { header(t); t('A-1', 30, 470); t('Partida que cuadra', 100, 470); t('2', 470, 470); t('10,00', 540, 470); t('20,00', 620, 470);
+    t('A-2', 30, 440); t('Partida que no cuadra', 100, 440); t('2', 470, 440); t('10,00', 540, 440); t('25,00', 620, 440); });
+  for (let n = 0; n < 33; n++) page((t) => t('Anexo ' + n, 30, 500));
+  page((t) => { header(t); t('Z-1', 30, 470); t('Partida de la última página', 100, 470); t('1', 470, 470); t('5,00', 540, 470); t('5,00', 620, 470); });
+  const b = await readBudgetPdf(Buffer.from(await doc.save()));
+  const items = b.chapters.flatMap((c) => c.items);
+  assert.deepEqual(items.map((i) => i.code), ['A-1', 'A-2', 'Z-1'], 'page 35 is read too');
+  assert.deepEqual([items[1].unit, items[1].check, items[1].total], ['ud', true, 25]);
+  assert.equal(b.totalDocument, 50);
+});
