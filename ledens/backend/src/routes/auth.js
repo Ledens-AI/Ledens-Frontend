@@ -52,11 +52,13 @@ router.post('/register', async (req, res) => {
     // never registered (migration 024): this registration takes that row, so
     // the obra is waiting for them, but held — typing an email proves nothing,
     // so they see no obra until the invitation link or a Google/Microsoft login
-    // proves it. Same answer as any registration either way.
+    // proves it. Same answer as any registration either way. Only a client row:
+    // one promoted to jefe or admin before signing in must never be taken by
+    // whoever types its email (the hold only narrows what a client sees).
     if (!user) {
       user = (await getPool().query(
         `UPDATE users SET name = $2, password_hash = $3, access_held = true, registered_at = now(), updated_at = now()
-          WHERE lower(email) = lower($1) AND registered_at IS NULL
+          WHERE lower(email) = lower($1) AND registered_at IS NULL AND role = 'client'
           RETURNING id, email, name, role, created_at`,
         [email.trim(), name.trim(), passwordHash],
       )).rows[0];
