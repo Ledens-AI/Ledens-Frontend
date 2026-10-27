@@ -12,16 +12,17 @@ import { PresupuestoError } from './service.js';
 const fail = (status, message) => { throw new PresupuestoError(status, message); };
 const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
-// Header text → field. Order matters: the first match wins.
+// Header text → field, in Spanish or English. Order matters: the first match wins
+// («Unit price» is a price, «Unit» alone the unit).
 const COLUMNS = [
-  ['chapter', /^capitulo/],
-  ['code', /^(codigo|cod\b|ref\b|referencia)/],
-  ['description', /^(descripcion|definicion|detalle)/],
-  ['unitPrice', /^(precio|p\.\s*unit|pu\b)/],
-  ['total', /^(importe|total)/],
-  ['quantity', /^(cantidad|cant\b|medicion|uds\b)/],
-  ['unit', /^(unidad(es)?|unid\b|und\b|ud\b|u\b)$/],
-  ['name', /^(partida|concepto|unidad de obra|item)/],
+  ['chapter', /^(capitulo|chapter|section)/],
+  ['code', /^(codigo|cod\b|ref\b|referencia|code)/],
+  ['description', /^(descripcion|definicion|detalle|description|details)/],
+  ['unitPrice', /^(precio|p\.\s*unit|pu\b|unit price|unit cost|price|rate)/],
+  ['total', /^(importe|total|amount|subtotal)/],
+  ['quantity', /^(cantidad|cant\b|medicion|uds\b|quantity|qty|quant)/],
+  ['unit', /^(unidad(es)?|unid\b|und\b|ud\b|u\b|unit|units|uom)$/],
+  ['name', /^(partida|concepto|unidad de obra|item|work item|concept)/],
 ];
 export const classifyHeader = (text) => { const t = norm(text).replace(/:/g, ''); return (COLUMNS.find(([, re]) => re.test(t)) || [])[0] || null; };
 
@@ -36,9 +37,11 @@ export function parseNumber(s) {
   const n = Number(t);
   return Number.isFinite(n) ? n : null;
 }
+// «con IVA» / «incl. VAT» in the price headers.
+const VAT_INCLUDED = (t) => /con iva|iva incl|incl\.? ?vat|including vat|vat incl/.test(t) && !/sin iva|excl\.? ?vat|excluding vat/.test(t);
 const matches = (q, p, total) => Math.abs(q * p - total) <= Math.max(0.02, Math.abs(total) * 0.005);
 
-const KIND = (chapter) => { const t = norm(chapter); return /condicionad/.test(t) ? 'condicionada' : /opcion/.test(t) ? 'opcion' : /decision/.test(t) ? 'decision' : 'confirmada'; };
+const KIND = (chapter) => { const t = norm(chapter); return /condicionad|conditional/.test(t) ? 'condicionada' : /opcion|option/.test(t) ? 'opcion' : /decision/.test(t) ? 'decision' : 'confirmada'; };
 const chapterName = (s) => String(s || '').replace(/^\s*\d+(\.\d+)*\.?\s+/, '').trim();
 
 // Rows of { field: text } (already grouped per line item) → chapters.
@@ -120,12 +123,18 @@ function headerOf(lines) {
     // values are not taken for the nearest known one.
     lines[i].cells.forEach((c, n) => { if (!keys[n] && !cols.some((x) => Math.abs(x.cx - c.cx) < 8)) cols.push({ key: `_${n}`, cx: c.cx, text: c.str }); });
     const extra = near.flatMap((l) => l.cells).map((c) => norm(c.str)).join(' ');
-    const priceText = norm(near.flatMap((l) => l.cells).filter((c) => /precio|importe|total|iva/.test(norm(c.str))).map((c) => c.str).join(' '));
+    const priceText = norm(near.flatMap((l) => l.cells).filter((c) => /precio|importe|total|iva|price|amount|vat/.test(norm(c.str))).map((c) => c.str).join(' '));
     cols.sort((a, b) => a.cx - b.cx);
-    return { cols, y: Math.min(...near.map((l) => l.y)), top: Math.max(...near.map((l) => l.y)), includesVat: /con iva|iva incl/.test(priceText) && !/sin iva/.test(priceText), extra };
+    return { cols, y: Math.min(...near.map((l) => l.y)), top: Math.max(...near.map((l) => l.y)), includesVat: VAT_INCLUDED(priceText), extra };
   }
   return null;
 }
+// Page footers («Página 1 de 3», «Page 2 of 3») are never part of the table.
+const FOOTER = /p[aá]gina\s+\d+\s+de\s+\d+|page\s+\d+\s+of\s+\d+/i;
+// A chapter row's title: its longest text that is not just a number, whatever
+// column it falls in.
+const chapterTitle = (f) => Object.entries(f).filter(([k, v]) => !['quantity', 'unitPrice', 'total'].includes(k) && v && !/^[\d.,\s€%]+$/.test(v))
+  .map(([, v]) => v.trim()).sort((a, b) => b.length - a.length)[0] || '';
 const columnOf = (cols, cx) => cols.reduce((best, c) => (Math.abs(c.cx - cx) < Math.abs(best.cx - cx) ? c : best), cols[0]).key;
 
 function fromText(pages, fullText) {
@@ -150,18 +159,29 @@ function fromText(pages, fullText) {
       if (q != null && q > 0 && (p != null || t != null)) {
         r.anchor = { quantity: q, unitPrice: p, total: t, parts: {} };
         anchors.push(r);
-      } else if (q == null && p == null && (t != null || /^\s*\d+(\.\d+)*\.?\s+\S/.test(r.f.chapter || r.f.code || r.f.name || '')) && !r.f.unit) {
-        r.chapterHeader = (r.f.chapter || r.f.name || r.f.code || '').trim();
+      } else if (q == null && p == null && (t != null || /^\s*\d+(\.\d+)*\.?\s+\S/.test(r.f.chapter || r.f.code || r.f.name || '')) && !FOOTER.test(r.text) && chapterTitle(r.f)) {
+        r.chapterHeader = chapterTitle(r.f);
       }
     }
     if (!anchors.length) continue;
+    // Text lines: a name or description belongs to the line item whose figures
+    // are nearest, however long it is (cells are centred on their figures).
+    // Below the last figures of the page it continues only while the lines run
+    // on without a gap; after that come the notes (exclusions, conditions).
     const lastY = anchors[anchors.length - 1].y;
+    // Below the last figures, a numbered line without an amount is a note
+    // («1 Buried services…»), not a chapter.
+    for (const r of rows) if (r.chapterHeader && r.y < lastY && parseNumber(r.f.total) == null) delete r.chapterHeader;
+    let tail = lastY, inTail = true;
     for (const r of rows) {
-      if (r.anchor || r.chapterHeader) continue;
-      if (r.y < lastY - 30) { notes.push(r.text); continue; }
-      // A text line belongs to the line item whose figures are nearest (above or below).
+      if (r.anchor || FOOTER.test(r.text)) continue;
+      if (r.chapterHeader) { if (r.y < lastY) inTail = false; continue; }
+      if (r.y < lastY) {
+        if (inTail && tail - r.y <= 16) { tail = r.y; (anchors[anchors.length - 1].anchor.extra ||= []).push(r); continue; }
+        inTail = false; notes.push(r.text); continue;
+      }
       const a = anchors.reduce((best, x) => (Math.abs(x.y - r.y) < Math.abs(best.y - r.y) ? x : best), anchors[0]);
-      if (Math.abs(a.y - r.y) > 40) continue;
+      if (Math.abs(a.y - r.y) > 150) continue;
       (a.anchor.extra ||= []).push(r);
     }
     for (const r of rows) {
@@ -181,11 +201,11 @@ function fromText(pages, fullText) {
 function docFacts(fullText, notes = []) {
   const text = String(fullText || '');
   // The value is the next cell after the label (cells are joined with 3+ spaces).
-  const after = (label) => { const m = text.match(new RegExp(`${label}\\s*:\\s*([^\\n]{3,200})`, 'i')); return m ? m[1].split(/\s{3,}/)[0].replace(/\s*-\s*$/, '').trim() || null : null; };
-  const vat = text.match(/IVA\s*\(?\s*(\d{1,2}(?:[.,]\d{1,2})?)\s*%/i);
+  const after = (label) => { const m = text.match(new RegExp(`${label}[ \\t]*:[ \\t]*([^\\n]{3,200})`, 'i')); const v = m ? m[1].split(/\s{3,}/)[0].replace(/\s*-\s*$/, '').trim() : ''; return v && !/:$/.test(v) ? v : null; };
+  const vat = text.match(/(?:IVA|VAT)\s*\(?\s*(\d{1,2}(?:[.,]\d{1,2})?)\s*%/i);
   return {
-    title: after('Proyecto') || after('Obra'),
-    address: after('Direcci[oó]n'),
+    title: after('Proyecto') || after('Obra') || after('Project'),
+    address: after('Direcci[oó]n') || after('Address'),
     vatRate: vat ? Number(vat[1].replace(',', '.')) : 21,
     notes: notes.join('\n').slice(0, 5000) || null,
   };
@@ -241,8 +261,8 @@ export function fromLayout(result) {
       if (q != null && q > 0 && (p != null || t != null)) {
         last = { chapter: f.chapter, code: f.code, name: f.name, description: f.description, unit: f.unit, quantity: q, unitPrice: p, total: t };
         records.push(last);
-      } else if (q == null && p == null && (t != null || /^\s*\d+(\.\d+)*\.?\s+\S/.test(f.chapter || f.code || f.name || '')) && !f.unit) {
-        records.push({ chapterHeader: (f.chapter || f.name || f.code || '').trim() }); last = null;
+      } else if (q == null && p == null && (t != null || /^\s*\d+(\.\d+)*\.?\s+\S/.test(f.chapter || f.code || f.name || '')) && chapterTitle(f)) {
+        records.push({ chapterHeader: chapterTitle(f) }); last = null;
       } else if (last) {
         for (const k of ['name', 'description']) if (f[k]) last[k] = `${last[k] || ''} ${f[k]}`.trim();
       }
@@ -250,7 +270,7 @@ export function fromLayout(result) {
   }
   if (!header) return null;
   const priceText = header.text;
-  return buildBudget(records, { includesVat: /con iva|iva incl/.test(priceText) && !/sin iva/.test(priceText), ...docFacts(result.content), source: 'ocr' });
+  return buildBudget(records, { includesVat: VAT_INCLUDED(priceText), ...docFacts(result.content), source: 'ocr' });
 }
 
 // ---- Entry point -------------------------------------------------------------
