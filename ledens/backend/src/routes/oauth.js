@@ -42,6 +42,14 @@ async function signIn(req, res, provider, profile) {
   res.redirect(invite ? '/plataforma' : '/');
 }
 
+// A failed or cancelled provider login goes back to the page it started from:
+// the invitation page while a link is in progress, /auth otherwise.
+function failTo(req, res, code) {
+  if (!req.cookies?.[INVITE_COOKIE]) return res.redirect(`/auth?error=${code}`);
+  res.clearCookie(INVITE_COOKIE, { path: '/api/auth' });
+  res.redirect(`/invitacion?error=${code}`);
+}
+
 router.get('/google', (req, res) => {
   if (!google.isGoogleConfigured()) {
     return res.status(503).json({ error: 'Login con Google no disponible todavía' });
@@ -62,10 +70,10 @@ router.get('/google/callback', async (req, res) => {
 
   // Google itself reports a cancelled consent screen this way — not an error
   // on our side, so a plainer message than the generic failure below.
-  if (error) return res.redirect('/auth?error=google_cancelled');
+  if (error) return failTo(req, res, 'google_cancelled');
 
   if (!code || !state || !expectedState || state !== expectedState) {
-    return res.redirect('/auth?error=google_failed');
+    return failTo(req, res, 'google_failed');
   }
 
   try {
@@ -74,10 +82,10 @@ router.get('/google/callback', async (req, res) => {
     await signIn(req, res, 'google', profile);
   } catch (err) {
     if (err instanceof EmailInUseError) {
-      return res.redirect('/auth?error=google_email_in_use');
+      return failTo(req, res, 'google_email_in_use');
     }
     console.error('[oauth] google callback failed', err);
-    res.redirect('/auth?error=google_failed');
+    failTo(req, res, 'google_failed');
   }
 });
 
@@ -99,10 +107,10 @@ router.get('/microsoft/callback', async (req, res) => {
   const expectedState = req.cookies?.[STATE_COOKIE];
   res.clearCookie(STATE_COOKIE, { path: '/' });
 
-  if (error) return res.redirect('/auth?error=microsoft_cancelled');
+  if (error) return failTo(req, res, 'microsoft_cancelled');
 
   if (!code || !state || !expectedState || state !== expectedState) {
-    return res.redirect('/auth?error=microsoft_failed');
+    return failTo(req, res, 'microsoft_failed');
   }
 
   try {
@@ -111,10 +119,10 @@ router.get('/microsoft/callback', async (req, res) => {
     await signIn(req, res, 'microsoft', profile);
   } catch (err) {
     if (err instanceof EmailInUseError) {
-      return res.redirect('/auth?error=microsoft_email_in_use');
+      return failTo(req, res, 'microsoft_email_in_use');
     }
     console.error('[oauth] microsoft callback failed', err);
-    res.redirect('/auth?error=microsoft_failed');
+    failTo(req, res, 'microsoft_failed');
   }
 });
 

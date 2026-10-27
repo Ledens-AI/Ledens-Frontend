@@ -39,6 +39,7 @@ export function createApp() {
   app.use('/api/finanzas', createFinanzasRouter());
   app.use('/api/presupuestos', createPresupuestosRouter());
   app.use('/api/obras', createObrasRouter());
+  app.use('/api/invitaciones', createInvitacionesRouter());
 
   const apiLimiter = rateLimit({
     windowMs: 60 * 1000,
@@ -64,7 +65,6 @@ export function createApp() {
   app.use('/api/auth', oauthRouter);
   app.use('/api/auth', authRouter);
   app.use('/api/admin', adminRouter);
-  app.use('/api/invitaciones', createInvitacionesRouter());
   app.use('/api/bridge', bridgeRouter);
   app.use('/api', financeRouter);
 

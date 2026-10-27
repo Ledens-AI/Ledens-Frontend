@@ -68,7 +68,10 @@ export function createInvitacionesRouter({ authenticate, findUser, pool, origin 
   }));
   router.use('/aceptacion', accept);
 
+  // Mounted before the shared /api limiter (app.js): the team's screen has its
+  // own, and sending is limited per person in the service.
   const team = Router();
+  team.use(rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false, message: { error: 'Demasiadas peticiones. Inténtalo de nuevo en un minuto.' } }));
   team.use(authenticate || requireAuth, viewAs({ findUser }), checkRole('admin', 'jefe'));
   const svc = (req) => new InvitacionesService(db(), req.user);
   team.get('/:id', handle((req) => svc(req).list(req.params.id)));

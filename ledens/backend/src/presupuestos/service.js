@@ -263,6 +263,8 @@ export class PresupuestosService {
         declare: team && !p.parent_id && approved && !!p.start_date,
         ampliar: team && !p.parent_id && approved,
         assignJefe: this.user.role === 'admin' && !p.parent_id,
+        // Clients are invited to the obra (root presupuesto): /api/invitaciones.
+        invite: team && !p.parent_id,
       },
     };
   }

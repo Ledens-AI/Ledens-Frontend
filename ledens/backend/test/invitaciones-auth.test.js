@@ -121,6 +121,12 @@ test('with Google: the provider account must carry the invited email, and the li
     return fetch(`${base}/api/auth/google/callback?code=c&state=${state}`, { redirect: 'manual', headers: { cookie: `${cookieFrom(login, 'oauth_state')}; ${invite}` } });
   };
 
+  // Cancelling at Google goes back to the invitation page, not to /auth.
+  const started = await post('/api/invitaciones/aceptacion/proveedor', { token, provider: 'google' });
+  const cancelled = await fetch(`${base}/api/auth/google/callback?error=access_denied`, { redirect: 'manual', headers: { cookie: cookieFrom(started, 'ledens_invitacion') } });
+  assert.equal(cancelled.headers.get('location'), '/invitacion?error=google_cancelled');
+  assert.match(cancelled.headers.getSetCookie().find((c) => c.startsWith('ledens_invitacion=')) || '', /Expires=Thu, 01 Jan 1970/, 'the invitation cookie is cleared');
+
   const wrong = await viaGoogle('otra.persona@auth.test');
   assert.equal(wrong.status, 302);
   assert.equal(wrong.headers.get('location'), '/invitacion?error=otro_email');
