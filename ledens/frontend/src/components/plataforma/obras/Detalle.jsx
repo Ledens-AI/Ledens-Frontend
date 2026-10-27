@@ -80,7 +80,8 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
       <div className="obr-head">
         <div className="fin-project-head">
           <span className="fin-muted">{`${doc.ref} · ${t.version} ${v.number}${doc.parent ? ` · ${t.extensionOf(doc.parent.ref)}` : ''}`}</span>
-          <h2>{doc.title}</h2>
+          {can.rename ? <TitleEditor doc={doc} onSave={async (title) => { const d = await api.rename(doc.id, { title }); setDoc(d); setVersionId(null); toast?.('Nombre de la obra actualizado'); onChanged?.(); }} />
+            : <h2>{doc.title}</h2>}
           <span className="fin-muted">{[doc.address, t.client(doc.client?.name || '—'), t.jefeOf(doc.jefe?.name)].filter(Boolean).join(' · ')}</span>
         </div>
         <PhaseBadge phase={doc.phase} />
@@ -242,6 +243,38 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
           {dialogError ? <span className="fin-error-inline">{dialogError}</span> : null}
         </Dialog>
       ) : null}
+    </div>
+  );
+}
+
+// The obra's name, editable in place by the team (jefe asignado or admin) at
+// any stage; team-only, so in Spanish like the other team actions.
+function TitleEditor({ doc, onSave }) {
+  const [editing, setEditing] = useState(false), [value, setValue] = useState(doc.title);
+  const [saving, setSaving] = useState(false), [error, setError] = useState('');
+  const start = () => { setValue(doc.title); setError(''); setEditing(true); };
+  const save = async () => {
+    if (!value.trim() || value.trim() === doc.title) { setEditing(false); return; }
+    setSaving(true); setError('');
+    try { await onSave(value.trim()); setEditing(false); } catch (e) { setError(e.message); }
+    setSaving(false);
+  };
+  if (!editing) {
+    return (
+      <div className="obr-title">
+        <h2>{doc.title}</h2>
+        <button type="button" className="fin-iconbtn" title="Cambiar el nombre de la obra" aria-label="Cambiar el nombre de la obra" onClick={start}><i className="ri-pencil-line"></i></button>
+      </div>
+    );
+  }
+  return (
+    <div className="obr-title is-editing">
+      <input aria-label="Nombre de la obra" value={value} maxLength={200} autoFocus disabled={saving}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }} />
+      <button type="button" className="fin-btn is-primary" disabled={saving || !value.trim()} onClick={save}>{saving ? 'Guardando…' : 'Guardar'}</button>
+      <button type="button" className="fin-btn is-ghost" disabled={saving} onClick={() => setEditing(false)}>Cancelar</button>
+      {error ? <span className="fin-error-inline" role="alert">{error}</span> : null}
     </div>
   );
 }

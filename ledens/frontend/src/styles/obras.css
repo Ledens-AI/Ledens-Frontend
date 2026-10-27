@@ -128,3 +128,6 @@
 
 /* Lines read from a PDF whose quantity × price does not match their total. */
 .fin-table tr.obr-check td { background: #FFF6E5; }
+/* Obra name, editable in place by the team */
+.obr-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.obr-title.is-editing input { flex: 1; min-width: 200px; font-size: 20px; font-weight: 700; padding: 6px 10px; border: 1px solid #DCDCD8; border-radius: 8px; }
