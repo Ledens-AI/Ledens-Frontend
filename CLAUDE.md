@@ -79,6 +79,7 @@ Browser
 | Storage Account | `stledens<sfx>` | i.e. `stledensee069061`. Azure Files share `ledens-data` → mounted at `/data` |
 | Log Analytics | `log-ledens` | 30-day retention, 0.5 GB/day cap. Linked to `ledens-env` |
 | Key Vault | `kv-ledens<sfx>` | i.e. `kv-ledens-ee069061`. RBAC mode. Secrets: `database-url`, `jwt-secret`, OAuth placeholders (`google-*`/`microsoft-*`/`apple-*` — still `CHANGE_ME`, no app registered with any provider yet) |
+| Translator | `tr-ledens<sfx>` | i.e. `tr-ledens-ee069061`. Azure AI Translator, F0 (2M characters/month free), `westeurope`. Translates budget-PDF lines in other languages before matching them against the base de partidas. Key in Key Vault `translator-key`. Created 27 Oct 2026. |
 | PostgreSQL Flexible Server | `psql-ledens<sfx>` | i.e. `psql-ledens-ee069061`. PG 16, Burstable B1ms, 32 GB, db `ledens`, ~15 €/month. Firewall: `allow-azure-services` (`0.0.0.0` — Azure-origin traffic only; password + TLS still required) |
 
 ---
@@ -134,6 +135,7 @@ All `/api/auth/*` routes return `503` if `DATABASE_URL` isn't set (production, u
 | `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` | from an Entra app registration | **Still placeholder `CHANGE_ME`** — same open question as Google. |
 | `MICROSOFT_REDIRECT_URI` | e.g. `https://ambitious-island-05d1d8a03.2.azurestaticapps.net/api/auth/microsoft/callback` | Must exactly match a redirect URI registered in the Entra app. |
 | `OBRA_ARCHIVOS_BLOB_URL` | `https://stledensee069061.blob.core.windows.net` | Set in ACA. Enables Azure Blob for obra photos/documents (private container `OBRA_ARCHIVOS_CONTAINER`, default `obra-archivos`). **Unset in production ⇒ uploads answer 503** — never falls back to the 1 GB `/data` share. |
+| `AZURE_TRANSLATOR_KEY` / `AZURE_TRANSLATOR_REGION` | `secretref:translator-key` / `westeurope` | Set in ACA (27 Oct 2026). Key Vault secret `translator-key` (key of `tr-ledens-ee069061`) through `id-ledens-backend`. Unset ⇒ no translation: English lines of a budget PDF are matched by their PA-### code only, with an annotation. `AZURE_TRANSLATOR_ENDPOINT` optional (default `https://api.cognitive.microsofttranslator.com`). |
 | `AZURE_CLIENT_ID` | client id of `id-ledens-backend` | Set in ACA. The managed identity `DefaultAzureCredential` uses for Blob; needs «Storage Blob Data Contributor» on the container. |
 | `PUBLIC_APP_URL` | optional; default `https://ambitious-island-05d1d8a03.2.azurestaticapps.net` | Base of the link in invitation emails (`<PUBLIC_APP_URL>/invitacion#<token>`). Only needed for another host (local: `http://localhost:5173`). **Not set in ACA yet** — the default is the production SWA host. |
 
