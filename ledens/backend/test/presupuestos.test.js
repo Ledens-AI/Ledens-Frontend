@@ -244,3 +244,20 @@ test('an admin reassigns the jefe de obra; the new one (admin or jefe) takes ove
   await as(admin).assignJefe(obraId, { jefeId: jefe.id });
   assert.equal((await db.query("SELECT count(*)::int n FROM audit_log WHERE action='Jefe de obra asignado'")).rows[0].n, 2);
 });
+
+test('the assigned jefe (or an admin) renames the obra at any stage, also once approved; nobody else can', async () => {
+  await assert.rejects(as(cliente).rename(obraId, { title: 'Otro nombre' }), { status: 403 });
+  await assert.rejects(as(otroJefe).rename(obraId, { title: 'Otro nombre' }), { status: 404 }, 'a jefe of another obra does not even see it');
+  await assert.rejects(as(jefe).rename(obraId, { title: '   ' }), { status: 400 });
+  const before = (await as(jefe).get(obraId));
+  assert.equal(before.can.rename, true);
+  assert.ok(before.obra, 'already an approved obra');
+  const d = await as(jefe).rename(obraId, { title: 'Casa Marbella · Fontanería' });
+  assert.equal(d.title, 'Casa Marbella · Fontanería');
+  assert.equal((await as(cliente).get(obraId)).title, 'Casa Marbella · Fontanería', 'the client sees the new name');
+  assert.equal((await as(cliente).get(obraId)).can.rename, false);
+  assert.equal((await as(admin).rename(obraId, { title: 'Casa Marbella' })).title, 'Casa Marbella');
+  const log = (await db.query("SELECT detail FROM audit_log WHERE action='Nombre de obra' ORDER BY id")).rows.map((r) => r.detail);
+  assert.equal(log.length, 2);
+  assert.match(log[0], /→ «Casa Marbella · Fontanería»/);
+});

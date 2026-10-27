@@ -266,6 +266,7 @@ export class PresupuestosService {
         declare: team && !p.parent_id && approved && !!p.start_date,
         ampliar: team && !p.parent_id && approved,
         assignJefe: this.user.role === 'admin' && !p.parent_id,
+        rename: team,
         // Clients are invited to the obra (root presupuesto): /api/invitaciones.
         invite: team && !p.parent_id,
       },
@@ -476,6 +477,20 @@ export class PresupuestosService {
       if ((p.jefe_id || null) === (j?.id || null)) return;
       await db.query('UPDATE presupuestos SET jefe_id=$2, updated_at=now() WHERE id=$1 OR parent_id=$1', [p.id, j?.id || null]);
       await audit({ actor: this.actor(), action: 'Jefe de obra asignado', target: { id: p.client_id, label: p.ref }, detail: `${p.ref} · ${j ? j.name || j.email : 'sin asignar'}` }, db);
+    });
+    return this.get(id);
+  }
+
+  // The obra's name, at any stage (also once approved, when the draft editor is
+  // closed): the assigned jefe or an admin. Only the title; recorded in audit.
+  async rename(id, body = {}) {
+    const title = text(body.title, 'el nombre de la obra', { max: 200, required: true });
+    await this.tx(async (db) => {
+      const p = await this.load(db, id, { lock: true });
+      if (!this.isTeam(p)) fail(403, 'No tienes permiso para cambiar el nombre de esta obra');
+      if (p.title === title) return;
+      await db.query('UPDATE presupuestos SET title=$2, updated_at=now() WHERE id=$1', [p.id, title]);
+      await audit({ actor: this.actor(), action: 'Nombre de obra', target: { id: p.client_id, label: p.ref }, detail: `${p.ref} · «${p.title}» → «${title}»` }, db);
     });
     return this.get(id);
   }

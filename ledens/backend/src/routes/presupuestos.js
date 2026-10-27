@@ -47,7 +47,8 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, or
   router.post('/:id/rechazar', handle((req) => svc(req).reject(req.params.id, req.body || {})));
   router.post('/:id/comentarios', handle((req) => svc(req).comment(req.params.id, req.body || {})));
   router.put('/:id/jefe', handle((req) => svc(req).assignJefe(req.params.id, req.body || {})));
-  router.put('/:id/fechas', handle((req) => svc(req).schedule(req.params.id, req.body || {})));
+  router.put('/:id/nombre', handle((req) => svc(req).rename(req.params.id, req.body || {})));
+  router.put('/:id/fechas',handle((req) => svc(req).schedule(req.params.id, req.body || {})));
   router.put('/:id/produccion', handle((req) => svc(req).declare(req.params.id, req.body || {})));
   router.use((err, _req, res, next) => {
     if (err.type === 'entity.too.large') return res.status(413).json({ error: 'El PDF supera el tamaño máximo (20 MB)' });

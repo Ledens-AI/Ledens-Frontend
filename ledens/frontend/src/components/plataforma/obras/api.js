@@ -51,6 +51,7 @@ export const api = {
     return data;
   },
   assignJefe: (id, body) => request('PUT', `${base}/${id}/jefe`, body),
+  rename: (id, body) => request('PUT', `${base}/${id}/nombre`, body),
   schedule: (id, body) => request('PUT', `${base}/${id}/fechas`, body),
   declare: (id, body) => request('PUT', `${base}/${id}/produccion`, body),
 };
