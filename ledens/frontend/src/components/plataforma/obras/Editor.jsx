@@ -83,7 +83,7 @@ export default function Editor({ mode, doc, parent, initial, onSaved, onCancel }
             <label className="fin-field"><span>Cliente</span>
               <select value={clientId} onChange={(e) => setClientId(e.target.value)}>
                 <option value="">{opts ? 'Selecciona el cliente' : 'Cargando…'}</option>
-                {(opts?.clients || []).map((c) => <option key={c.id} value={c.id}>{`${c.name} · ${c.email}`}</option>)}
+                {(opts?.clients || []).map((c) => <option key={c.id} value={c.id}>{`${c.name} · ${c.email}${c.registered === false ? ' · pendiente de registro' : ''}`}</option>)}
               </select>
             </label>
             <label className="fin-field"><span>Jefe de obra</span>

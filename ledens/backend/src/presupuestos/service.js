@@ -114,7 +114,8 @@ export class PresupuestosService {
     if (this.user.role === 'admin') return '($1::uuid IS NOT NULL)';
     if (this.user.role === 'jefe') return 'p.jefe_id=$1';
     // The titular client, or one invited to the obra (obra_clientes, migration 023: they see it, only the titular decides).
-    if (this.user.role === 'client') return "(p.client_id=$1 OR EXISTS (SELECT 1 FROM obra_clientes oc WHERE oc.presupuesto_id=coalesce(p.parent_id, p.id) AND oc.user_id=$1)) AND EXISTS (SELECT 1 FROM presupuesto_versiones x WHERE x.presupuesto_id=p.id AND x.status<>'draft')";
+    // A password registration that claimed a pending client row sees nothing until the email is proven (migration 024).
+    if (this.user.role === 'client') return "(p.client_id=$1 OR EXISTS (SELECT 1 FROM obra_clientes oc WHERE oc.presupuesto_id=coalesce(p.parent_id, p.id) AND oc.user_id=$1)) AND EXISTS (SELECT 1 FROM presupuesto_versiones x WHERE x.presupuesto_id=p.id AND x.status<>'draft') AND NOT EXISTS (SELECT 1 FROM users me WHERE me.id=$1 AND me.access_held AND NOT me.email_verified)";
     return 'false';
   }
   versionFilter() { return this.isClient ? "AND v.status<>'draft'" : ''; }
@@ -302,8 +303,8 @@ export class PresupuestosService {
   // budgets for themselves, so they only get the clients.
   async options() {
     if (!['admin', 'jefe'].includes(this.user.role)) fail(403, 'Solo el equipo puede crear presupuestos');
-    const rows = (await this.pool.query("SELECT id, name, email, role FROM users WHERE role IN ('client','jefe','admin') ORDER BY coalesce(name,email)")).rows;
-    const pick = (role) => rows.filter((u) => u.role === role).map((u) => ({ id: u.id, name: u.name || u.email, email: u.email }));
+    const rows = (await this.pool.query("SELECT id, name, email, role, registered_at IS NOT NULL registered FROM users WHERE role IN ('client','jefe','admin') ORDER BY coalesce(name,email)")).rows;
+    const pick = (role) => rows.filter((u) => u.role === role).map((u) => ({ id: u.id, name: u.name || u.email, email: u.email, registered: u.registered }));
     // An admin may also be the person in charge of an obra.
     if (this.user.role === 'jefe') return { clients: pick('client'), jefes: [{ id: this.user.id, name: this.user.name || this.user.email, email: this.user.email }] };
     return { clients: pick('client'), jefes: [...pick('jefe'), ...pick('admin')] };
