@@ -10,6 +10,7 @@ import { createIngestionRouter } from './routes/ingestion.js';
 import { createFinanzasRouter } from './routes/finanzas.js';
 import { createPresupuestosRouter } from './routes/presupuestos.js';
 import { createObrasRouter } from './routes/obras.js';
+import { createInvitacionesRouter } from './routes/invitaciones.js';
 import bridgeRouter from './routes/bridge.js';
 import financeRouter from './routes/finance.js';
 
@@ -38,6 +39,7 @@ export function createApp() {
   app.use('/api/finanzas', createFinanzasRouter());
   app.use('/api/presupuestos', createPresupuestosRouter());
   app.use('/api/obras', createObrasRouter());
+  app.use('/api/invitaciones', createInvitacionesRouter());
 
   const apiLimiter = rateLimit({
     windowMs: 60 * 1000,

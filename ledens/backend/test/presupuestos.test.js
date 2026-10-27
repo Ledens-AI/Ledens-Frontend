@@ -35,7 +35,7 @@ before(async () => {
   await db.exec(`CREATE TABLE users(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), email text NOT NULL, name text, role text NOT NULL);
     CREATE TABLE audit_log(id bigint GENERATED ALWAYS AS IDENTITY, actor_id uuid REFERENCES users(id), actor_label text, action text,
       target_id uuid REFERENCES users(id), target_label text, detail text);`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql']) await db.exec(await fs.readFile(new URL('../src/db/migrations/' + m, import.meta.url), 'utf8'));
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql']) await db.exec(await fs.readFile(new URL('../src/db/migrations/' + m, import.meta.url), 'utf8'));
   [admin, jefe, otroJefe, cliente, otroCliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES
     ('admin@pre.test','Admin Test','admin'),('jefe@pre.test','Jefe Test','jefe'),('jefe2@pre.test','Otro Jefe','jefe'),
     ('cliente@pre.test','Cliente Test','client'),('cliente2@pre.test','Otro Cliente','client') RETURNING id,email,name,role`)).rows;

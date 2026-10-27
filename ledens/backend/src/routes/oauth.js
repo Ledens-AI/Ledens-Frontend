@@ -1,9 +1,11 @@
 import { Router } from 'express';
-import { isDbConfigured } from '../db/pool.js';
+import { getPool, isDbConfigured } from '../db/pool.js';
 import { createSession, sessionCookieOptions, SESSION_COOKIE } from '../auth/sessions.js';
 import { findOrCreateUserFromIdentity, EmailInUseError } from '../auth/identities.js';
 import * as google from '../auth/providers/google.js';
 import * as microsoft from '../auth/providers/microsoft.js';
+import { checkIdentity, acceptWithIdentity, InvitacionError } from '../invitaciones/service.js';
+import { INVITE_COOKIE } from './invitaciones.js';
 
 const router = Router();
 
@@ -13,6 +15,40 @@ const router = Router();
 // providers: only one OAuth attempt is ever in flight per browser at a time.
 const STATE_COOKIE = 'oauth_state';
 const STATE_MAX_AGE_MS = 10 * 60 * 1000;
+
+// Ends a provider login in a session. With an invitation link in progress
+// (cookie set by /api/invitaciones/aceptacion/proveedor) the provider account
+// must carry the invited email; the link proves that email, so the login
+// counts as verified and the invitation is accepted. Otherwise the login is the
+// ordinary one and the provider alone decides whether the email is verified.
+async function signIn(req, res, provider, profile) {
+  const invite = req.cookies?.[INVITE_COOKIE];
+  let user;
+  if (invite) {
+    res.clearCookie(INVITE_COOKIE, { path: '/api/auth' });
+    try {
+      await checkIdentity(getPool(), invite, profile.email);
+      user = await findOrCreateUserFromIdentity({ provider, ...profile, emailVerified: true });
+      await acceptWithIdentity(getPool(), invite, user.id, provider === 'google' ? 'Google' : 'Microsoft');
+    } catch (err) {
+      if (err instanceof InvitacionError) return res.redirect(`/invitacion?error=${encodeURIComponent(err.code || 'invitacion_no_valida')}`);
+      throw err;
+    }
+  } else {
+    user = await findOrCreateUserFromIdentity({ provider, ...profile });
+  }
+  const { token } = await createSession(user.id, { userAgent: req.get('user-agent'), ip: req.ip });
+  res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
+  res.redirect(invite ? '/plataforma' : '/');
+}
+
+// A failed or cancelled provider login goes back to the page it started from:
+// the invitation page while a link is in progress, /auth otherwise.
+function failTo(req, res, code) {
+  if (!req.cookies?.[INVITE_COOKIE]) return res.redirect(`/auth?error=${code}`);
+  res.clearCookie(INVITE_COOKIE, { path: '/api/auth' });
+  res.redirect(`/invitacion?error=${code}`);
+}
 
 router.get('/google', (req, res) => {
   if (!google.isGoogleConfigured()) {
@@ -34,25 +70,22 @@ router.get('/google/callback', async (req, res) => {
 
   // Google itself reports a cancelled consent screen this way — not an error
   // on our side, so a plainer message than the generic failure below.
-  if (error) return res.redirect('/auth?error=google_cancelled');
+  if (error) return failTo(req, res, 'google_cancelled');
 
   if (!code || !state || !expectedState || state !== expectedState) {
-    return res.redirect('/auth?error=google_failed');
+    return failTo(req, res, 'google_failed');
   }
 
   try {
     const accessToken = await google.exchangeCodeForToken(code);
     const profile = await google.fetchProfile(accessToken);
-    const user = await findOrCreateUserFromIdentity({ provider: 'google', ...profile });
-    const { token } = await createSession(user.id, { userAgent: req.get('user-agent'), ip: req.ip });
-    res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
-    res.redirect('/');
+    await signIn(req, res, 'google', profile);
   } catch (err) {
     if (err instanceof EmailInUseError) {
-      return res.redirect('/auth?error=google_email_in_use');
+      return failTo(req, res, 'google_email_in_use');
     }
     console.error('[oauth] google callback failed', err);
-    res.redirect('/auth?error=google_failed');
+    failTo(req, res, 'google_failed');
   }
 });
 
@@ -74,25 +107,22 @@ router.get('/microsoft/callback', async (req, res) => {
   const expectedState = req.cookies?.[STATE_COOKIE];
   res.clearCookie(STATE_COOKIE, { path: '/' });
 
-  if (error) return res.redirect('/auth?error=microsoft_cancelled');
+  if (error) return failTo(req, res, 'microsoft_cancelled');
 
   if (!code || !state || !expectedState || state !== expectedState) {
-    return res.redirect('/auth?error=microsoft_failed');
+    return failTo(req, res, 'microsoft_failed');
   }
 
   try {
     const { accessToken, idToken } = await microsoft.exchangeCodeForToken(code);
     const profile = await microsoft.fetchProfile(accessToken, { idToken });
-    const user = await findOrCreateUserFromIdentity({ provider: 'microsoft', ...profile });
-    const { token } = await createSession(user.id, { userAgent: req.get('user-agent'), ip: req.ip });
-    res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
-    res.redirect('/');
+    await signIn(req, res, 'microsoft', profile);
   } catch (err) {
     if (err instanceof EmailInUseError) {
-      return res.redirect('/auth?error=microsoft_email_in_use');
+      return failTo(req, res, 'microsoft_email_in_use');
     }
     console.error('[oauth] microsoft callback failed', err);
-    res.redirect('/auth?error=microsoft_failed');
+    failTo(req, res, 'microsoft_failed');
   }
 });
 

@@ -23,6 +23,16 @@ const EN = {
   'Selección de partidas no válida': 'Invalid selection of items.',
   'Solo puedes elegir partidas opcionales o pendientes de decisión de este presupuesto': 'You can only choose optional or pending-decision items of this quote.',
   'Origen no permitido': 'Origin not allowed.',
+  // /api/invitaciones/aceptacion — the invitation link (InvitacionPage)
+  'Invitaciones no disponibles todavía': 'Invitations are not available yet.',
+  'El enlace de invitación no es válido o ha caducado': 'The invitation link is not valid or has expired.',
+  'Ya tienes una contraseña: inicia sesión con ella para aceptar la invitación': 'You already have a password: log in with it to accept the invitation.',
+  'Has iniciado sesión con otra cuenta. Cierra sesión y vuelve a abrir el enlace.': 'You are logged in with another account. Log out and open the link again.',
+  'Entra con la cuenta del email al que se envió la invitación': 'Sign in with the account of the email the invitation was sent to.',
+  'Proveedor no válido': 'Invalid sign-in provider.',
+  'Login con Google no disponible todavía': 'Google sign-in is not available yet.',
+  'Login con Microsoft no disponible todavía': 'Microsoft sign-in is not available yet.',
+  'No autenticado': 'You are not logged in.',
 };
 
 export function apiErrorText(msg, lang, fallbackEn = 'Something went wrong. Please try again.') {

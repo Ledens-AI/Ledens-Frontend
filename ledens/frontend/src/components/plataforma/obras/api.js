@@ -84,6 +84,15 @@ export const archivos = {
   },
 };
 
+// Invitaciones de cliente a una obra (backend: ledens/backend/src/routes/invitaciones.js). Team only.
+const inv = (id) => `/api/invitaciones/obras/${id}`;
+export const invitaciones = {
+  list: (id) => request('GET', inv(id)),
+  invite: (id, body) => request('POST', inv(id), body),
+  resend: (id, invId) => request('POST', `${inv(id)}/${invId}/reenviar`),
+  revoke: (id, invId) => request('POST', `${inv(id)}/${invId}/revocar`),
+};
+
 // Labels and colours from the platform design.
 export const PHASE = {
   borrador: { label: 'Borrador', bg: '#EDEDEA', fg: '#3A3A38', icon: 'ri-draft-line' },

@@ -3,6 +3,7 @@ import { api, archivos, parseDecimal } from './api.js';
 import { Badge, Dialog, Empty, ErrorBox, Kpi } from '../finanzas/ui.jsx';
 import Editor from './Editor.jsx';
 import Archivos from './Archivos.jsx';
+import Clientes from './Clientes.jsx';
 import { useObrasI18n } from './i18n.js';
 
 export const PhaseBadge = ({ phase }) => { const { PHASE } = useObrasI18n(); const p = PHASE[phase] || PHASE.borrador; return <Badge bg={p.bg} fg={p.fg} icon={p.icon}>{p.label}</Badge>; };
@@ -69,7 +70,9 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
   const options = v.chapters.flatMap((c) => c.items).filter((i) => i.kind === 'decision' || i.kind === 'opcion');
   const optionalChosen = options.filter((i) => selected.includes(i.id)).reduce((a, i) => a + Number(i.amount), 0);
   // Photos and documents belong to the obra: an approved root presupuesto.
-  const tabs = [['presupuesto', t.tabBudget], ...(doc.obra ? [['obra', t.tabObra], ['archivos', t.tabFiles]] : []), ['conversacion', t.tabChat(doc.comments.length)]];
+  // «Clientes» is the team's (jefe asignado or admin) on the root presupuesto; «Ver como» keeps it to read.
+  const tabs = [['presupuesto', t.tabBudget], ...(doc.obra ? [['obra', t.tabObra], ['archivos', t.tabFiles]] : []), ['conversacion', t.tabChat(doc.comments.length)],
+    ...(doc.can?.invite ? [['clientes', 'Clientes']] : [])];
 
   return (
     <div className="fin-stack obr">
@@ -179,6 +182,8 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
       {tab === 'obra' && doc.obra ? <ObraTab doc={doc} can={can} busy={busy} autoEdit={initialEdit} onDeclare={(items) => act(() => api.declare(doc.id, { items }), 'Avance guardado')} error={dialogError} /> : null}
 
       {tab === 'archivos' && doc.obra ? <Archivos obraId={doc.id} readOnly={readOnly} toast={toast} /> : null}
+
+      {tab === 'clientes' && doc.can?.invite ? <Clientes obraId={doc.id} readOnly={readOnly} toast={toast} /> : null}
 
       {tab === 'conversacion' ? (
         <div className="fin-card">

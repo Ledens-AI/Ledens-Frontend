@@ -69,10 +69,13 @@ export async function findOrCreateUserFromIdentity(identity, _retried = false) {
     } else if (found && found.email_verified) {
       user = found;
     } else if (found) {
+      // An account created by a client invitation without a name carries the
+      // email as its name (invitaciones/service.js): the provider's name replaces it.
       const reclaimed = await client.query(
-        `UPDATE users SET email_verified = true, password_hash = NULL, updated_at = now()
+        `UPDATE users SET email_verified = true, password_hash = NULL, updated_at = now(),
+                name = CASE WHEN name = email AND coalesce($2, '') <> '' THEN $2 ELSE name END
           WHERE id = $1 RETURNING id, email, name, created_at`,
-        [found.id],
+        [found.id, name ?? null],
       );
       await client.query('DELETE FROM sessions WHERE user_id = $1', [found.id]);
       user = reclaimed.rows[0];

@@ -19,11 +19,12 @@ import TerminosPage from './components/TerminosPage.jsx';
 import CookiesPage from './components/CookiesPage.jsx';
 import CookieConsent from './components/CookieConsent.jsx';
 import RegistroPage from './components/RegistroPage.jsx';
+import InvitacionPage from './components/InvitacionPage.jsx';
 import Plataforma from './components/plataforma/Plataforma.jsx';
 import RequireAuth from './components/RequireAuth.jsx';
 
 // Full-screen pages that bring their own logo/navigation instead of Header.
-const NO_HEADER = ['/registro', '/plataforma'];
+const NO_HEADER = ['/registro', '/plataforma', '/invitacion'];
 
 /* The full landing page */
 function LandingPage({ onOpenLead }) {
@@ -69,6 +70,8 @@ export default function App() {
         <Route path="/" element={<LandingPage onOpenLead={openLead} />} />
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/registro" element={<RegistroPage />} />
+        {/* Link of a client invitation: the token is in the #fragment */}
+        <Route path="/invitacion" element={<InvitacionPage />} />
         <Route
           path="/plataforma"
           element={

@@ -26,7 +26,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
   countRef.current = onCount;
   const load = useCallback(() => api.list().then((d) => {
     setList(d.presupuestos); setError('');
-    countRef.current?.(d.presupuestos.filter((p) => (panel === 'client' ? p.phase === 'pendiente' : p.phase === 'cambios')).length);
+    countRef.current?.(d.presupuestos.filter((p) => (panel === 'client' ? p.phase === 'pendiente' && p.decides !== false : p.phase === 'cambios')).length);
   }, (e) => setError(e.message)), [panel]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setOpen(null); setCreating(false); setImporting(false); }, [screen]);
@@ -45,6 +45,9 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
   if (!list) return <div className="fin fin-loading fin-muted">{t.loading}</div>;
 
   const by = (...phases) => list.filter((p) => phases.includes(p.phase));
+  // Waiting for this client's decision: only the titular decides (invited clients follow).
+  const mine = list.filter((p) => p.phase === 'pendiente' && p.decides !== false);
+  const othersPending = list.filter((p) => p.phase === 'pendiente' && p.decides === false);
   const obras = list.filter((p) => p.phase === 'en_curso');
   const openP = (p, tab) => () => setOpen({ id: p.id, tab });
 
@@ -59,7 +62,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
       );
     }
     if (screen === 'home') {
-      const pend = by('pendiente');
+      const pend = mine;
       return (
         <div className="fin obr">
           <Head title={t.hello(firstName)} text={t.homeText} />
@@ -69,6 +72,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
             <Kpi label={t.kObras} value={String(obras.length)} icon="ri-building-2-line" />
           </div>
           {pend.length ? <Section title={t.secPending} rows={pend} onOpen={openP} client /> : null}
+          <Section title={t.secPendingOther} hint={t.secPendingOtherHint} rows={othersPending} onOpen={openP} client />
           {obras.length ? <div className="obr-cards">{obras.map((p) => <ObraCard key={p.id} p={p} onClick={openP(p, 'obra')} />)}</div> : null}
           {!list.length ? <Empty icon="ri-file-list-3-line" title={t.noBudgets} text={t.noBudgetsHome} /> : null}
         </div>
@@ -78,7 +82,8 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
       <div className="fin obr">
         <Head title={t.presuTitle} text={t.presuText} />
         {!list.length ? <Empty icon="ri-file-list-3-line" title={t.noBudgets} text={t.noBudgetsList} /> : null}
-        <Section title={t.secPending} rows={by('pendiente')} onOpen={openP} client />
+        <Section title={t.secPending} rows={mine} onOpen={openP} client />
+        <Section title={t.secPendingOther} hint={t.secPendingOtherHint} rows={othersPending} onOpen={openP} client />
         <Section title={t.secReview} hint={t.secReviewHint} rows={by('cambios')} onOpen={openP} client />
         <Section title={t.secApproved} rows={by('aprobado', 'en_curso')} onOpen={openP} client />
         <Section title={t.secRejected} rows={by('rechazado')} onOpen={openP} client />

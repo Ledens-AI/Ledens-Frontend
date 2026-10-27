@@ -36,7 +36,7 @@ class PlataformaView extends React.Component {
   go=(screen,x)=>{if(!screen.startsWith(PREFIX[this.state.role]))return;this.setState(Object.assign({screen,notifOpen:false},x||{}));window.scrollTo(0,0);};
   componentDidMount(){if(this.state.role==='admin'){this.loadUsers();this.loadAudit();this.getJSON('/api/bridge/workspace/counts').then(d=>this.setState({finBridgePending:d.pending,finConciliationPending:d.reconciliation??d.pending}),()=>{});}if(this.state.role!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.pendientes}),()=>{});this.loadPresu();}
   // Badge and notification counts: presupuestos waiting for this user.
-  loadPresu=()=>this.getJSON('/api/presupuestos').then(d=>{const n=k=>d.presupuestos.filter(p=>p.phase===k).length;this.setState({presu:{pendiente:n('pendiente'),cambios:n('cambios')}});},()=>this.setState({presu:null}));
+  loadPresu=()=>this.getJSON('/api/presupuestos').then(d=>{const n=k=>d.presupuestos.filter(p=>p.phase===k&&(k!=='pendiente'||p.decides!==false)).length;this.setState({presu:{pendiente:n('pendiente'),cambios:n('cambios')}});},()=>this.setState({presu:null}));
   getJSON=async(url)=>{const r=await fetch(url,{headers:viewAsHeaders()});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'No se pudieron cargar los datos.');return d;};
   loadUsers=()=>this.getJSON('/api/admin/users').then(d=>this.setState({adminUsers:d.users}),e=>{this.setState({adminUsers:[]});this.flash(e.message);});
   loadAudit=()=>this.getJSON('/api/admin/audit').then(d=>this.setState({adminAudit:d.entries}),e=>this.flash(e.message));

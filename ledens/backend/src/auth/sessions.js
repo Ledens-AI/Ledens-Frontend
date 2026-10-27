@@ -6,8 +6,9 @@ const SESSION_DAYS = 30;
 
 // Only a hash of the session token is stored in the database — same reasoning
 // as password hashing: a leak of the `sessions` table alone should not let
-// anyone log in as someone else.
-const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
+// anyone log in as someone else. Invitation links (invitaciones/service.js)
+// store their tokens the same way.
+export const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
 export async function createSession(userId, { userAgent, ip } = {}) {
   const token = crypto.randomBytes(32).toString('hex');
