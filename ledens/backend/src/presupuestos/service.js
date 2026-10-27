@@ -31,6 +31,11 @@ const money = (c) => (Math.round(c) / 100).toFixed(2);
 const vatOf = (baseCents, rate) => Math.round(baseCents * Number(rate) / 100);
 const pct = (part, whole) => (whole > 0 ? Math.round(part / whole * 1000) / 10 : 0);
 
+// The optional / pending-decision lines chosen on approval.
+const selection = (selected = []) => {
+  if (!Array.isArray(selected) || selected.length > 1000 || !selected.every(isUuid)) fail(400, 'Selección de partidas no válida');
+  return selected;
+};
 const text = (v, field, { max, required } = {}) => {
   if (v === undefined || v === null || (typeof v === 'string' && !v.trim())) {
     if (required) fail(400, `Falta ${field}`);
@@ -261,6 +266,8 @@ export class PresupuestosService {
         edit: team && !!latestAll && ['draft', 'sent', 'changes_requested'].includes(latestAll.status),
         send: team && latestAll?.status === 'draft',
         decide: isOwner && latestSent?.status === 'sent' && shown.id === latestSent.id,
+        // An admin records an approval given outside the platform, on the latest version.
+        approveOnBehalf: this.user.role === 'admin' && !!latestAll && ['draft', 'sent', 'changes_requested'].includes(latestAll.status) && shown.id === latestAll.id,
         comment: team || isOwner,
         schedule: team && !p.parent_id && approved,
         declare: team && !p.parent_id && approved && !!p.start_date,
@@ -414,18 +421,52 @@ export class PresupuestosService {
   }
 
   async approve(id, body = {}) {
-    const selected = body.selected ?? [];
-    if (!Array.isArray(selected) || selected.length > 1000 || !selected.every(isUuid)) fail(400, 'Selección de partidas no válida');
+    const selected = selection(body.selected);
     await this.tx(async (db) => {
       const { p, v } = await this.decision(db, id, body.versionId);
-      if (selected.length) {
-        const ok = (await db.query("SELECT count(*)::int n FROM presupuesto_partidas WHERE version_id=$1 AND kind IN ('decision','opcion') AND id=ANY($2::uuid[])", [v.id, selected])).rows[0].n;
-        if (ok !== new Set(selected).size) fail(400, 'Solo puedes elegir partidas opcionales o pendientes de decisión de este presupuesto');
-        await db.query('UPDATE presupuesto_partidas SET selected=true WHERE version_id=$1 AND id=ANY($2::uuid[])', [v.id, selected]);
-      }
-      await db.query("UPDATE presupuesto_versiones SET status='approved', decided_at=now(), decided_by=$2 WHERE id=$1", [v.id, this.user.id]);
-      await db.query("DELETE FROM presupuesto_versiones WHERE presupuesto_id=$1 AND status='draft'", [p.id]);
+      await this.markApproved(db, p, v, selected);
       await audit({ actor: this.actor(), action: 'Presupuesto aprobado', target: { id: p.client_id, label: p.ref }, detail: `${p.ref} v${v.number}${selected.length ? ` · ${selected.length} partidas opcionales elegidas` : ''}` }, db);
+    });
+    return this.get(id);
+  }
+
+  // The chosen optional lines, the version approved, leftover drafts dropped.
+  async markApproved(db, p, v, selected) {
+    if (selected.length) {
+      const ok = (await db.query("SELECT count(*)::int n FROM presupuesto_partidas WHERE version_id=$1 AND kind IN ('decision','opcion') AND id=ANY($2::uuid[])", [v.id, selected])).rows[0].n;
+      if (ok !== new Set(selected).size) fail(400, 'Solo puedes elegir partidas opcionales o pendientes de decisión de este presupuesto');
+      await db.query('UPDATE presupuesto_partidas SET selected=true WHERE version_id=$1 AND id=ANY($2::uuid[])', [v.id, selected]);
+    }
+    await db.query("UPDATE presupuesto_versiones SET status='approved', decided_at=now(), decided_by=$2 WHERE id=$1", [v.id, this.user.id]);
+    await db.query("DELETE FROM presupuesto_versiones WHERE presupuesto_id=$1 AND status='draft' AND id<>$2", [p.id, v.id]);
+  }
+
+  // An admin records an approval the client gave outside the platform (in
+  // person, by phone or email). The latest version is approved — sent first if
+  // it is still a draft — with decided_by = the admin, a mandatory reason shown
+  // to the client in the conversation, and its own audit entry.
+  async approveOnBehalf(id, body = {}) {
+    if (this.user.role !== 'admin') fail(403, 'Solo un administrador puede aprobar en nombre del cliente');
+    const selected = selection(body.selected);
+    const reason = text(body.reason, 'el motivo (cómo aprobó el cliente)', { max: 1000, required: true });
+    if (reason.length < 5) fail(400, 'Explica cómo aprobó el cliente (al menos 5 caracteres)');
+    await this.tx(async (db) => {
+      const p = await this.load(db, id, { lock: true });
+      const v = await this.latest(db, p.id);
+      if (!v) fail(400, 'Este presupuesto no tiene ninguna versión');
+      if (body.versionId && body.versionId !== v.id) fail(409, 'Hay una versión más reciente de este presupuesto. Recárgalo.');
+      if (!['draft', 'sent', 'changes_requested'].includes(v.status)) fail(409, 'Este presupuesto ya está aprobado o rechazado');
+      if (v.status === 'draft') {
+        if (!(await db.query('SELECT 1 FROM presupuesto_partidas WHERE version_id=$1 LIMIT 1', [v.id])).rows.length) fail(400, 'Añade al menos una partida antes de aprobarlo');
+        await db.query("UPDATE presupuesto_versiones SET status='superseded' WHERE presupuesto_id=$1 AND status IN ('sent','changes_requested')", [p.id]);
+        await db.query("UPDATE presupuesto_versiones SET sent_at=now(), sent_by=$2 WHERE id=$1", [v.id, this.user.id]);
+      }
+      await this.markApproved(db, p, v, selected);
+      const client = (await db.query('SELECT name, email FROM users WHERE id=$1', [p.client_id])).rows[0];
+      await db.query('INSERT INTO presupuesto_comentarios (presupuesto_id, version_id, author_id, body) VALUES ($1,$2,$3,$4)',
+        [p.id, v.id, this.user.id, `Aprobado en nombre de ${client?.name || client?.email || 'el cliente'}: ${reason}`]);
+      await audit({ actor: this.actor(), action: 'Presupuesto aprobado en nombre del cliente', target: { id: p.client_id, label: p.ref },
+        detail: `${p.ref} v${v.number} · ${reason}${selected.length ? ` · ${selected.length} partidas opcionales elegidas` : ''}` }, db);
     });
     return this.get(id);
   }

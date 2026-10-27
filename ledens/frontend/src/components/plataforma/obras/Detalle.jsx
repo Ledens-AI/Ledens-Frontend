@@ -95,7 +95,8 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
 
       {tab === 'presupuesto' ? (
         <>
-          <TeamActions doc={doc} can={can} busy={busy} onEdit={editLatest} onSend={() => { setDialogError(''); setDialog('send'); }} onAmpliar={() => setEditing('ampliacion')} />
+          <TeamActions doc={doc} can={can} busy={busy} onEdit={editLatest} onSend={() => { setDialogError(''); setDialog('send'); }} onAmpliar={() => setEditing('ampliacion')}
+            onApproveOnBehalf={() => { setDialogError(''); setDialog('behalf'); }} />
           {can.decide && v.status === 'sent' ? (
             <div className="fin-card obr-decide">
               <div>
@@ -207,6 +208,10 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
         </div>
       ) : null}
 
+      {dialog === 'behalf' ? (
+        <BehalfDialog doc={doc} version={v} options={options} busy={busy} error={dialogError} onClose={() => setDialog(null)}
+          onConfirm={(body) => act(() => api.approveOnBehalf(doc.id, body), 'Presupuesto aprobado en nombre del cliente')} />
+      ) : null}
       {dialog === 'approve' ? (
         <Dialog title={t.approveTitle} onClose={() => setDialog(null)} actions={<>
           <button type="button" className="fin-btn" onClick={() => setDialog(null)}>{t.cancel}</button>
@@ -252,8 +257,8 @@ function BackLink({ onBack }) {
 }
 
 // Team only (edit, send, extend): Spanish.
-function TeamActions({ doc, can, busy, onEdit, onSend, onAmpliar }) {
-  if (!can.edit && !can.send && !can.ampliar) return null;
+function TeamActions({ doc, can, busy, onEdit, onSend, onAmpliar, onApproveOnBehalf }) {
+  if (!can.edit && !can.send && !can.ampliar && !can.approveOnBehalf) return null;
   const last = doc.versions[0];
   return (
     <div className="fin-card obr-decide">
@@ -265,8 +270,39 @@ function TeamActions({ doc, can, busy, onEdit, onSend, onAmpliar }) {
         {can.ampliar ? <button type="button" className="fin-btn" onClick={onAmpliar} disabled={busy}><i className="ri-add-line"></i>Nueva ampliación</button> : null}
         {can.edit ? <button type="button" className="fin-btn" onClick={onEdit} disabled={busy}><i className="ri-edit-2-line"></i>{last.status === 'draft' ? 'Editar borrador' : 'Preparar nueva versión'}</button> : null}
         {can.send ? <button type="button" className="fin-btn is-primary" onClick={onSend} disabled={busy}><i className="ri-send-plane-line"></i>Enviar al cliente</button> : null}
+        {can.approveOnBehalf ? <button type="button" className="fin-btn" onClick={onApproveOnBehalf} disabled={busy}><i className="ri-user-received-2-line"></i>Aprobar en nombre del cliente</button> : null}
       </div>
     </div>
+  );
+}
+
+// Admins: record an approval the client gave outside the platform (team-only, in Spanish).
+function BehalfDialog({ doc, version, options, busy, error, onClose, onConfirm }) {
+  const [reason, setReason] = useState(''), [chosen, setChosen] = useState([]);
+  const draft = version.status === 'draft';
+  return (
+    <Dialog title="Aprobar en nombre del cliente" onClose={onClose} actions={<>
+      <button type="button" className="fin-btn" onClick={onClose}>Cancelar</button>
+      <button type="button" className="fin-btn is-primary" disabled={busy || reason.trim().length < 5} onClick={() => onConfirm({ versionId: version.id, reason: reason.trim(), selected: chosen })}>
+        {busy ? 'Aprobando…' : 'Aprobar'}</button></>}>
+      <p>{`Registras que ${doc.client?.name || 'el cliente'} ha aprobado la versión ${version.number} de ${doc.ref} fuera de la plataforma.`}
+        {draft ? ' Como todavía es un borrador, se enviará y aprobará a la vez.' : ''}</p>
+      {options.length ? (
+        <fieldset className="fin-choices">
+          <legend>Partidas opcionales que ha elegido</legend>
+          {options.map((o) => (
+            <label key={o.id} className="fin-choice">
+              <input type="checkbox" checked={chosen.includes(o.id)} onChange={(e) => setChosen((s) => (e.target.checked ? [...s, o.id] : s.filter((x) => x !== o.id)))} />
+              <span>{o.name}</span>
+            </label>
+          ))}
+        </fieldset>
+      ) : null}
+      <label className="fin-field"><span>Cómo lo aprobó</span>
+        <textarea rows={3} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ej. aprobado por correo el 20/10, firmado en la visita…" /></label>
+      <p className="fin-muted fin-small">El cliente verá esta nota en la conversación y queda registrado en la auditoría con tu nombre.</p>
+      {error ? <span className="fin-error-inline" role="alert">{error}</span> : null}
+    </Dialog>
   );
 }
 
