@@ -125,3 +125,6 @@
   .obr-car-nav.is-next { right: 6px; }
   .obr-car-thumb { flex-basis: 64px; height: 52px; }
 }
+
+/* Lines read from a PDF whose quantity × price does not match their total. */
+.fin-table tr.obr-check td { background: #FFF6E5; }

@@ -6,21 +6,21 @@ import { ErrorBox } from '../finanzas/ui.jsx';
 const blankItem = () => ({ code: '', name: '', description: '', unit: 'ud', quantity: '', unitPrice: '', kind: 'confirmada' });
 const fromVersion = (v) => (v?.chapters || []).map((c) => ({
   name: c.name,
-  items: c.items.map((i) => ({ code: i.code || '', name: i.name, description: i.description || '', unit: i.unit, quantity: String(Number(i.quantity)).replace('.', ','), unitPrice: String(Number(i.unitPrice)).replace('.', ','), kind: i.kind })),
+  items: c.items.map((i) => ({ code: i.code || '', name: i.name, description: i.description || '', unit: i.unit, quantity: String(Number(i.quantity)).replace('.', ','), unitPrice: String(Number(i.unitPrice)).replace('.', ','), kind: i.kind, check: !!i.check })),
 }));
 
 /* Budget editor: chapters with coded lines (unit, quantity, net unit price,
  * kind), one VAT rate, conditions/exclusions. mode: 'new' (admin picks client
  * and jefe), 'ampliacion' (of `parent`) or 'edit' (the presupuesto `doc`). The
  * server validates everything again. */
-export default function Editor({ mode, doc, parent, onSaved, onCancel }) {
-  const [title, setTitle] = useState(doc?.title || (mode === 'ampliacion' ? `Ampliación de ${parent.title}` : ''));
-  const [address, setAddress] = useState(doc?.address || '');
+export default function Editor({ mode, doc, parent, initial, onSaved, onCancel }) {
+  const [title, setTitle] = useState(doc?.title || initial?.title || (mode === 'ampliacion' ? `Ampliación de ${parent.title}` : ''));
+  const [address, setAddress] = useState(doc?.address || initial?.address || '');
   // An ampliación starts with the VAT rate of the obra it extends.
   const rateOf = doc || (mode === 'ampliacion' ? parent : null);
-  const [vatRate, setVatRate] = useState(rateOf ? String(Number(rateOf.version.vatRate)).replace('.', ',') : '21');
-  const [notes, setNotes] = useState(doc?.version.notes || '');
-  const [chapters, setChapters] = useState(() => (doc ? fromVersion(doc.version) : [{ name: '', items: [blankItem()] }]));
+  const [vatRate, setVatRate] = useState(rateOf ? String(Number(rateOf.version.vatRate)).replace('.', ',') : initial ? String(initial.vatRate).replace('.', ',') : '21');
+  const [notes, setNotes] = useState(doc?.version.notes || initial?.notes || '');
+  const [chapters, setChapters] = useState(() => (doc ? fromVersion(doc.version) : initial ? fromVersion(initial) : [{ name: '', items: [blankItem()] }]));
   const [opts, setOpts] = useState(null);
   const [clientId, setClientId] = useState('');
   const [jefeId, setJefeId] = useState('');
@@ -31,12 +31,13 @@ export default function Editor({ mode, doc, parent, onSaved, onCancel }) {
 
   const setChapter = (ci, patch) => setChapters((cs) => cs.map((c, i) => (i === ci ? { ...c, ...patch } : c)));
   const setItem = (ci, ii, patch) => setChapters((cs) => cs.map((c, i) => (i === ci ? { ...c, items: c.items.map((it, j) => (j === ii ? { ...it, ...patch } : it)) } : c)));
-  const lineAmount = (it) => { const q = parseDecimal(it.quantity, 3), p = parseDecimal(it.unitPrice, 2); return q && p ? Number(q) * Number(p) : 0; };
+  const lineAmount = (it) => { const q = parseDecimal(it.quantity, 3), p = parseDecimal(it.unitPrice, 6); return q && p ? Number(q) * Number(p) : 0; };
   const counted = (it) => it.kind === 'confirmada' || it.kind === 'condicionada';
-  const base = chapters.reduce((a, c) => a + c.items.reduce((b, it) => b + (counted(it) ? Math.round(lineAmount(it) * 100) / 100 : 0), 0), 0);
+  // Summed unrounded, rounded once (as the server does).
+  const base = Math.round(chapters.reduce((a, c) => a + c.items.reduce((b, it) => b + (counted(it) ? lineAmount(it) : 0), 0), 0) * 100) / 100;
   const rate = Number(parseDecimal(vatRate, 2) ?? 0);
 
-  const save = async () => {
+  const save = async (send) => {
     setError('');
     const r = parseDecimal(vatRate, 2);
     if (r === null || Number(r) >= 100) return setError('Tipo de IVA no válido');
@@ -45,11 +46,12 @@ export default function Editor({ mode, doc, parent, onSaved, onCancel }) {
       const items = [];
       for (const [ii, it] of c.items.entries()) {
         const where = `partida ${ci + 1}.${ii + 1}`;
-        const quantity = parseDecimal(it.quantity, 3), unitPrice = parseDecimal(it.unitPrice, 2);
+        const quantity = parseDecimal(it.quantity, 3), unitPrice = parseDecimal(it.unitPrice, 6);
         if (!it.name.trim()) return setError(`Falta el nombre de la ${where}`);
         if (!quantity || Number(quantity) === 0) return setError(`Cantidad no válida en la ${where}`);
         if (unitPrice === null) return setError(`Precio no válido en la ${where}`);
-        items.push({ ...it, quantity, unitPrice });
+        const { check, ...line } = it;
+        items.push({ ...line, quantity, unitPrice });
       }
       body.chapters.push({ name: c.name, items });
     }
@@ -58,18 +60,20 @@ export default function Editor({ mode, doc, parent, onSaved, onCancel }) {
     if (mode === 'edit') body.version = doc.versions[0]?.number;
     setSaving(true);
     try {
-      onSaved(mode === 'edit' ? await api.save(doc.id, body) : await api.create(body));
+      onSaved(mode === 'edit' ? await api.save(doc.id, body) : await api.create(body), { send: send === true });
     } catch (e) { setError(e.message); setSaving(false); }
   };
 
   return (
     <div className="fin-stack obr-editor">
       <div className="fin-page-head">
-        <h1>{mode === 'new' ? 'Nuevo presupuesto' : mode === 'ampliacion' ? 'Nueva ampliación' : `Editar ${doc.ref}`}</h1>
+        <h1>{initial ? 'Revisar presupuesto leído del PDF' : mode === 'new' ? 'Nuevo presupuesto' : mode === 'ampliacion' ? 'Nueva ampliación' : `Editar ${doc.ref}`}</h1>
         <p>{mode === 'edit' && doc.versions[0]?.status !== 'draft'
           ? `El cliente ya tiene la versión ${doc.versions[0].number}. Al guardar se prepara la versión ${doc.versions[0].number + 1} como borrador; no la verá hasta que la envíes.`
+          : initial ? 'Comprueba capítulos, partidas, mediciones y precios, elige el cliente y envíaselo: quedará pendiente de su aprobación. Los precios se guardan sin IVA.'
           : 'Se guarda como borrador. El cliente no lo verá hasta que lo envíes. Los precios son sin IVA.'}</p>
       </div>
+      {initial ? <PdfSummary initial={initial} all={Math.round(chapters.reduce((a, c) => a + c.items.reduce((b, it) => b + lineAmount(it), 0), 0) * 100) / 100} rate={rate} /> : null}
       {error ? <ErrorBox message={error} /> : null}
       <div className="fin-card fin-form">
         <div className="obr-grid">
@@ -104,7 +108,7 @@ export default function Editor({ mode, doc, parent, onSaved, onCancel }) {
               <thead><tr><th>Código</th><th>Partida y descripción</th><th>Tipo</th><th>Unidad</th><th className="fin-num">Cantidad</th><th className="fin-num">Precio (sin IVA)</th><th className="fin-num">Importe</th><th></th></tr></thead>
               <tbody>
                 {c.items.map((it, ii) => (
-                  <tr key={ii}>
+                  <tr key={ii} className={it.check ? 'obr-check' : undefined} title={it.check ? 'Cantidad × precio no coincide con el importe del PDF: revísala' : undefined}>
                     <td><input aria-label="Código" value={it.code} maxLength={40} onChange={(e) => setItem(ci, ii, { code: e.target.value })} className="obr-in obr-in-code" /></td>
                     <td>
                       <input aria-label="Partida" value={it.name} maxLength={300} onChange={(e) => setItem(ci, ii, { name: e.target.value })} className="obr-in" placeholder="Nombre de la partida" />
@@ -113,7 +117,7 @@ export default function Editor({ mode, doc, parent, onSaved, onCancel }) {
                     <td><select aria-label="Tipo" value={it.kind} onChange={(e) => setItem(ci, ii, { kind: e.target.value })}>{Object.entries(KIND).map(([k, d]) => <option key={k} value={k}>{d.label}</option>)}</select></td>
                     <td><input aria-label="Unidad" value={it.unit} maxLength={20} onChange={(e) => setItem(ci, ii, { unit: e.target.value })} className="obr-in obr-in-unit" /></td>
                     <td className="fin-num"><input aria-label="Cantidad" inputMode="decimal" value={it.quantity} onChange={(e) => setItem(ci, ii, { quantity: e.target.value })} className={'obr-in obr-in-num' + (it.quantity && !parseDecimal(it.quantity, 3) ? ' is-invalid' : '')} /></td>
-                    <td className="fin-num"><input aria-label="Precio unitario" inputMode="decimal" value={it.unitPrice} onChange={(e) => setItem(ci, ii, { unitPrice: e.target.value })} className={'obr-in obr-in-num' + (it.unitPrice && parseDecimal(it.unitPrice, 2) === null ? ' is-invalid' : '')} /></td>
+                    <td className="fin-num"><input aria-label="Precio unitario" inputMode="decimal" value={it.unitPrice} onChange={(e) => setItem(ci, ii, { unitPrice: e.target.value })} className={'obr-in obr-in-num' + (it.unitPrice && parseDecimal(it.unitPrice, 6) === null ? ' is-invalid' : '')} /></td>
                     <td className="fin-num fin-nowrap">{eur(lineAmount(it))}{counted(it) ? null : <div className="fin-muted fin-small">no suma</div>}</td>
                     <td><button type="button" className="fin-btn is-ghost is-small" aria-label="Quitar partida" onClick={() => setChapter(ci, { items: c.items.filter((_, j) => j !== ii) })}><i className="ri-close-line"></i></button></td>
                   </tr>
@@ -137,8 +141,28 @@ export default function Editor({ mode, doc, parent, onSaved, onCancel }) {
       </div>
       <div className="obr-actions">
         <button type="button" className="fin-btn" onClick={onCancel} disabled={saving}>Cancelar</button>
-        <button type="button" className="fin-btn is-primary" onClick={save} disabled={saving}><i className="ri-save-line"></i>{saving ? 'Guardando…' : 'Guardar borrador'}</button>
+        <button type="button" className={'fin-btn' + (initial ? '' : ' is-primary')} onClick={() => save(false)} disabled={saving}><i className="ri-save-line"></i>{saving ? 'Guardando…' : 'Guardar borrador'}</button>
+        {initial ? <button type="button" className="fin-btn is-primary" onClick={() => save(true)} disabled={saving}><i className="ri-send-plane-line"></i>{saving ? 'Guardando…' : 'Guardar y enviar al cliente'}</button> : null}
       </div>
+    </div>
+  );
+}
+
+// What was read from the PDF, to compare before sending.
+// `all`: every line, options included, as the PDF adds them up.
+function PdfSummary({ initial, all, rate }) {
+  const total = Math.round((all + all * rate / 100) * 100) / 100;
+  const doc = Number(initial.totalDocument);
+  const shown = initial.pricesIncludeVat ? total : all;
+  const differs = Math.abs(shown - doc) > 0.05;
+  return (
+    <div className="fin-stack">
+      <p className={differs ? 'fin-warn' : 'fin-muted'}>
+        <i className={initial.source === 'ocr' ? 'ri-scan-2-line' : 'ri-file-text-line'}></i>
+        {` Leído ${initial.source === 'ocr' ? 'con OCR' : 'del texto del PDF'}: suma de importes del PDF ${eur(doc)} ${initial.pricesIncludeVat ? 'con IVA (los precios se han pasado a base imponible)' : 'sin IVA'}; ahora ${eur(shown)}.`}
+        {differs ? ' No coinciden: revisa las partidas marcadas o las que falten.' : ''}
+      </p>
+      {initial.warnings?.length ? <div className="fin-warn"><i className="ri-error-warning-line"></i><span>{initial.warnings.join(' ')}</span></div> : null}
     </div>
   );
 }

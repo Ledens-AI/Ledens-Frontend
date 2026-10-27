@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { api, parseDecimal } from './api.js';
+import { api, archivos, parseDecimal } from './api.js';
 import { Badge, Dialog, Empty, ErrorBox, Kpi } from '../finanzas/ui.jsx';
 import Editor from './Editor.jsx';
 import Archivos from './Archivos.jsx';
@@ -158,6 +158,7 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
               </div>
             </div>
           )) : <Empty icon="ri-file-list-3-line" title={t.noItems} text={t.noItemsText} />}
+          {!doc.parent ? <BudgetDocs id={doc.id} /> : null}
           {v.notes ? <div className="fin-card"><h3>{t.notes}</h3><p className="obr-pre">{v.notes}</p></div> : null}
           {doc.ampliaciones.length ? (
             <div className="fin-card">
@@ -402,6 +403,22 @@ function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
         </div>
       ))}
       {editing ? actions : null}
+    </div>
+  );
+}
+
+// Documents kept with the presupuesto (e.g. the PDF presented to the client).
+function BudgetDocs({ id }) {
+  const { t } = useObrasI18n();
+  const [docs, setDocs] = useState([]);
+  useEffect(() => { archivos.list(id).then((d) => setDocs(d.documentos || []), () => setDocs([])); }, [id]);
+  if (!docs.length) return null;
+  return (
+    <div className="fin-card">
+      <h3>{t.budgetDocs}</h3>
+      <ul className="obr-list">
+        {docs.map((f) => <li key={f.id}><a className="fin-link" href={f.downloadUrl}><i className="ri-file-pdf-2-line"></i> {f.title || f.name}</a></li>)}
+      </ul>
     </div>
   );
 }
