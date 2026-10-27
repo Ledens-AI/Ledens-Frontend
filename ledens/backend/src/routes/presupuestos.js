@@ -43,6 +43,7 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, or
   router.put('/:id', handle((req) => svc(req).saveDraft(req.params.id, req.body || {})));
   router.post('/:id/enviar', handle((req) => svc(req).send(req.params.id)));
   router.post('/:id/aprobar', handle((req) => svc(req).approve(req.params.id, req.body || {})));
+  router.post('/:id/aprobar-en-nombre', handle((req) => svc(req).approveOnBehalf(req.params.id, req.body || {})));
   router.post('/:id/cambios', handle((req) => svc(req).requestChanges(req.params.id, req.body || {})));
   router.post('/:id/rechazar', handle((req) => svc(req).reject(req.params.id, req.body || {})));
   router.post('/:id/comentarios', handle((req) => svc(req).comment(req.params.id, req.body || {})));

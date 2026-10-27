@@ -35,6 +35,7 @@ export const api = {
   save: (id, body) => request('PUT', `${base}/${id}`, body),
   send: (id) => request('POST', `${base}/${id}/enviar`),
   approve: (id, body) => request('POST', `${base}/${id}/aprobar`, body),
+  approveOnBehalf: (id, body) => request('POST', `${base}/${id}/aprobar-en-nombre`, body),
   requestChanges: (id, body) => request('POST', `${base}/${id}/cambios`, body),
   reject: (id, body) => request('POST', `${base}/${id}/rechazar`, body),
   comment: (id, body) => request('POST', `${base}/${id}/comentarios`, body),
