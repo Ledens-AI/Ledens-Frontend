@@ -305,9 +305,17 @@ export class PresupuestosService {
     if (!['admin', 'jefe'].includes(this.user.role)) fail(403, 'Solo el equipo puede crear presupuestos');
     const rows = (await this.pool.query("SELECT id, name, email, role, registered_at IS NOT NULL registered FROM users WHERE role IN ('client','jefe','admin') ORDER BY coalesce(name,email)")).rows;
     const pick = (role) => rows.filter((u) => u.role === role).map((u) => ({ id: u.id, name: u.name || u.email, email: u.email, registered: u.registered }));
+    // Obras a new presupuesto can join (as one more budget of the obra, approved
+    // separately): approved main presupuestos the user runs (an admin: all).
+    const obras = (await this.pool.query(`
+      SELECT p.id, p.ref, p.title, p.address, p.client_id FROM presupuestos p
+       WHERE p.parent_id IS NULL AND (${this.user.role === 'admin' ? 'true' : 'p.jefe_id=$1'})
+         AND EXISTS (SELECT 1 FROM presupuesto_versiones v WHERE v.presupuesto_id=p.id AND v.status='approved')
+       ORDER BY p.created_at DESC`, this.user.role === 'admin' ? [] : [this.user.id])).rows
+      .map((p) => ({ id: p.id, ref: p.ref, title: p.title, address: p.address, clientId: p.client_id }));
     // An admin may also be the person in charge of an obra.
-    if (this.user.role === 'jefe') return { clients: pick('client'), jefes: [{ id: this.user.id, name: this.user.name || this.user.email, email: this.user.email }] };
-    return { clients: pick('client'), jefes: [...pick('jefe'), ...pick('admin')] };
+    if (this.user.role === 'jefe') return { clients: pick('client'), jefes: [{ id: this.user.id, name: this.user.name || this.user.email, email: this.user.email }], obras };
+    return { clients: pick('client'), jefes: [...pick('jefe'), ...pick('admin')], obras };
   }
 
   async writeContent(db, versionId, content) {

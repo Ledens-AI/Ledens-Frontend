@@ -233,3 +233,27 @@ test('an English quote: English headers, incl. VAT, long descriptions over two p
   assert.match(b.notes, /Buried services/);
   assert.equal(b.totalDocument, 1875);
 });
+
+test('a PDF budget can join an existing obra of the client: one more presupuesto, approved separately', async () => {
+  const jefeSvc = new PresupuestosService(pool, jefe);
+  // The client's obra, approved, run by this jefe; and a pending one that is not an obra yet.
+  let obra = await jefeSvc.create({ title: 'Casa de prueba', clientId: cliente.id, chapters: [{ name: 'Obra', items: [{ name: 'Partida', unit: 'ud', quantity: '1', unitPrice: '100' }] }] });
+  obra = await jefeSvc.send(obra.id);
+  await new PresupuestosService(pool, cliente).approve(obra.id, { versionId: obra.version.id });
+  const pending = await jefeSvc.send((await jefeSvc.create({ title: 'Otra pendiente', clientId: cliente.id, chapters: [{ name: 'C', items: [{ name: 'P', unit: 'ud', quantity: '1', unitPrice: '1' }] }] })).id);
+  const opts = await jefeSvc.options();
+  assert.ok(opts.obras.some((o) => o.id === obra.id && o.clientId === cliente.id && o.ref === obra.ref));
+  assert.ok(!opts.obras.some((o) => o.id === pending.id), 'only approved obras');
+  const otherJefe = (await db.query("INSERT INTO users(email,name,role) VALUES('j2@pdf.test','Otro jefe','jefe') RETURNING id,email,name,role")).rows[0];
+  assert.deepEqual((await new PresupuestosService(pool, otherJefe).options()).obras, [], 'a jefe lists only the obras they run');
+  // What the editor sends for «Obra: <that obra>».
+  const draft = await pdfDraft(jefe, await presentado());
+  let p = await jefeSvc.create({ ...draft, title: 'Solución aislamiento', parentId: obra.id });
+  assert.equal(p.parent.id, obra.id);
+  assert.equal(p.client.id, cliente.id);
+  p = await jefeSvc.send(p.id);
+  const mine = await new PresupuestosService(pool, cliente).list();
+  assert.equal(mine.find((x) => x.id === p.id).phase, 'pendiente');
+  assert.equal(mine.find((x) => x.id === p.id).parent.id, obra.id);
+  assert.equal((await new PresupuestosService(pool, cliente).get(obra.id)).obra.base, '100.00', 'it adds to the obra only once approved');
+});

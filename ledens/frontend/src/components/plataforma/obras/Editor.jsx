@@ -24,6 +24,8 @@ export default function Editor({ mode, doc, parent, initial, onSaved, onCancel }
   const [opts, setOpts] = useState(null);
   const [clientId, setClientId] = useState('');
   const [jefeId, setJefeId] = useState('');
+  // '' = a new obra; otherwise the obra (approved main presupuesto) it joins.
+  const [obraId, setObraId] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -55,7 +57,8 @@ export default function Editor({ mode, doc, parent, initial, onSaved, onCancel }
       }
       body.chapters.push({ name: c.name, items });
     }
-    if (mode === 'new') { body.clientId = clientId; body.jefeId = jefeId || undefined; }
+    if (mode === 'new' && obraId) body.parentId = obraId; // client and jefe come from the obra
+    else if (mode === 'new') { body.clientId = clientId; body.jefeId = jefeId || undefined; }
     if (mode === 'ampliacion') body.parentId = parent.id;
     if (mode === 'edit') body.version = doc.versions[0]?.number;
     setSaving(true);
@@ -81,17 +84,26 @@ export default function Editor({ mode, doc, parent, initial, onSaved, onCancel }
           <label className="fin-field obr-span2"><span>Dirección de la obra</span><input value={address} maxLength={300} onChange={(e) => setAddress(e.target.value)} /></label>
           {mode === 'new' ? (<>
             <label className="fin-field"><span>Cliente</span>
-              <select value={clientId} onChange={(e) => setClientId(e.target.value)}>
+              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setObraId(''); }}>
                 <option value="">{opts ? 'Selecciona el cliente' : 'Cargando…'}</option>
                 {(opts?.clients || []).map((c) => <option key={c.id} value={c.id}>{`${c.name} · ${c.email}${c.registered === false ? ' · pendiente de registro' : ''}`}</option>)}
               </select>
             </label>
-            <label className="fin-field"><span>Jefe de obra</span>
-              <select value={jefeId} onChange={(e) => setJefeId(e.target.value)}>
-                <option value="">Sin asignar</option>
-                {(opts?.jefes || []).map((j) => <option key={j.id} value={j.id}>{j.name}</option>)}
+            <label className="fin-field"><span>Obra</span>
+              <select value={obraId} disabled={!clientId} onChange={(e) => setObraId(e.target.value)}>
+                <option value="">Obra nueva</option>
+                {(opts?.obras || []).filter((o) => o.clientId === clientId).map((o) => <option key={o.id} value={o.id}>{`${o.ref} · ${o.title}`}</option>)}
               </select>
             </label>
+            {obraId ? null : (
+              <label className="fin-field"><span>Jefe de obra</span>
+                <select value={jefeId} onChange={(e) => setJefeId(e.target.value)}>
+                  <option value="">Sin asignar</option>
+                  {(opts?.jefes || []).map((j) => <option key={j.id} value={j.id}>{j.name}</option>)}
+                </select>
+              </label>
+            )}
+            {obraId ? <p className="fin-muted fin-small obr-span2">Se añade a esa obra como un presupuesto más: el cliente lo aprueba por separado y, al aprobarlo, suma al total y al avance de la obra. El jefe de obra es el de la obra.</p> : null}
           </>) : null}
           <label className="fin-field"><span>IVA (%)</span><input className="fin-w-num" inputMode="decimal" value={vatRate} onChange={(e) => setVatRate(e.target.value)} /></label>
         </div>
