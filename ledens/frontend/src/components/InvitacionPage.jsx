@@ -235,7 +235,8 @@ export default function InvitacionPage() {
     body = fatal ? (
       <>
         <h1 className="auth-title">{t.failed}</h1>
-        <p className="auth-subtitle">{t.net}</p>
+        {/* Any other error is in the alert above, as the server gave it. */}
+        {fatal === 'net' ? <p className="auth-subtitle">{t.net}</p> : null}
         <button type="button" className="auth-submit" onClick={() => { setFatal(null); setAlert(null); consult(); }}>{t.tryAgain}</button>
       </>
     ) : <p className="auth-subtitle">{t.loading}</p>;
