@@ -79,12 +79,41 @@ export function parseContent(body) {
           quantity: decimal(i.quantity, `Cantidad de la ${where}`, 3),
           unitPrice: decimal(i.unitPrice, `Precio de la ${where}`, 6, { allowZero: true }),
           kind,
+          baseCode: text(i.baseCode, `Partida de la base de la ${where}`, { max: 40 }),
+          annotations: parseAnnotations(i.annotations, where),
+          proposal: parseProposal(i.proposal, where),
         };
       }),
     };
   });
   if (lines > 1000) fail(400, 'Demasiadas partidas (máximo 1000)');
-  return { vatRate, notes, chapters: parsed };
+  return { vatRate, notes, chapters: parsed, sourceFile: text(body.sourceFile, 'Archivo de origen', { max: 200 }) };
+}
+
+// Notes about how a line relates to the base de partidas (catalog.js), team only.
+export const ANNOTATION_TYPES = ['precio', 'codigo', 'traduccion', 'nueva', 'base', 'nota'];
+function parseAnnotations(v, where) {
+  if (v == null) return [];
+  if (!Array.isArray(v) || v.length > 20) fail(400, `Anotaciones de la ${where} no válidas`);
+  return v.map((a) => {
+    if (!a || !ANNOTATION_TYPES.includes(a.type)) fail(400, `Anotación de la ${where} no válida`);
+    return { type: a.type, text: text(a.text, `Anotación de la ${where}`, { max: 1000, required: true }) };
+  });
+}
+// A proposed new partida for the base, when no partida covers the line.
+function parseProposal(v, where) {
+  if (v == null) return null;
+  if (typeof v !== 'object') fail(400, `Partida propuesta de la ${where} no válida`);
+  return {
+    name: text(v.name, `Nombre de la partida propuesta (${where})`, { max: 300, required: true }),
+    definition: text(v.definition, `Definición de la partida propuesta (${where})`, { max: 4000 }),
+    unit: text(v.unit, `Unidad de la partida propuesta (${where})`, { max: 20, required: true }),
+    priceInclVat: v.priceInclVat == null || v.priceInclVat === '' ? null : decimal(String(v.priceInclVat), `Precio de la partida propuesta (${where})`, 6, { allowZero: true }),
+    categoryCode: text(v.categoryCode, 'Categoría', { max: 20 }),
+    categoryName: text(v.categoryName, 'Categoría', { max: 200 }),
+    nearestCode: text(v.nearestCode, 'Partida más próxima', { max: 40 }),
+    reason: text(v.reason, 'Motivo', { max: 1000 }),
+  };
 }
 
 export class PresupuestosService {
@@ -224,7 +253,10 @@ export class PresupuestosService {
     if (!shown) fail(404, 'Versión no encontrada');
     const lines = (await this.pool.query(`
       SELECT ch.id capitulo_id, ch.position chapter_position, ch.name chapter_name, l.id, l.position, l.code, l.name, l.description,
-             l.unit, l.quantity::text, l.unit_price::text, l.kind, l.selected, ${LINE} amount, ${COUNTED} counted
+             l.unit, l.quantity::text, l.unit_price::text, l.kind, l.selected, ${LINE} amount, ${COUNTED} counted, l.base_code, l.annotations,
+             (SELECT to_jsonb(x) FROM (SELECT pp.id, pp.status, pp.name, pp.definition, pp.unit, pp.price_incl_vat::text "priceInclVat", pp.category_code "categoryCode",
+                     pp.category_name "categoryName", pp.nearest_code "nearestCode", pp.reason, pp.created_code "createdCode"
+                FROM partida_propuestas pp WHERE pp.partida_id=l.id ORDER BY pp.created_at DESC LIMIT 1) x) proposal
         FROM presupuesto_capitulos ch LEFT JOIN presupuesto_partidas l ON l.capitulo_id=ch.id
        WHERE ch.version_id=$1 ORDER BY ch.position, l.position`, [shown.id])).rows;
     const chapters = [];
@@ -233,7 +265,9 @@ export class PresupuestosService {
       if (!c || c.id !== l.capitulo_id) chapters.push(c = { id: l.capitulo_id, name: l.chapter_name, base: 0, items: [] });
       if (!l.id) continue;
       if (l.counted) c.base += cents(l.amount);
-      c.items.push({ id: l.id, code: l.code, name: l.name, description: l.description, unit: l.unit, quantity: l.quantity, unitPrice: l.unit_price, kind: l.kind, selected: l.selected, counted: l.counted, amount: money(cents(l.amount)) });
+      c.items.push({ id: l.id, code: l.code, name: l.name, description: l.description, unit: l.unit, quantity: l.quantity, unitPrice: l.unit_price, kind: l.kind, selected: l.selected, counted: l.counted, amount: money(cents(l.amount)),
+        // How the line relates to the base de partidas: internal, team only.
+        ...(team ? { baseCode: l.base_code, annotations: l.annotations || [], proposal: l.proposal && l.proposal.status === 'pending' ? l.proposal : null } : {}) });
     }
     chapters.forEach((c) => { c.base = money(c.base); });
     const comments = (await this.pool.query(`
@@ -318,16 +352,30 @@ export class PresupuestosService {
     return { clients: pick('client'), jefes: [...pick('jefe'), ...pick('admin')], obras };
   }
 
+  // A draft saved again replaces its pending proposals with the ones it now carries.
   async writeContent(db, versionId, content) {
     await db.query('UPDATE presupuesto_versiones SET vat_rate=$2, notes=$3 WHERE id=$1', [versionId, content.vatRate, content.notes]);
+    await db.query("DELETE FROM partida_propuestas WHERE status='pending' AND partida_id IN (SELECT id FROM presupuesto_partidas WHERE version_id=$1)", [versionId]);
     await db.query('DELETE FROM presupuesto_capitulos WHERE version_id=$1', [versionId]);
+    const p = (await db.query('SELECT p.id, p.ref, p.title FROM presupuesto_versiones v JOIN presupuestos p ON p.id=v.presupuesto_id WHERE v.id=$1', [versionId])).rows[0];
     for (const [ci, c] of content.chapters.entries()) {
       const chId = (await db.query('INSERT INTO presupuesto_capitulos (version_id, position, name) VALUES ($1,$2,$3) RETURNING id', [versionId, ci + 1, c.name])).rows[0].id;
       for (const [ii, i] of c.items.entries()) {
-        await db.query(`INSERT INTO presupuesto_partidas (version_id, capitulo_id, position, code, name, description, unit, quantity, unit_price, kind)
-                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [versionId, chId, ii + 1, i.code, i.name, i.description, i.unit, i.quantity, i.unitPrice, i.kind]);
+        const line = (await db.query(`INSERT INTO presupuesto_partidas (version_id, capitulo_id, position, code, name, description, unit, quantity, unit_price, kind, base_code, annotations)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+        [versionId, chId, ii + 1, i.code, i.name, i.description, i.unit, i.quantity, i.unitPrice, i.kind, i.baseCode || null, JSON.stringify(i.annotations || [])])).rows[0];
+        if (i.proposal && !i.baseCode) await this.propose(db, line.id, p, i.proposal, content.sourceFile);
       }
     }
+  }
+
+  async propose(db, partidaId, p, x, sourceFile) {
+    const file = sourceFile ? `«${sourceFile}»` : 'un presupuesto en PDF';
+    const origin = `Partida propuesta el ${new Date().toISOString().slice(0, 10)} a partir de ${file} para la obra ${p.ref} «${p.title}». Partida más próxima descartada: ${x.nearestCode || 'ninguna'}.`;
+    const priceSource = x.priceInclVat == null ? null : `Precio de venta del presupuesto ${p.ref} (${file}) presentado al cliente`;
+    await db.query(`INSERT INTO partida_propuestas (partida_id, presupuesto_id, category_code, category_name, name, definition, unit, price_incl_vat, price_source, nearest_code, reason, origin, created_by)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+    [partidaId, p.id, x.categoryCode, x.categoryName, x.name, x.definition, x.unit, x.priceInclVat, priceSource, x.nearestCode, x.reason, origin, this.user.id || null]);
   }
 
   async create(body = {}) {
