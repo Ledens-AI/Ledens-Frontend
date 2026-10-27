@@ -86,6 +86,27 @@ export function trustedOrganizationEmail(claims, email) {
     && domains.includes(address.split('@')[1]);
 }
 
+// Personal Microsoft accounts (consumer tenant) whose sign-in name is an
+// address on one of Microsoft's own mail domains (hotmail, outlook, live…):
+// that mailbox is issued by Microsoft to the account itself, so nobody else
+// can hold a Microsoft account with that name. A personal account signed in
+// with any other address (gmail, a company domain…) stays unverified, and so
+// does anything outside the consumer tenant. Same id_token checks as above;
+// MICROSOFT_CONSUMER_DOMAINS (comma-separated) overrides the list, '' disables it.
+const CONSUMER_TENANT = '9188040d-6c67-4c5b-b112-36a304b66dad';
+const CONSUMER_DOMAINS = ['hotmail.com', 'hotmail.es', 'hotmail.co.uk', 'hotmail.fr', 'hotmail.it', 'hotmail.de',
+  'outlook.com', 'outlook.es', 'outlook.fr', 'outlook.it', 'outlook.de', 'live.com', 'live.es', 'live.co.uk', 'live.fr', 'msn.com'].join(',');
+export function trustedConsumerEmail(claims, email) {
+  const domains = list(process.env.MICROSOFT_CONSUMER_DOMAINS, CONSUMER_DOMAINS);
+  if (!claims || !email || !domains.length) return false;
+  const address = String(email).toLowerCase();
+  return String(claims.tid || '').toLowerCase() === CONSUMER_TENANT
+    && claims.aud === process.env.MICROSOFT_CLIENT_ID
+    && String(claims.iss || '').toLowerCase() === `https://login.microsoftonline.com/${CONSUMER_TENANT}/v2.0`
+    && String(claims.preferred_username || '').toLowerCase() === address
+    && domains.includes(address.split('@')[1]);
+}
+
 // NOTE — unconfirmed against a real Microsoft account (no test account
 // available yet): unlike Google, Microsoft's OIDC userinfo response may not
 // reliably include an email_verified claim. We read it the same way either
@@ -105,7 +126,8 @@ export async function fetchProfile(accessToken, { idToken } = {}) {
     providerUserId: profile.sub,
     email,
     emailVerified: profile.email_verified === true || profile.email_verified === 'true'
-      || trustedOrganizationEmail(idTokenClaims(idToken), email),
+      || trustedOrganizationEmail(idTokenClaims(idToken), email)
+      || trustedConsumerEmail(idTokenClaims(idToken), email),
     name: profile.name || email,
   };
 }

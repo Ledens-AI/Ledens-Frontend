@@ -6,7 +6,7 @@ import { PresupuestosService } from '../src/presupuestos/service.js';
 import { AlertService } from '../src/notifications/service.js';
 import { hashToken } from '../src/auth/sessions.js';
 import { hashPassword } from '../src/auth/passwords.js';
-import { LIMITS, describe, acceptWithPassword, acceptWithSession, checkIdentity, acceptWithIdentity } from '../src/invitaciones/service.js';
+import { LIMITS, appUrl, describe, acceptWithPassword, acceptWithSession, checkIdentity, acceptWithIdentity } from '../src/invitaciones/service.js';
 import { createInvitacionesRouter } from '../src/routes/invitaciones.js';
 // Invitaciones de cliente on PGlite (migrations 020–023, with the users,
 // sessions, audit_log and mail-queue tables they hang from): who may invite,
@@ -261,4 +261,19 @@ test('«Ver como» reads the list of a jefe but changes nothing; the sending lim
   assert.equal(last.status, 429);
   assert.equal(await userByEmail(`lote${LIMITS.hour}@inv.test`), undefined, 'refused before creating anything');
   assert.equal((await invite(jefe, { email: 'aparte@inv.test' })).status, 201, 'the limit is per person');
+});
+
+test('the link opens on the site the backend accepts (CORS_ORIGIN) unless PUBLIC_APP_URL says otherwise', () => {
+  const saved = { p: process.env.PUBLIC_APP_URL, c: process.env.CORS_ORIGIN };
+  try {
+    delete process.env.PUBLIC_APP_URL;
+    process.env.CORS_ORIGIN = 'https://app.ledens.test/';
+    assert.equal(appUrl(), 'https://app.ledens.test');
+    process.env.CORS_ORIGIN = '*';
+    assert.equal(appUrl(), 'https://ambitious-island-05d1d8a03.2.azurestaticapps.net', 'no wildcard in a link');
+    process.env.PUBLIC_APP_URL = 'https://otra.ledens.test';
+    assert.equal(appUrl(), 'https://otra.ledens.test');
+  } finally {
+    for (const [k, v] of [['PUBLIC_APP_URL', saved.p], ['CORS_ORIGIN', saved.c]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
 });

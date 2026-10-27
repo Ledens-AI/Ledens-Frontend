@@ -294,7 +294,13 @@ export async function acceptWithIdentity(pool, token, userId, provider) {
  * null when the invitation is no longer open or a newer send replaced this
  * one: the message is then closed without sending anything. */
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-export const appUrl = () => (process.env.PUBLIC_APP_URL || 'https://ambitious-island-05d1d8a03.2.azurestaticapps.net').replace(/\/+$/, '');
+// The link must open on the site the backend accepts writes from (CORS_ORIGIN,
+// checked on every POST of the page) and where Google/Microsoft send the person
+// back: a page opened on another host answers «Origen no permitido» and loses
+// the login cookies on the way back. PUBLIC_APP_URL still wins when set.
+const singleOrigin = (v) => (typeof v === 'string' && /^https?:\/\/[^\s,*]+$/.test(v.trim()) ? v.trim() : null);
+export const appUrl = () => (process.env.PUBLIC_APP_URL || singleOrigin(process.env.CORS_ORIGIN)
+  || 'https://ambitious-island-05d1d8a03.2.azurestaticapps.net').replace(/\/+$/, '');
 
 const MAIL = {
   es: {

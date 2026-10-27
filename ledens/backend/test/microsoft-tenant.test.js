@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
-import { trustedOrganizationEmail, idTokenClaims, fetchProfile } from '../src/auth/providers/microsoft.js';
+import { trustedOrganizationEmail, trustedConsumerEmail, idTokenClaims, fetchProfile } from '../src/auth/providers/microsoft.js';
 // Microsoft accounts of the company's own tenant count as verified; nothing else does.
 const TENANT = '89aa3c28-3056-4509-bfc5-5c16f8f0737a';
 const jwt = (claims) => ['e30', Buffer.from(JSON.stringify(claims)).toString('base64url'), 'sig'].join('.');
@@ -42,4 +42,17 @@ test('fetchProfile marks the email verified only with a matching id_token', asyn
   assert.equal((await fetchProfile('t', { idToken: jwt(claims()) })).emailVerified, true);
   assert.equal((await fetchProfile('t', { idToken: jwt(claims({ preferred_username: 'otra@ledens.es' })) })).emailVerified, false, 'sign-in name is another account');
   assert.equal((await fetchProfile('t')).emailVerified, false, 'no id_token');
+});
+
+test('a personal account is verified only on a Microsoft mail domain it signs in with', () => {
+  const C = '9188040d-6c67-4c5b-b112-36a304b66dad';
+  const personal = (over = {}) => ({ tid: C, aud: 'test-client-id', iss: `https://login.microsoftonline.com/${C}/v2.0`, preferred_username: 'grijnierse@hotmail.com', ...over });
+  assert.equal(trustedConsumerEmail(personal(), 'Grijnierse@hotmail.com'), true);
+  assert.equal(trustedConsumerEmail(personal({ preferred_username: 'x@gmail.com' }), 'x@gmail.com'), false, 'a personal account on another address');
+  assert.equal(trustedConsumerEmail(personal({ preferred_username: 'x@hotmail.com.evil.test' }), 'x@hotmail.com.evil.test'), false, 'a lookalike domain');
+  assert.equal(trustedConsumerEmail(personal(), 'otra@hotmail.com'), false, 'sign-in name is not the email');
+  assert.equal(trustedConsumerEmail(personal({ tid: TENANT, iss: `https://login.microsoftonline.com/${TENANT}/v2.0` }), 'grijnierse@hotmail.com'), false, 'an organisation tenant');
+  assert.equal(trustedConsumerEmail(personal({ aud: 'other-app' }), 'grijnierse@hotmail.com'), false, 'a token for another app');
+  process.env.MICROSOFT_CONSUMER_DOMAINS = '';
+  try { assert.equal(trustedConsumerEmail(personal(), 'grijnierse@hotmail.com'), false, 'switched off'); } finally { delete process.env.MICROSOFT_CONSUMER_DOMAINS; }
 });
