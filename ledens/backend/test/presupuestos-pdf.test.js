@@ -169,3 +169,66 @@ test('a jefe uploads the PDF, reviews it and sends it: the client finds it pendi
     assert.deepEqual(seen.version.chapters.map((c) => c.items.map((i) => i.kind)), [['confirmada', 'confirmada'], ['condicionada']]);
   } finally { s.close(); }
 });
+
+test('every page is read, and a line without unit whose figures do not add up is kept and flagged', async () => {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = (draw) => { const p = doc.addPage([842, 595]); draw((s, x, y) => p.drawText(s, { x, y, size: 8, font })); };
+  const header = (t) => [['Código', 30], ['Partida', 100], ['Cantidad', 470], ['Precio', 540], ['Importe', 620]].forEach(([s, x]) => t(s, x, 500));
+  page((t) => { header(t); t('A-1', 30, 470); t('Partida que cuadra', 100, 470); t('2', 470, 470); t('10,00', 540, 470); t('20,00', 620, 470);
+    t('A-2', 30, 440); t('Partida que no cuadra', 100, 440); t('2', 470, 440); t('10,00', 540, 440); t('25,00', 620, 440); });
+  for (let n = 0; n < 33; n++) page((t) => t('Anexo ' + n, 30, 500));
+  page((t) => { header(t); t('Z-1', 30, 470); t('Partida de la última página', 100, 470); t('1', 470, 470); t('5,00', 540, 470); t('5,00', 620, 470); });
+  const b = await readBudgetPdf(Buffer.from(await doc.save()));
+  const items = b.chapters.flatMap((c) => c.items);
+  assert.deepEqual(items.map((i) => i.code), ['A-1', 'A-2', 'Z-1'], 'page 35 is read too');
+  assert.deepEqual([items[1].unit, items[1].check, items[1].total], ['ud', true, 25]);
+  assert.equal(b.totalDocument, 50);
+});
+
+// An English quote in the company's layout: «Unit price incl. / VAT» in two
+// lines, chapter rows, descriptions far longer than the figures' line, two pages.
+const englishQuote = async () => {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = (draw) => { const p = doc.addPage([842, 595]); draw((s, x, y) => p.drawText(s, { x, y, size: 8, font })); };
+  const header = (t) => { t('Unit price incl.', 620, 512); [['Code', 30], ['Unit', 90], ['Item', 140], ['Description', 320], ['Quantity', 560], ['Amount incl. VAT', 720]].forEach(([s, x]) => t(s, x, 500)); t('VAT', 620, 490); };
+  const long = (t, y0, n, text) => { for (let i = 0; i < n; i++) t(`${text} line ${i + 1}`, 320, y0 - i * 10); };
+  page((t) => {
+    t('Project:', 30, 560); t('VAT 21%:', 500, 560); t('989,26 €', 620, 560);
+    header(t);
+    t('1', 30, 470); t('Demolition and dismantling', 140, 470); t('600,00 €', 720, 470);
+    long(t, 440, 13, 'Cutting a trench through the slab');
+    t('Cutting a 30 cm trench through the', 140, 386); t('PA-188', 30, 380); t('lin. m', 90, 380); t('15,00', 560, 380); t('40,00 €', 620, 380); t('600,00 €', 720, 380); t('concrete slab', 140, 372);
+    t('2', 30, 300); t('Masonry', 140, 300); t('1.275,00 €', 720, 300);
+    t('Ledens · Page 1 of 2', 380, 30);
+  });
+  page((t) => {
+    header(t);
+    long(t, 470, 8, 'Excavation beside the facade');
+    t('PA-187', 30, 435); t('lin. m', 90, 435); t('30,00', 560, 435); t('20,00 €', 620, 435); t('600,00 €', 720, 435); t('Excavation of perimeter trench', 140, 435);
+    long(t, 380, 9, 'Cleaning and sealing the slab');
+    t('PA-189', 30, 340); t('m²', 90, 340); t('45,00', 560, 340); t('15,00 €', 620, 340); t('675,00 €', 720, 340); t('Cleaning, priming and sealing', 140, 340);
+    t('1 Buried services along the trench route are not included.', 30, 200);
+    t('Ledens · Page 2 of 2', 380, 30);
+  });
+  return Buffer.from(await doc.save());
+};
+
+test('an English quote: English headers, incl. VAT, long descriptions over two pages, chapter rows', async () => {
+  const b = await readBudgetPdf(await englishQuote());
+  assert.equal(b.source, 'texto');
+  assert.equal(b.pricesIncludeVat, true);
+  assert.equal(b.vatRate, 21);
+  assert.equal(b.title, null, 'a label with nothing after it on its line gives no title');
+  assert.deepEqual(b.chapters.map((c) => [c.name, c.items.map((i) => i.code)]), [['Demolition and dismantling', ['PA-188']], ['Masonry', ['PA-187', 'PA-189']]]);
+  const [cut] = b.chapters[0].items;
+  assert.deepEqual([cut.unit, cut.quantity, cut.unitPrice, cut.total], ['lin. m', 15, 40, 600]);
+  assert.equal(cut.name, 'Cutting a 30 cm trench through the concrete slab');
+  assert.match(cut.description, /^Cutting a trench through the slab line 1 .* line 13$/, 'all 13 description lines');
+  const seal = b.chapters[1].items[1];
+  assert.match(seal.description, /^Cleaning and sealing the slab line 1 .* line 9$/);
+  assert.doesNotMatch(seal.description, /Buried|Page/, 'notes and footers stay out');
+  assert.match(b.notes, /Buried services/);
+  assert.equal(b.totalDocument, 1875);
+});
