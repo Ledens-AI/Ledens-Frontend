@@ -16,7 +16,7 @@ import { ROLE_VIEW, ROLE_LABEL, initials, firstName, fmtDate, userRow, signupBar
 import { FIN_TABS } from './finanzas/tabs.js';
 import { setViewAs, viewAsHeaders } from './finanzas/api.js';
 import { VerComoSelector, VerComoBanner } from './VerComo.jsx';
-import { useI18n } from '../../i18n/I18nContext.jsx';
+import { useI18n, LangOverride } from '../../i18n/I18nContext.jsx';
 import LangSwitch from '../../i18n/LangSwitch.jsx';
 import { PLAT_TXT } from './i18n.js';
 const GestionFinanciera = React.lazy(() => import('./finanzas/GestionFinanciera.jsx'));
@@ -58,7 +58,7 @@ class PlataformaView extends React.Component {
   };
   flash=t=>{this.setState({toast:t});clearTimeout(this._t);this._t=setTimeout(()=>this.setState({toast:''}),3600);};
   renderVals(){
-    const s=this.state,role=s.role,view=role==='client'?'client':'internal',L=this.props.L;
+    const s=this.state,role=s.role,view=role==='client'?'client':'internal',L=role==='client'?this.props.L:PLAT_TXT.es;
     const mk=(label,icon,screen,badge,match)=>({label,icon,badge,go:()=>this.go(screen),bg:(match||[screen]).includes(s.screen)?'#F2F4FA':'transparent',fg:(match||[screen]).includes(s.screen)?'#3E4D85':'#3A3A38',fw:(match||[screen]).includes(s.screen)?700:500});
     // admin: real users from /api/admin/users
     const now=new Date(),allU=s.adminUsers||[],rowsAll=allU.map(u=>userRow(u,allU,now));
@@ -139,7 +139,10 @@ class PlataformaView extends React.Component {
   }
   render(){
     const v=this.renderVals();
+    // Only the client area is bilingual; the admin and jefe de obra panels
+    // (and whatever they embed) are Spanish whatever the saved choice.
     return (
+      <LangOverride lang={v.isClient ? null : 'es'}>
       <div className="plat">
     <div style={{ display: "grid", gridTemplateColumns: "248px minmax(0,1fr)", minHeight: "100vh" }}>
       <aside style={{ background: "#fff", borderRight: "1px solid #EDEDEA", display: "flex", flexDirection: "column", gap: "24px", padding: "22px 16px", position: "sticky", top: "0", height: "100vh" }}>
@@ -232,7 +235,7 @@ class PlataformaView extends React.Component {
               </span>
             </>
           ) : null}
-          <LangSwitch />
+          {v.isClient ? <LangSwitch /> : null}
           <div style={{ position: "relative" }}>
             <button onClick={v.toggleNotif} aria-label={v.L.notifications} style={{ width: "44px", height: "44px", borderRadius: "10px", border: "1px solid #EDEDEA", background: "#fff", cursor: "pointer", position: "relative", display: "grid", placeItems: "center" }}>
               <i className="ri-notification-3-line" style={{ fontSize: "20px", color: "#3A3A38" }}></i>
@@ -1147,6 +1150,7 @@ class PlataformaView extends React.Component {
       </>
     ) : null}
       </div>
+      </LangOverride>
     );
   }
 }
