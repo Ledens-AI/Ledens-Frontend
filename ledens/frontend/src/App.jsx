@@ -20,11 +20,12 @@ import CookiesPage from './components/CookiesPage.jsx';
 import CookieConsent from './components/CookieConsent.jsx';
 import RegistroPage from './components/RegistroPage.jsx';
 import InvitacionPage from './components/InvitacionPage.jsx';
+import ContrasenaPage from './components/ContrasenaPage.jsx';
 import Plataforma from './components/plataforma/Plataforma.jsx';
 import RequireAuth from './components/RequireAuth.jsx';
 
 // Full-screen pages that bring their own logo/navigation instead of Header.
-const NO_HEADER = ['/registro', '/plataforma', '/invitacion'];
+const NO_HEADER = ['/registro', '/plataforma', '/invitacion', '/contrasena'];
 
 /* The full landing page */
 function LandingPage({ onOpenLead }) {
@@ -72,6 +73,8 @@ export default function App() {
         <Route path="/registro" element={<RegistroPage />} />
         {/* Link of a client invitation: the token is in the #fragment */}
         <Route path="/invitacion" element={<InvitacionPage />} />
+        {/* Create or reset a password; the email's link carries the token in the #fragment */}
+        <Route path="/contrasena" element={<ContrasenaPage />} />
         <Route
           path="/plataforma"
           element={

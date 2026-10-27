@@ -9,6 +9,7 @@ import {
   sessionCookieOptions,
   SESSION_COOKIE,
 } from '../auth/sessions.js';
+import { requestLink, describeLink, usePasswordLink, PasswordLinkError } from '../auth/passwordLinks.js';
 
 const router = Router();
 
@@ -109,5 +110,33 @@ router.post('/logout', async (req, res) => {
 router.get('/me', requireAuth, (req, res) => {
   res.json({ user: req.user });
 });
+
+// Create or reset a password with a link sent by email (auth/passwordLinks.js,
+// page /contrasena). Asking never says whether the email has an account; a few
+// tries per address are plenty (the token itself is 256 random bits).
+// One counter per route, per IP and 15 minutes (each account also gets at
+// most 3 links an hour, in the service).
+const linkLimiter = (max) => rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' },
+});
+const linkRoute = (fn) => async (req, res) => {
+  try { res.json(await fn(req, res)); } catch (err) {
+    if (err instanceof PasswordLinkError) return res.status(err.status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
+    console.error('[auth] password link failed', err);
+    res.status(500).json({ error: 'No se pudo completar la operación' });
+  }
+};
+router.post('/contrasena/solicitar', linkLimiter(10), linkRoute((req) => requestLink(getPool(), req.body?.email, req.body?.lang)));
+router.post('/contrasena/consultar', linkLimiter(30), linkRoute((req) => describeLink(getPool(), req.body?.token)));
+router.post('/contrasena/establecer', linkLimiter(10), linkRoute(async (req, res) => {
+  const user = await usePasswordLink(getPool(), req.body?.token, req.body?.password);
+  const { token } = await createSession(user.id, { userAgent: req.get('user-agent'), ip: req.ip });
+  res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
+  return { user };
+}));
 
 export default router;

@@ -233,10 +233,13 @@ async function finish(db, inv, user, method) {
     if (!i.access_granted && user.role === 'client') await grantAccess(db, i, user, i.invited_by);
     await db.query('UPDATE invitaciones SET accepted_at=now(), token_hash=NULL WHERE id=$1', [i.id]);
     await audit({ actor: { id: user.id, name: user.name || user.email }, action: 'Invitación aceptada', target: { id: user.id, label: user.email },
-      detail: `${i.ref} · ${i.title} · ${method}${i.id === inv.id ? '' : ' (otra invitación al mismo email)'}` }, db);
+      detail: `${i.ref} · ${i.title} · ${method}${inv && i.id === inv.id ? '' : ' (otra invitación al mismo email)'}` }, db);
   }
   return { id: user.id, email: user.email, name: user.name, role: user.role };
 }
+
+// A password link (auth/passwordLinks.js) proves the email too: same effect.
+export const acceptOpenInvitations = (db, user, method) => finish(db, null, user, method);
 
 const userOf = async (db, id) => (await db.query('SELECT id, email, name, role, password_hash, email_verified FROM users WHERE id=$1 FOR UPDATE', [id])).rows[0];
 

@@ -62,7 +62,7 @@ const TXT = {
     google: 'Continuar con Google', microsoft: 'Continuar con Microsoft', apple: 'Continuar con Apple', soon: 'Próximamente',
     or: 'o', fullName: 'Nombre completo', namePh: 'Tu nombre', email: 'Email', emailPh: 'tu@correo.es',
     password: 'Contraseña', pwdPh: 'Mínimo 8 caracteres', showPwd: 'Mostrar contraseña',
-    remember: 'Recuérdame', forgot: '¿Olvidaste tu contraseña?',
+    remember: 'Recuérdame', forgot: '¿No tienes contraseña o la has olvidado?',
     noAccount: '¿Aún no tienes cuenta?', signupFree: 'Regístrate gratis',
     haveAccount: '¿Ya tienes cuenta?', login: 'Inicia sesión',
     terms: <>Al crear cuenta aceptas los <Link to="/terminos">Términos</Link> y la{' '}<Link to="/privacidad">Política de privacidad</Link> de Ledens.</>,
@@ -93,7 +93,7 @@ const TXT = {
     google: 'Continue with Google', microsoft: 'Continue with Microsoft', apple: 'Continue with Apple', soon: 'Coming soon',
     or: 'or', fullName: 'Full name', namePh: 'Your name', email: 'Email', emailPh: 'you@email.com',
     password: 'Password', pwdPh: 'At least 8 characters', showPwd: 'Show password',
-    remember: 'Remember me', forgot: 'Forgot your password?',
+    remember: 'Remember me', forgot: 'No password yet, or forgot it?',
     noAccount: 'Don’t have an account yet?', signupFree: 'Sign up for free',
     haveAccount: 'Already have an account?', login: 'Log in',
     terms: <>By creating an account you accept Ledens’ <Link to="/terminos">Terms</Link> and{' '}<Link to="/privacidad">Privacy policy</Link>.</>,
@@ -245,6 +245,8 @@ export default function AuthPage() {
               <div>
                 <div className="auth-alert-title">{alertTitle}</div>
                 <div>{alertMsg}</div>
+                {/* An account that exists may simply have no password yet (invited client, Google/Microsoft only). */}
+                {alert.title === 'emailTaken' ? <Link to="/contrasena" state={{ email: email.trim() }}>{t.forgot}</Link> : null}
               </div>
             </div>
           )}
@@ -312,7 +314,7 @@ export default function AuthPage() {
                   <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
                   {t.remember}
                 </label>
-                <a href="#" className="auth-forgot">{t.forgot}</a>
+                <Link to="/contrasena" state={{ email: email.trim() }} className="auth-forgot">{t.forgot}</Link>
               </div>
             )}
 

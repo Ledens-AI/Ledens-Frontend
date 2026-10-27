@@ -62,6 +62,7 @@ const TXT = {
     mustAccept: 'Debes aceptar los Términos y la Política de privacidad.', fixRed: 'Corrige los campos marcados en rojo para continuar.',
     emailTaken: 'Este email ya está registrado', unavailable: 'Registro no disponible', couldNotCreate: 'No hemos podido crear tu cuenta',
     emailTakenMsg: 'Inicia sesión con tu contraseña, o con Google o Microsoft si te registraste así.', tryAgain: 'Inténtalo de nuevo.',
+    noPassword: '¿No tienes contraseña o la has olvidado? Te enviamos un enlace para crearla.',
     netTitle: 'Error de conexión', netMsg: 'No se pudo contactar con el servidor. Inténtalo de nuevo.',
     hidePwd: 'Ocultar contraseña', showPwd: 'Mostrar contraseña',
     artTitle: <>Empieza tu reforma <em>con todo claro</em> desde el primer día.</>,
@@ -98,6 +99,7 @@ const TXT = {
     mustAccept: 'You must accept the Terms and the Privacy policy.', fixRed: 'Fix the fields marked in red to continue.',
     emailTaken: 'This email is already registered', unavailable: 'Sign-up not available', couldNotCreate: 'We couldn’t create your account',
     emailTakenMsg: 'Log in with your password, or with Google or Microsoft if you signed up that way.', tryAgain: 'Please try again.',
+    noPassword: 'No password yet, or forgot it? We’ll email you a link to create one.',
     netTitle: 'Connection error', netMsg: 'Could not reach the server. Please try again.',
     hidePwd: 'Hide password', showPwd: 'Show password',
     artTitle: <>Start your renovation <em>with everything clear</em> from day one.</>,
@@ -312,6 +314,7 @@ export default function RegistroPage() {
                   <div>
                     <b>{t[alert.title]}</b>
                     <span>{alert.apiMsg ? apiErrorText(alert.apiMsg, lang, t.tryAgain) : t[alert.msg]}</span>
+                    {alert.title === 'emailTaken' ? <Link to="/contrasena" state={{ email: values.email.trim() }}>{t.noPassword}</Link> : null}
                   </div>
                 </div>
               )}
