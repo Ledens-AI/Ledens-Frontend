@@ -10,6 +10,7 @@ import { createIngestionRouter } from './routes/ingestion.js';
 import { createFinanzasRouter } from './routes/finanzas.js';
 import { createPresupuestosRouter } from './routes/presupuestos.js';
 import { createObrasRouter } from './routes/obras.js';
+import { createInvitacionesRouter } from './routes/invitaciones.js';
 import bridgeRouter from './routes/bridge.js';
 import financeRouter from './routes/finance.js';
 
@@ -63,6 +64,7 @@ export function createApp() {
   app.use('/api/auth', oauthRouter);
   app.use('/api/auth', authRouter);
   app.use('/api/admin', adminRouter);
+  app.use('/api/invitaciones', createInvitacionesRouter());
   app.use('/api/bridge', bridgeRouter);
   app.use('/api', financeRouter);
 

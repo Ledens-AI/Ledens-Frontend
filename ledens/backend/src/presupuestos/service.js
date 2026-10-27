@@ -113,7 +113,8 @@ export class PresupuestosService {
   visibleSql() {
     if (this.user.role === 'admin') return '($1::uuid IS NOT NULL)';
     if (this.user.role === 'jefe') return 'p.jefe_id=$1';
-    if (this.user.role === 'client') return "p.client_id=$1 AND EXISTS (SELECT 1 FROM presupuesto_versiones x WHERE x.presupuesto_id=p.id AND x.status<>'draft')";
+    // The titular client, or one invited to the obra (obra_clientes, migration 023: they see it, only the titular decides).
+    if (this.user.role === 'client') return "(p.client_id=$1 OR EXISTS (SELECT 1 FROM obra_clientes oc WHERE oc.presupuesto_id=coalesce(p.parent_id, p.id) AND oc.user_id=$1)) AND EXISTS (SELECT 1 FROM presupuesto_versiones x WHERE x.presupuesto_id=p.id AND x.status<>'draft')";
     return 'false';
   }
   versionFilter() { return this.isClient ? "AND v.status<>'draft'" : ''; }
