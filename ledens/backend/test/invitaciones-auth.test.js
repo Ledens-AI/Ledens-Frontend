@@ -99,7 +99,7 @@ test('a jefe invites, the client sets a password through the link and lands with
   assert.equal((await post('/api/invitaciones/aceptacion/contrasena', { token, password: 'otra-vez-123' })).status, 410, 'one use');
   assert.equal((await post('/api/auth/login', { email: 'clave.inv@auth.test', password: 'mi-clave-nueva-1' })).status, 200, 'the password works from now on');
 
-  const audit = (await getPool().query("SELECT action FROM audit_log WHERE target_label='clave.inv@auth.test' ORDER BY id")).rows.map((x) => x.action);
+  const audit = (await getPool().query("SELECT a.action FROM audit_log a JOIN users u ON u.id=a.target_id WHERE u.email='clave.inv@auth.test' ORDER BY a.id")).rows.map((x) => x.action);
   assert.deepEqual(audit, ['Cuenta de cliente creada por invitación', 'Invitación enviada', 'Invitación aceptada']);
 });
 

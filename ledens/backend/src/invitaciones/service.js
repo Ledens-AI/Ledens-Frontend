@@ -123,9 +123,11 @@ export class InvitacionesService {
     return tx(this.pool, async (db) => {
       const p = await this.obra(db, obraId, { lock: true });
       await this.checkLimit(db);
-      // Never anything but a client, whatever the request says.
+      // Never anything but a client, whatever the request says. users.name is
+      // required: without one the email stands in (as the admin list shows it)
+      // until the person gives theirs.
       const created = (await db.query(`INSERT INTO users (email, name, password_hash, email_verified, role) VALUES ($1,$2,NULL,false,'client')
-                                       ON CONFLICT DO NOTHING RETURNING id`, [email, name])).rows.length > 0;
+                                       ON CONFLICT DO NOTHING RETURNING id`, [email, name || email])).rows.length > 0;
       const user = (await db.query('SELECT id, email, role, password_hash, email_verified FROM users WHERE lower(email)=lower($1)', [email])).rows[0];
       let inv = (await db.query(`UPDATE invitaciones SET email=$3, name=$4, lang=$5, token_hash=NULL, expires_at=now() + make_interval(days => $6),
                                   sent_count=sent_count+1, last_sent_at=now(), invited_by=$7
@@ -195,7 +197,7 @@ async function byToken(db, token, { lock } = {}) {
 export async function describe(pool, token, { providers = {} } = {}) {
   const inv = await byToken(pool, token);
   const { rows: [r] } = await pool.query(`
-    SELECT u.name user_name, u.password_hash IS NOT NULL AND u.email_verified has_password, p.title, j.name invited_by
+    SELECT nullif(u.name, u.email) user_name, u.password_hash IS NOT NULL AND u.email_verified has_password, p.title, j.name invited_by
       FROM invitaciones i JOIN users u ON u.id=i.user_id JOIN presupuestos p ON p.id=i.presupuesto_id LEFT JOIN users j ON j.id=i.invited_by
      WHERE i.id=$1`, [inv.id]);
   return {
@@ -311,7 +313,7 @@ export async function invitationMessage(pool, alert) {
   const inv = (await pool.query(`UPDATE invitaciones i SET token_hash=$3 WHERE i.id=$1 AND i.sent_count=$2 AND ${OPEN} RETURNING i.*`,
     [id, sentCount, hashToken(token)])).rows[0];
   if (!inv) return null;
-  const { rows: [r] } = await pool.query(`SELECT p.title, j.name invited_by, u.name user_name FROM presupuestos p JOIN users u ON u.id=$2
+  const { rows: [r] } = await pool.query(`SELECT p.title, j.name invited_by, nullif(u.name, u.email) user_name FROM presupuestos p JOIN users u ON u.id=$2
     LEFT JOIN users j ON j.id=$3 WHERE p.id=$1`, [inv.presupuesto_id, inv.user_id, inv.invited_by]);
   // The token travels in the fragment: browsers never send it to a server or
   // in a Referer, so it stays out of the hosting logs.

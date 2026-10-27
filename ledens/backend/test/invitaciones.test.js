@@ -34,7 +34,7 @@ before(async () => {
   db = new PGlite();
   pool = { query: (...a) => db.query(...a), connect: async () => ({ query: (...a) => db.query(...a), release() {} }) };
   await db.exec(`
-    CREATE TABLE users(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), email text NOT NULL, name text, password_hash text,
+    CREATE TABLE users(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), email text NOT NULL, name text NOT NULL, password_hash text,
       email_verified boolean NOT NULL DEFAULT false, role text NOT NULL DEFAULT 'client', created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
     CREATE UNIQUE INDEX users_email_lower_key ON users (lower(email));
     CREATE TABLE sessions(id bigint GENERATED ALWAYS AS IDENTITY, user_id uuid REFERENCES users(id) ON DELETE CASCADE, token_hash text);
@@ -222,7 +222,7 @@ test('a proven password or a social login: accept with that account, never with 
 });
 
 test('accepting proves the email for every open invitation of that person', async () => {
-  const persona = (await db.query(`INSERT INTO users(email,password_hash,role) VALUES ('dos@inv.test',$1,'client') RETURNING id`, [hashPassword('sin-verificar-1')])).rows[0];
+  const persona = (await db.query(`INSERT INTO users(email,name,password_hash,role) VALUES ('dos@inv.test','Dos',$1,'client') RETURNING id`, [hashPassword('sin-verificar-1')])).rows[0];
   await invite(jefe, { email: 'dos@inv.test' });
   await invite(otroJefe, { email: 'dos@inv.test' }, otraObraId);
   const links = await claimLinks();
