@@ -213,7 +213,9 @@ function PdfImport({ onCancel, onDone, toast }) {
   if (draft) {
     return <Editor mode="new" initial={draft} onCancel={onCancel} onSaved={async (d, { send }) => {
       const notes = [];
-      try { await archivos.upload(d.id, file, { title: 'Presupuesto original (PDF)' }); } catch (e) { notes.push(`el PDF original no se ha guardado (${e.message})`); }
+      // Files hang from the obra: an added presupuesto keeps its PDF there, under its reference.
+      const title = d.parent ? `Presupuesto original (PDF) · ${d.ref}` : 'Presupuesto original (PDF)';
+      try { await archivos.upload(d.parent?.id || d.id, file, { title }); } catch (e) { notes.push(`el PDF original no se ha guardado (${e.message})`); }
       let msg = 'Borrador guardado';
       if (send) { try { await api.send(d.id); msg = 'Presupuesto enviado: queda pendiente de que el cliente lo apruebe'; } catch (e) { msg = 'Guardado como borrador'; notes.push(`no se ha podido enviar (${e.message})`); } }
       toast?.(notes.length ? `${msg}; ${notes.join('; ')}` : msg);
