@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { getPool, isDbConfigured } from '../db/pool.js';
 import { requireRole, ROLES, ROLE_LABEL } from '../auth/sessions.js';
 import { audit } from '../db/audit.js';
+import { sendLink, PasswordLinkError } from '../auth/passwordLinks.js';
 
 // Everything under /api/admin is for the admin role only — the users list
 // holds every account's email, so this must never be reachable by a client
@@ -74,6 +75,17 @@ router.patch('/users/:id/role', async (req, res, next) => {
     next(err);
   } finally {
     client.release();
+  }
+});
+
+// Sends the user an email with a link to create (or reset) their password.
+router.post('/users/:id/enlace-contrasena', async (req, res, next) => {
+  if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.status(400).json({ error: 'Usuario no válido' });
+  try {
+    res.json(await sendLink(getPool(), req.user, req.params.id, req.body?.lang));
+  } catch (err) {
+    if (err instanceof PasswordLinkError) return res.status(err.status).json({ error: err.message });
+    next(err);
   }
 });
 

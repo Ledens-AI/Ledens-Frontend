@@ -18,6 +18,7 @@ import { setViewAs, viewAsHeaders } from './finanzas/api.js';
 import { VerComoSelector, VerComoBanner } from './VerComo.jsx';
 import { useI18n, LangOverride } from '../../i18n/I18nContext.jsx';
 import LangSwitch from '../../i18n/LangSwitch.jsx';
+import EnlaceContrasena from './EnlaceContrasena.jsx';
 import { PLAT_TXT } from './i18n.js';
 const GestionFinanciera = React.lazy(() => import('./finanzas/GestionFinanciera.jsx'));
 const Obras = React.lazy(() => import('./obras/Obras.jsx'));
@@ -912,6 +913,7 @@ class PlataformaView extends React.Component {
                         </span>
                       </div>
                     </div>
+                    <EnlaceContrasena key={v.user.id} user={v.user} onDone={v.flash} />
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
                     {v.notSelf ? (

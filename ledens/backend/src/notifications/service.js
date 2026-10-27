@@ -1,5 +1,6 @@
 import {randomUUID,createHash} from 'node:crypto';
 import {invitationMessage} from '../invitaciones/service.js';
+import {passwordLinkMessage} from '../auth/passwordLinks.js';
 const escape=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const reasons={duplicate_content:'El archivo ya estaba registrado; no se ha duplicado el documento',invoice_date_requires_review:'La fecha del documento no se ha validado',ocr_failed:'El extractor no ha podido leer el documento',ocr_rejected_document:'El extractor ha rechazado el documento',no_match:'No se ha encontrado un movimiento compatible',ambiguous_match:'Existen varios movimientos posibles',insufficient_evidence:'No hay evidencias suficientes para conciliar',auto_confirmed:'Conciliación automática confirmada',partial_or_existing_allocation:'Existen imputaciones previas o parciales',invoice_issue:'El documento requiere revisión',awaiting_evaluation:'Pendiente de evaluar'};
 const states={duplicate:'Duplicado detectado; documento conservado sin duplicar',received:'Recibido',ready:'Extracción correcta',review:'Revisión necesaria',archived:'Original archivado',pending:'Conciliación pendiente',matched:'Conciliado',Confirmado:'Conciliación confirmada',Revisar:'Conciliación en revisión',error:'Fallo técnico',replace_allocations:'Asignación a proyecto actualizada',recognition:'Validación contable actualizada',review_flag:'Revisión actualizada'};
@@ -22,12 +23,13 @@ export class AlertService{
    UPDATE ledens.transaction_alerts a SET lease_token=$1,lease_until=now()+interval '30 minutes',attempts=attempts+1 FROM pending p WHERE a.id=p.id RETURNING a.*`,[token]);
   const messages=[];
   for(const a of rows){
-   // Client invitations go to the invited person, not to the fixed recipients (the Logic App sends to `to` when present).
-   // One no longer open (accepted, revoked, expired or resent since) is closed without sending.
-   if(a.event_type==='invitation'){
-    const mail=await invitationMessage(this.pool,a);
+   // Client invitations and password links go to the person, not to the fixed recipients (the Logic App sends to `to` when present).
+   // One no longer open (accepted, revoked, used, expired or replaced since) is closed without sending.
+   const personal={invitation:invitationMessage,password_link:passwordLinkMessage}[a.event_type];
+   if(personal){
+    const mail=await personal(this.pool,a);
     if(mail)messages.push({id:a.id,lease_token:token,...mail});
-    else await this.pool.query(`UPDATE ledens.transaction_alerts SET delivered_at=now(),lease_token=NULL,lease_until=NULL,last_error='invitation_not_pending' WHERE id=$1`,[a.id]);
+    else await this.pool.query(`UPDATE ledens.transaction_alerts SET delivered_at=now(),lease_token=NULL,lease_until=NULL,last_error=$2 WHERE id=$1`,[a.id,`${a.event_type}_not_pending`]);
     continue;
    }
    const context=a.document_id?(await this.pool.query(`SELECT jsonb_build_object('numero',d.numerodocumento,'fecha',d.document_on,'tercero',d.tercero,'importe_total',d.total,'base',d.base_amount,'iva',d.vat_amount,'movimientos',coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'referencia',m.reference,'descripcion',m.description,'fecha',m.completed_on,'importe',m.total_amount,'moneda',m.currency,'importe_bridge',x.allocated_amount,'estado_bridge',x.state)) FROM ledens.bank_document_allocations x JOIN ledens.bank_movements m ON m.id=x.bank_movement_id WHERE x.document_id=d.id),'[]'::jsonb),'conceptos',coalesce((SELECT jsonb_agg(jsonb_build_object('id',f.id,'concepto',f.description,'importe',f.gross_amount,'categoria',f.category,'estado',f.status,'importe_sin_asignar',abs(f.gross_amount)-coalesce((SELECT sum(abs(pa.allocated_amount)) FROM ledens.project_financial_allocations pa WHERE pa.record_id=f.id),0))) FROM ledens.financial_records f WHERE f.document_id=d.id),'[]'::jsonb)) detail FROM ledens.documents d WHERE d.id=$1`,[a.document_id])).rows[0]?.detail||{}:{};

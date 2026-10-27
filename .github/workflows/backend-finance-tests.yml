@@ -42,7 +42,7 @@ jobs:
       - name: Existing authentication, OAuth, roles and migration regression
         env:
           DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_auth_test
-        run: node --test test/auth.test.js test/admin.test.js test/db.test.js test/oauth-google.test.js test/oauth-microsoft.test.js test/invitaciones-auth.test.js
+        run: node --test test/auth.test.js test/admin.test.js test/db.test.js test/oauth-google.test.js test/oauth-microsoft.test.js test/invitaciones-auth.test.js test/contrasena-auth.test.js
       - name: Financial transactions and concurrency on PostgreSQL 16
         env:
           DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_finance_test
