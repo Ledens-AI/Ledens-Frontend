@@ -41,23 +41,41 @@ export function I18nProvider({ children }) {
     try { window.localStorage.setItem(STORAGE_KEY, next); } catch { /* not persisted */ }
   }, []);
 
-  const value = useMemo(() => {
-    const locale = LOCALES[lang];
-    return {
-      lang,
-      locale,
-      setLang,
-      fmtDate: (d, opts = { day: 'numeric', month: 'short', year: 'numeric' }) => {
-        if (!d) return '';
-        const date = d instanceof Date ? d : new Date(d);
-        return Number.isNaN(date.getTime()) ? String(d) : date.toLocaleDateString(locale, opts);
-      },
-      fmtMoney: (n, opts = {}) =>
-        new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR', ...opts }).format(Number(n) || 0),
-      fmtNumber: (n, opts = {}) => new Intl.NumberFormat(locale, opts).format(Number(n) || 0),
-    };
-  }, [lang, setLang]);
+  const value = useMemo(() => makeValue(lang, setLang), [lang, setLang]);
 
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+function makeValue(lang, setLang) {
+  const locale = LOCALES[lang];
+  return {
+    lang,
+    locale,
+    setLang,
+    fmtDate: (d, opts = { day: 'numeric', month: 'short', year: 'numeric' }) => {
+      if (!d) return '';
+      const date = d instanceof Date ? d : new Date(d);
+      return Number.isNaN(date.getTime()) ? String(d) : date.toLocaleDateString(locale, opts);
+    },
+    fmtMoney: (n, opts = {}) =>
+      new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR', ...opts }).format(Number(n) || 0),
+    fmtNumber: (n, opts = {}) => new Intl.NumberFormat(locale, opts).format(Number(n) || 0),
+  };
+}
+
+/** Renders its children in `lang` whatever the user chose (null: no
+ * override). The saved choice is untouched. Used by /plataforma so the
+ * Spanish-only admin and jefe de obra panels never mix in English. */
+export function LangOverride({ lang, children }) {
+  const ctx = useI18n();
+  const forced = lang && lang !== ctx.lang ? lang : null;
+  const value = useMemo(() => (forced ? makeValue(forced, ctx.setLang) : ctx), [forced, ctx]);
+  // <html lang> follows what is on screen (API error texts read it too).
+  useEffect(() => {
+    if (!forced) return undefined;
+    document.documentElement.lang = forced;
+    return () => { document.documentElement.lang = ctx.lang; };
+  }, [forced, ctx.lang]);
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 
