@@ -38,6 +38,18 @@ export const api = {
   requestChanges: (id, body) => request('POST', `${base}/${id}/cambios`, body),
   reject: (id, body) => request('POST', `${base}/${id}/rechazar`, body),
   comment: (id, body) => request('POST', `${base}/${id}/comentarios`, body),
+  // Budget PDF → chapters and lines (backend: presupuestos/pdf.js). Saves nothing.
+  readPdf: async (file) => {
+    let r;
+    try {
+      r = await fetch(`${base}/pdf`, { method: 'POST', headers: { 'Content-Type': 'application/pdf', ...viewAsHeaders() }, body: file });
+    } catch {
+      throw new ApiError(0, 'Error de conexión. Comprueba tu red e inténtalo de nuevo.');
+    }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new ApiError(r.status, data.error || (r.status === 413 ? 'El PDF es demasiado grande (máximo 20 MB).' : 'No se pudo leer el PDF.'), data);
+    return data;
+  },
   assignJefe: (id, body) => request('PUT', `${base}/${id}/jefe`, body),
   schedule: (id, body) => request('PUT', `${base}/${id}/fechas`, body),
   declare: (id, body) => request('PUT', `${base}/${id}/produccion`, body),

@@ -293,12 +293,14 @@ export class PresupuestosService {
     };
   }
 
-  // Admin form: clients to send to and jefes to assign.
+  // New-budget form: clients to send to and jefes to assign. A jefe creates
+  // budgets for themselves, so they only get the clients.
   async options() {
-    if (this.user.role !== 'admin') fail(403, 'Solo un administrador puede crear presupuestos');
+    if (!['admin', 'jefe'].includes(this.user.role)) fail(403, 'Solo el equipo puede crear presupuestos');
     const rows = (await this.pool.query("SELECT id, name, email, role FROM users WHERE role IN ('client','jefe','admin') ORDER BY coalesce(name,email)")).rows;
     const pick = (role) => rows.filter((u) => u.role === role).map((u) => ({ id: u.id, name: u.name || u.email, email: u.email }));
     // An admin may also be the person in charge of an obra.
+    if (this.user.role === 'jefe') return { clients: pick('client'), jefes: [{ id: this.user.id, name: this.user.name || this.user.email, email: this.user.email }] };
     return { clients: pick('client'), jefes: [...pick('jefe'), ...pick('admin')] };
   }
 
@@ -328,12 +330,14 @@ export class PresupuestosService {
         if (!(await db.query("SELECT 1 FROM presupuesto_versiones WHERE presupuesto_id=$1 AND status='approved'", [parent.id])).rows.length) fail(409, 'Solo se amplía un presupuesto aprobado');
         clientId = parent.client_id; jefeId = parent.jefe_id;
       } else {
-        if (this.user.role !== 'admin') fail(403, 'Solo un administrador puede crear presupuestos');
+        // An admin creates for any jefe; a jefe creates the budgets they will run.
+        if (!['admin', 'jefe'].includes(this.user.role)) fail(403, 'Solo el equipo puede crear presupuestos');
         if (!isUuid(body.clientId)) fail(400, 'Selecciona el cliente');
         const c = (await db.query('SELECT role FROM users WHERE id=$1', [body.clientId])).rows[0];
         if (c?.role !== 'client') fail(400, 'El destinatario debe ser un usuario cliente');
         clientId = body.clientId;
-        if (body.jefeId) {
+        if (this.user.role === 'jefe') jefeId = this.user.id;
+        else if (body.jefeId) {
           if (!isUuid(body.jefeId)) fail(400, 'Jefe de obra no válido');
           const j = (await db.query('SELECT role FROM users WHERE id=$1', [body.jefeId])).rows[0];
           if (j?.role !== 'jefe' && j?.role !== 'admin') fail(400, 'El responsable debe ser un jefe de obra o un administrador');
