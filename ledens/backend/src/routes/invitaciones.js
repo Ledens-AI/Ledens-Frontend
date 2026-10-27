@@ -53,7 +53,7 @@ export function createInvitacionesRouter({ authenticate, findUser, pool, origin 
   accept.post('/consultar', handle(async (req) => {
     const out = await describe(db(), req.body?.token, { providers: providers() });
     const current = await getSessionUser(req.cookies?.[SESSION_COOKIE]).catch(() => null);
-    return { ...out, session: current ? { email: current.email, matches: current.email.toLowerCase() === out.email.toLowerCase() } : null };
+    return { ...out, session: current ? { email: current.email, matches: current.email.toLowerCase() === out.email.toLowerCase(), verified: !!current.email_verified } : null };
   }));
   accept.post('/contrasena', handle(async (req, res) => login(req, res, await acceptWithPassword(db(), req.body?.token, req.body?.password))));
   accept.post('/sesion', authenticate || requireAuth, handle((req) => acceptWithSession(db(), req.body?.token, req.user).then((user) => ({ user }))));
