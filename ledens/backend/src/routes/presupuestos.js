@@ -1,15 +1,17 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { getPool, isDbConfigured } from '../db/pool.js';
 import { requireAuth, checkRole } from '../auth/sessions.js';
 import { viewAs } from '../auth/viewAs.js';
 import { PresupuestosService, PresupuestoError } from '../presupuestos/service.js';
+import { pdfDraft, LayoutOcr } from '../presupuestos/pdf.js';
 
 // Presupuestos para clientes y obras en curso (/api/presupuestos). Every role
 // reaches it; what each one sees and may do is decided per row in
 // PresupuestosService. «Ver como» answers as the viewed user, read-only.
 // `authenticate`/`pool` replace the session lookup and the database in tests.
-export function createPresupuestosRouter({ authenticate, findUser, pool, origin = process.env.CORS_ORIGIN } = {}) {
+// `ocr` replaces Azure Document Intelligence (DI_ENDPOINT/DI_KEY) in tests; null turns it off.
+export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, origin = process.env.CORS_ORIGIN } = {}) {
   const router = Router();
   router.use((_req, res, next) => {
     if (!pool && !isDbConfigured()) return res.status(503).json({ error: 'Presupuestos no disponibles todavía' });
@@ -31,6 +33,10 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, origin 
   };
 
   router.get('/', handle(async (req) => ({ presupuestos: await svc(req).list() })));
+  // A budget PDF read into chapters and lines (text layer, else OCR). Saves nothing.
+  const layout = ocr !== undefined ? ocr : process.env.DI_ENDPOINT && process.env.DI_KEY ? new LayoutOcr(process.env.DI_ENDPOINT, process.env.DI_KEY) : null;
+  router.post('/pdf', rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false }),
+    express.raw({ type: () => true, limit: 20 * 1024 * 1024 }), handle((req) => pdfDraft(req.user, req.body, { ocr: layout })));
   router.get('/opciones', handle((req) => svc(req).options()));
   router.get('/:id', handle((req) => svc(req).get(req.params.id, { versionId: req.query.version || undefined })));
   router.post('/', handle((req) => svc(req).create(req.body || {})));
@@ -43,5 +49,9 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, origin 
   router.put('/:id/jefe', handle((req) => svc(req).assignJefe(req.params.id, req.body || {})));
   router.put('/:id/fechas', handle((req) => svc(req).schedule(req.params.id, req.body || {})));
   router.put('/:id/produccion', handle((req) => svc(req).declare(req.params.id, req.body || {})));
+  router.use((err, _req, res, next) => {
+    if (err.type === 'entity.too.large') return res.status(413).json({ error: 'El PDF supera el tamaño máximo (20 MB)' });
+    next(err);
+  });
   return router;
 }

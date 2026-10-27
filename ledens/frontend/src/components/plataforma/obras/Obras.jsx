@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { api, pctS } from './api.js';
+import { api, archivos, pctS } from './api.js';
 import { eur } from '../finanzas/format.js';
 import { Empty, ErrorBox, Kpi } from '../finanzas/ui.jsx';
 import Detalle, { PhaseBadge, Progress } from './Detalle.jsx';
@@ -19,6 +19,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
   const [error, setError] = useState('');
   const [open, setOpen] = useState(null); // { id, tab }
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [filter, setFilter] = useState('todos');
 
   const countRef = React.useRef(onCount);
@@ -28,9 +29,10 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
     countRef.current?.(d.presupuestos.filter((p) => (panel === 'client' ? p.phase === 'pendiente' : p.phase === 'cambios')).length);
   }, (e) => setError(e.message)), [panel]);
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setOpen(null); setCreating(false); }, [screen]);
+  useEffect(() => { setOpen(null); setCreating(false); setImporting(false); }, [screen]);
 
   if (creating) return <div className="fin obr"><Editor mode="new" onCancel={() => setCreating(false)} onSaved={(d) => { setCreating(false); load(); toast?.('Borrador guardado'); setOpen({ id: d.id }); }} /></div>;
+  if (importing) return <div className="fin obr"><PdfImport toast={toast} onCancel={() => setImporting(false)} onDone={(id) => { setImporting(false); load(); setOpen({ id }); }} /></div>;
   if (open) {
     return (
       <div className="fin obr">
@@ -104,7 +106,12 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
         <Head title={panel === 'admin' ? 'Presupuestos y obras' : screen === 'home' ? 'Hoy' : 'Obras asignadas'} text={panel === 'admin'
           ? 'Prepara presupuestos, envíalos al cliente, fija la fecha de inicio y sigue la producción de cada obra.'
           : 'Presupuestos y obras de los que eres responsable. Declara aquí la producción de cada partida.'} />
-        {panel === 'admin' && !readOnly ? <button type="button" className="fin-btn is-primary" onClick={() => setCreating(true)}><i className="ri-add-line"></i>Nuevo presupuesto</button> : null}
+        {!readOnly ? (
+          <div className="obr-actions">
+            <button type="button" className="fin-btn" onClick={() => setCreating(true)}><i className="ri-add-line"></i>Nuevo presupuesto</button>
+            <button type="button" className="fin-btn is-primary" onClick={() => setImporting(true)}><i className="ri-file-upload-line"></i>Subir PDF de presupuesto</button>
+          </div>
+        ) : null}
       </div>
       {screen === 'home' && obras.length ? <div className="obr-cards">{obras.map((p) => <ObraCard key={p.id} p={p} onClick={openP(p, 'obra')} team />)}</div> : null}
       <div className="fin-segmented">
@@ -183,5 +190,48 @@ function ObraCard({ p, onClick, team, cta }) {
       <span className="fin-muted fin-small">{p.obra ? t.ofExVat(money(p.obra.consumed), money(p.obra.base)) : ''}</span>
       {cta ? <span className="fin-btn is-primary is-small obr-card-cta"><i className="ri-edit-2-line"></i>{cta}</span> : null}
     </button>
+  );
+}
+
+// The budget PDF presented to the client: read it (text, else OCR), review it in
+// the editor and send it; the original PDF is kept with the presupuesto.
+function PdfImport({ onCancel, onDone, toast }) {
+  const [file, setFile] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const read = async () => {
+    setBusy(true); setError('');
+    try { setDraft(await api.readPdf(file)); } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+  if (draft) {
+    return <Editor mode="new" initial={draft} onCancel={onCancel} onSaved={async (d, { send }) => {
+      const notes = [];
+      try { await archivos.upload(d.id, file, { title: 'Presupuesto original (PDF)' }); } catch (e) { notes.push(`el PDF original no se ha guardado (${e.message})`); }
+      let msg = 'Borrador guardado';
+      if (send) { try { await api.send(d.id); msg = 'Presupuesto enviado: queda pendiente de que el cliente lo apruebe'; } catch (e) { msg = 'Guardado como borrador'; notes.push(`no se ha podido enviar (${e.message})`); } }
+      toast?.(notes.length ? `${msg}; ${notes.join('; ')}` : msg);
+      onDone(d.id);
+    }} />;
+  }
+  return (
+    <div className="fin-stack">
+      <div className="fin-page-head">
+        <h1>Subir PDF de presupuesto</h1>
+        <p>Sube el PDF que has presentado al cliente. Se leen capítulos, partidas, mediciones, precios e importes; lo revisas y se lo envías para que lo apruebe.</p>
+      </div>
+      {error ? <ErrorBox message={error} /> : null}
+      <div className="fin-card fin-form">
+        <label className="fin-field"><span>Presupuesto en PDF (máximo 20 MB)</span>
+          <input type="file" accept="application/pdf,.pdf" onChange={(e) => { setFile(e.target.files?.[0] || null); setError(''); }} />
+        </label>
+        {busy ? <p className="fin-muted">Leyendo el PDF… Si es un escaneo, el OCR puede tardar unos segundos.</p> : null}
+        <div className="obr-actions obr-start">
+          <button type="button" className="fin-btn" onClick={onCancel} disabled={busy}>Cancelar</button>
+          <button type="button" className="fin-btn is-primary" onClick={read} disabled={busy || !file}><i className="ri-scan-2-line"></i>{busy ? 'Leyendo…' : 'Leer PDF'}</button>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -42,8 +42,8 @@ before(async () => {
 });
 after(() => db?.close());
 
-test('only an admin creates, for a client; drafts are invisible to the client and to other jefes', async () => {
-  await assert.rejects(as(jefe).create({ ...fontaneria(), clientId: cliente.id }), { status: 403 });
+test('the team creates, for a client; drafts are invisible to the client and to other jefes', async () => {
+  await assert.rejects(as(cliente).create({ ...fontaneria(), clientId: cliente.id }), { status: 403 }, 'a client never creates');
   await assert.rejects(as(admin).create({ ...fontaneria(), clientId: jefe.id }), { status: 400, message: /cliente/ });
   await assert.rejects(as(admin).create({ ...fontaneria(), clientId: cliente.id, jefeId: cliente.id }), { status: 400, message: /jefe/ });
   await assert.rejects(as(admin).create({ ...fontaneria('-3'), clientId: cliente.id }), { status: 400, message: /Cantidad/ });
