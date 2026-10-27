@@ -30,6 +30,7 @@ const EN = {
   'Has iniciado sesión con otra cuenta. Cierra sesión y vuelve a abrir el enlace.': 'You are logged in with another account. Log out and open the link again.',
   'Entra con la cuenta del email al que se envió la invitación': 'Sign in with the account of the email the invitation was sent to.',
   'Proveedor no válido': 'Invalid sign-in provider.',
+  'Acepta la invitación con Google, Microsoft o una contraseña nueva': 'Accept the invitation with Google, Microsoft or a new password.',
   'Login con Google no disponible todavía': 'Google sign-in is not available yet.',
   'Login con Microsoft no disponible todavía': 'Microsoft sign-in is not available yet.',
   'No autenticado': 'You are not logged in.',

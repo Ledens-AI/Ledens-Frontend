@@ -240,7 +240,9 @@ export default function InvitacionPage() {
       </>
     ) : <p className="auth-subtitle">{t.loading}</p>;
   } else {
-    const s = info.session;
+    // A session of an unverified account doesn't accept on its own (the
+    // backend asks for Google/Microsoft or a new password): offer those.
+    const s = info.session && !(info.session.matches && !info.session.verified) ? info.session : null;
     const social = info.providers?.google || info.providers?.microsoft;
     body = (
       <>
