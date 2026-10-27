@@ -161,7 +161,7 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
               </div>
             </div>
           )) : <Empty icon="ri-file-list-3-line" title={t.noItems} text={t.noItemsText} />}
-          {!doc.parent ? <BudgetDocs id={doc.id} /> : null}
+          <BudgetDocs id={doc.parent?.id || doc.id} />
           {v.notes ? <div className="fin-card"><h3>{t.notes}</h3><p className="obr-pre">{v.notes}</p></div> : null}
           {doc.ampliaciones.length ? (
             <div className="fin-card">
