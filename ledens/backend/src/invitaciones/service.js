@@ -65,7 +65,22 @@ async function grantAccess(db, inv, user, addedBy) {
   }
   await db.query('UPDATE invitaciones SET access_granted=true WHERE id=$1', [inv.id]);
 }
-const accessNow = (u) => u.role === 'client' && !(u.password_hash && !u.email_verified);
+// Access at once only when nobody but the invited person can be behind the
+// account: verified, or with no way in yet (no password, no Google/Microsoft
+// identity). An unverified account with a password, or created by a provider
+// login that did not vouch for the email, waits for the link.
+const accessNow = (u) => u.role === 'client' && (u.email_verified || (!u.password_hash && !u.has_identity));
+
+// Using the link proves the email. Whatever an unverified account already had
+// (a password, a Google/Microsoft identity that did not vouch for the email,
+// the sessions opened with them) may belong to someone else: it goes.
+export async function dropUnproven(db, userId) {
+  const { rowCount } = await db.query('UPDATE users SET password_hash=NULL, updated_at=now() WHERE id=$1 AND NOT email_verified', [userId]);
+  if (!rowCount) return false;
+  await db.query('DELETE FROM auth_identities WHERE user_id=$1', [userId]);
+  await db.query('DELETE FROM sessions WHERE user_id=$1', [userId]);
+  return true;
+}
 
 /* What the team does: invite, list, resend, revoke. One service per request,
  * built with the effective user (after «Ver como»). */
@@ -128,7 +143,9 @@ export class InvitacionesService {
       // until the person gives theirs.
       const created = (await db.query(`INSERT INTO users (email, name, password_hash, email_verified, role) VALUES ($1,$2,NULL,false,'client')
                                        ON CONFLICT DO NOTHING RETURNING id`, [email, name || email])).rows.length > 0;
-      const user = (await db.query('SELECT id, email, role, password_hash, email_verified FROM users WHERE lower(email)=lower($1)', [email])).rows[0];
+      const user = (await db.query(`SELECT u.id, u.email, u.role, u.password_hash, u.email_verified,
+                                      EXISTS (SELECT 1 FROM auth_identities a WHERE a.user_id=u.id) has_identity
+                                 FROM users u WHERE lower(u.email)=lower($1)`, [email])).rows[0];
       let inv = (await db.query(`UPDATE invitaciones SET email=$3, name=$4, lang=$5, token_hash=NULL, expires_at=now() + make_interval(days => $6),
                                   sent_count=sent_count+1, last_sent_at=now(), invited_by=$7
                                   WHERE presupuesto_id=$1 AND user_id=$2 AND accepted_at IS NULL AND revoked_at IS NULL RETURNING *`,
@@ -224,37 +241,45 @@ async function finish(db, inv, user, method) {
 const userOf = async (db, id) => (await db.query('SELECT id, email, name, role, password_hash, email_verified FROM users WHERE id=$1 FOR UPDATE', [id])).rows[0];
 
 // Sets the password. An account that already has a proven password keeps it
-// (the person logs in with it instead); one whose password was never proven
-// loses it, together with every session open under it.
+// (the person logs in with it instead); an unverified one loses every
+// credential it had (dropUnproven) and every session.
 export async function acceptWithPassword(pool, token, password) {
   if (!isPassword(password)) fail(400, 'La contraseña debe tener al menos 8 caracteres');
   return tx(pool, async (db) => {
     const inv = await byToken(db, token, { lock: true });
     const user = await userOf(db, inv.user_id);
     if (user.password_hash && user.email_verified) fail(409, 'Ya tienes una contraseña: inicia sesión con ella para aceptar la invitación', 'ya_tiene_contrasena');
+    await dropUnproven(db, user.id);
     await db.query('UPDATE users SET password_hash=$2, updated_at=now() WHERE id=$1', [user.id, hashPassword(password)]);
     await db.query('DELETE FROM sessions WHERE user_id=$1', [user.id]);
     return finish(db, inv, user, 'contraseña nueva');
   });
 }
 
-// Logged in already (password or social) as the invited account.
+// Logged in already as the invited account, and that account is verified: a
+// session of an unverified one may come from a credential that isn't the
+// person's, so it accepts with Google/Microsoft or a new password instead.
 export async function acceptWithSession(pool, token, sessionUser) {
   return tx(pool, async (db) => {
     const inv = await byToken(db, token, { lock: true });
     if (inv.user_id !== sessionUser.id) fail(403, 'Has iniciado sesión con otra cuenta. Cierra sesión y vuelve a abrir el enlace.', 'otra_cuenta');
-    return finish(db, inv, await userOf(db, inv.user_id), 'sesión iniciada');
+    const user = await userOf(db, inv.user_id);
+    if (!user.email_verified) fail(409, 'Acepta la invitación con Google, Microsoft o una contraseña nueva', 'sesion_sin_verificar');
+    return finish(db, inv, user, 'sesión iniciada');
   });
 }
 
 // Google / Microsoft with the link: the provider account must carry the
 // invited email; holding the link then proves that email, so the login counts
-// as verified (link or reclaim, see findOrCreateUserFromIdentity).
+// as verified (link or reclaim, see findOrCreateUserFromIdentity). Before
+// that, an unverified invited account loses what it had (dropUnproven), so the
+// login that follows is its only way in.
 export async function checkIdentity(pool, token, email) {
   const inv = await byToken(pool, token);
   if (typeof email !== 'string' || email.trim().toLowerCase() !== inv.email.trim().toLowerCase()) {
     fail(403, 'Entra con la cuenta del email al que se envió la invitación', 'otro_email');
   }
+  await tx(pool, (db) => dropUnproven(db, inv.user_id));
   return inv;
 }
 export async function acceptWithIdentity(pool, token, userId, provider) {

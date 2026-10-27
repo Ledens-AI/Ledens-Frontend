@@ -37,6 +37,7 @@ before(async () => {
     CREATE TABLE users(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), email text NOT NULL, name text NOT NULL, password_hash text,
       email_verified boolean NOT NULL DEFAULT false, role text NOT NULL DEFAULT 'client', created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
     CREATE UNIQUE INDEX users_email_lower_key ON users (lower(email));
+    CREATE TABLE auth_identities(id bigint GENERATED ALWAYS AS IDENTITY, user_id uuid REFERENCES users(id) ON DELETE CASCADE, provider text, provider_user_id text);
     CREATE TABLE sessions(id bigint GENERATED ALWAYS AS IDENTITY, user_id uuid REFERENCES users(id) ON DELETE CASCADE, token_hash text);
     CREATE TABLE audit_log(id bigint GENERATED ALWAYS AS IDENTITY, actor_id uuid REFERENCES users(id), actor_label text, action text,
       target_id uuid REFERENCES users(id), target_label text, detail text);
@@ -221,6 +222,20 @@ test('a proven password or a social login: accept with that account, never with 
   await assert.rejects(acceptWithIdentity(pool, s.token, cliente.id, 'Google'), (e) => e.code === 'otro_email', 'the provider account belongs to someone else');
   await acceptWithIdentity(pool, s.token, inv.user_id, 'Google');
   assert.equal((await userByEmail('social@inv.test')).email_verified, true);
+});
+
+test('an account created by a provider login that did not vouch for the email waits for the link, which drops that login', async () => {
+  const ajeno = (await db.query(`INSERT INTO users(email,name,role) VALUES ('ajeno-ms@inv.test','Social','client') RETURNING id`)).rows[0];
+  await db.query("INSERT INTO auth_identities(user_id, provider, provider_user_id) VALUES ($1,'microsoft','ms-ajeno')", [ajeno.id]);
+  await db.query("INSERT INTO sessions(user_id, token_hash) VALUES ($1,'abierta-social')", [ajeno.id]);
+  await invite(jefe, { email: 'ajeno-ms@inv.test' });
+  assert.equal((await db.query('SELECT count(*)::int n FROM obra_clientes WHERE user_id=$1', [ajeno.id])).rows[0].n, 0, 'no access before the link');
+  const [m] = await claimLinks();
+  await assert.rejects(acceptWithSession(pool, m.token, { id: ajeno.id }), (e) => e.status === 409 && e.code === 'sesion_sin_verificar');
+  await acceptWithPassword(pool, m.token, 'la-de-verdad-1');
+  assert.equal((await db.query('SELECT count(*)::int n FROM auth_identities WHERE user_id=$1', [ajeno.id])).rows[0].n, 0, 'the unproven login is gone');
+  assert.equal((await db.query('SELECT count(*)::int n FROM sessions WHERE user_id=$1', [ajeno.id])).rows[0].n, 0);
+  assert.equal((await db.query('SELECT count(*)::int n FROM obra_clientes WHERE user_id=$1', [ajeno.id])).rows[0].n, 1);
 });
 
 test('accepting proves the email for every open invitation of that person', async () => {
