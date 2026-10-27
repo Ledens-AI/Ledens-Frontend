@@ -89,7 +89,21 @@ router.get('/google/callback', async (req, res) => {
   }
 });
 
-router.get('/microsoft', (req, res) => {
+// Microsoft / Google send the person back to *_REDIRECT_URI. The state cookie
+// has to be set on that same host, or the callback can't find it and the login
+// fails («No se pudo iniciar sesión»): when the browser started on another
+// address of the site (as forwarded by the Static Web App), go through that
+// host first. /inicio never redirects again, so this can't loop.
+function onCallbackHost(req, res, provider, redirectUri) {
+  const forwarded = String(req.get('x-forwarded-host') || '').split(',')[0].trim().toLowerCase();
+  let target;
+  try { target = new URL(redirectUri); } catch { return false; }
+  if (!forwarded || forwarded === target.host.toLowerCase()) return false;
+  res.redirect(`${target.origin}/api/auth/${provider}/inicio`);
+  return true;
+}
+
+function startMicrosoft(req, res) {
   if (!microsoft.isMicrosoftConfigured()) {
     return res.status(503).json({ error: 'Login con Microsoft no disponible todavía' });
   }
@@ -100,16 +114,26 @@ router.get('/microsoft', (req, res) => {
   const state = microsoft.randomState();
   res.cookie(STATE_COOKIE, state, { ...sessionCookieOptions(req), maxAge: STATE_MAX_AGE_MS });
   res.redirect(microsoft.buildAuthUrl(state));
+}
+router.get('/microsoft', (req, res) => {
+  if (microsoft.isMicrosoftConfigured() && onCallbackHost(req, res, 'microsoft', process.env.MICROSOFT_REDIRECT_URI)) return;
+  startMicrosoft(req, res);
 });
+router.get('/microsoft/inicio', startMicrosoft);
 
 router.get('/microsoft/callback', async (req, res) => {
   const { code, state, error } = req.query;
   const expectedState = req.cookies?.[STATE_COOKIE];
   res.clearCookie(STATE_COOKIE, { path: '/' });
 
-  if (error) return failTo(req, res, 'microsoft_cancelled');
+  if (error) {
+    // access_denied is the person cancelling; anything else is Microsoft refusing (logged with its AADSTS code).
+    if (error !== 'access_denied') console.warn('[oauth] microsoft returned an error', error, String(req.query.error_description || '').slice(0, 300));
+    return failTo(req, res, error === 'access_denied' ? 'microsoft_cancelled' : 'microsoft_failed');
+  }
 
   if (!code || !state || !expectedState || state !== expectedState) {
+    console.warn('[oauth] microsoft callback without its state cookie', { host: req.get('x-forwarded-host') || req.get('host'), hasCookie: Boolean(expectedState) });
     return failTo(req, res, 'microsoft_failed');
   }
 
