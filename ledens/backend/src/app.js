@@ -11,6 +11,8 @@ import { createFinanzasRouter } from './routes/finanzas.js';
 import { createPresupuestosRouter } from './routes/presupuestos.js';
 import { createObrasRouter } from './routes/obras.js';
 import { createInvitacionesRouter } from './routes/invitaciones.js';
+import { createMfaRouter } from './routes/mfa.js';
+import { createCapitalRouter } from './routes/capital.js';
 import bridgeRouter from './routes/bridge.js';
 import financeRouter from './routes/finance.js';
 
@@ -40,6 +42,7 @@ export function createApp() {
   app.use('/api/presupuestos', createPresupuestosRouter());
   app.use('/api/obras', createObrasRouter());
   app.use('/api/invitaciones', createInvitacionesRouter());
+  app.use('/api/capital', createCapitalRouter());
 
   const apiLimiter = rateLimit({
     windowMs: 60 * 1000,
@@ -54,6 +57,9 @@ export function createApp() {
   });
 
   app.use('/api/contact', contactRouter);
+  // Second factor (Ledens Capital). Before authRouter, whose path-less 503
+  // guard would otherwise answer first (see oauthRouter below).
+  app.use('/api/auth/mfa', createMfaRouter());
   // oauthRouter mounted FIRST: authRouter's "DB not configured" guard is a
   // path-less router.use(), so once it sends a 503 nothing downstream ever
   // runs — mounting it first would silently swallow /api/auth/google and

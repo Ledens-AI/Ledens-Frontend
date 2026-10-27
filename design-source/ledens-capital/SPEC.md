@@ -93,7 +93,7 @@ Estos casos deben ser **tests del motor**, junto con punto muerto, caja insufici
 
 ## 6. Datos (propuesta)
 
-Esquema nuevo **`capital`** en la misma PostgreSQL. No toca `public` (usuarios, presupuestos) ni `ledens.*` (contabilidad, propiedad de otra herramienta). Primera migración: `024_capital_*.sql`, comprobando antes los nombres que ya figuran en `schema_migrations` de producción (ver CLAUDE.md).
+Esquema nuevo **`capital`** en la misma PostgreSQL. No toca `public` (usuarios, presupuestos) ni `ledens.*` (contabilidad, propiedad de otra herramienta). Migraciones `024_mfa_totp.sql` (segundo factor) y `025_capital_core.sql` (esquema `capital`).
 
 - `capital.members`: `user_id` → `users`, tipo (física / jurídica), estado de cuenta (`invited`, `accepted`, `pending_verification`, `pending_approval`, `approved`, `suspended`, `revoked`), MFA obligatorio.
 - `capital.staff_roles`: `user_id`, rol (`super_admin`, `investment_manager`, `project_manager`, `finance_manager`, `compliance`, `investor_relations`). Se hace aparte de `users.role` para no alterar los roles de la plataforma de reformas.
@@ -106,14 +106,38 @@ Esquema nuevo **`capital`** en la misma PostgreSQL. No toca `public` (usuarios, 
 - `capital.distributions`, `capital.documents` (metadatos; bytes en Blob privado, con registro de accesos), `capital.reports` y `capital.messages`.
 - Auditoría: reutilizar `audit_log` o crear `capital.audit_log` solo de inserción (sin UPDATE ni DELETE para el rol de la aplicación).
 
-## 7. API propuesta (`/api/capital/*`)
+## 7. API (`/api/capital/*` y `/api/auth/mfa/*`)
 
-Montada en `ledens/backend/src/app.js` con su propio limitador. Toda ruta pasa por `requireAuth` y por una comprobación de pertenencia a Capital. Lectura fila a fila por `member_id`.
+Implementado en `ledens/backend` (rama `claude/dazzling-cerf-3kto5s`). Toda ruta de Capital exige una sesión **con el segundo factor verificado** (`requireMfaSession`, `src/routes/mfa.js`). Si falta, responde 401 con `code`: `login_requerido`, `mfa_alta_requerida` o `mfa_requerido`, para que el frontend lleve a la persona al paso correcto. Las escrituras solo se aceptan desde `CORS_ORIGIN`.
 
-- Inversor: `GET /me`, `GET /portfolio`, `GET /opportunities`, `GET /projects/:id`, `POST /projects/:id/simulate` (motor del servidor), `POST /commitments`, `GET /commitments/:id`, `POST /commitments/:id/acknowledgements`, `GET /documents/:id` y `GET /statements?from&to&format=csv|pdf`.
-- Back-office: `POST /admin/invitations`, `PATCH /admin/members/:id/status`, `POST /admin/projects`, `POST /admin/projects/:id/plan-versions`, `POST /admin/commitments/:id/approvals`, `POST /admin/cash-movements/:id/reconcile`, `POST /admin/distributions` y `GET /admin/audit`.
+**Segundo factor** (`/api/auth/mfa`, `src/auth/mfa.js`, TOTP RFC 6238 sin dependencias):
+- `GET /` → `{ enrolled, verified, recoveryCodesLeft }`
+- `POST /alta` → `{ secret, otpauthUrl }` (para el código QR)
+- `POST /alta/confirmar` `{ code }` → `{ recoveryCodes }` (se muestran una única vez)
+- `POST /verificar` `{ code }` o `{ recoveryCode }`
+- `POST /recuperacion` `{ code }` → códigos nuevos
 
-Reutilizable de lo que ya existe: sesiones y `requireAuth` (`src/auth/sessions.js`), el flujo de invitación por enlace con token hasheado (`src/invitaciones/`), la cola de notificaciones por email (`NOTIFICATIONS.md`), el almacenamiento en Blob (`src/obras/storage.js`) y la comprobación de origen en los POST.
+Un código no vale dos veces. Tras 5 fallos seguidos, la cuenta queda bloqueada 15 minutos. El secreto se guarda cifrado con `MFA_ENCRYPTION_KEY`.
+
+**Partícipe** (solo con `capital.members.status = 'approved'`; si no, 403 con `code: cuenta_<estado>`):
+- `GET /me`
+- `GET /oportunidades`: las operaciones con acceso, con captación agregada y escenario base estimado.
+- `GET /proyectos/:id`: plan aprobado, tabla de escenarios y mis solicitudes. La dirección completa solo aparece con una asignación aprobada.
+- `POST /proyectos/:id/simular` `{ amount, scenarioId?, overrides? }`: motor del servidor.
+- `POST /proyectos/:id/solicitudes` `{ amount, acknowledgements: [{ key, version }] }`
+- `POST /solicitudes/:id/retirar`
+- `GET /cartera`: KPI realizados (solo movimientos conciliados) y posiciones.
+
+**Equipo** (`/admin`, según `capital.staff_roles`):
+- `GET|POST /miembros` y `PATCH /miembros/:id/estado`
+- `POST /proyectos`, `PATCH /proyectos/:id/estado`, `POST /proyectos/:id/planes`, `POST /proyectos/:id/planes/:vid/aprobar` (por otra persona) y `POST /proyectos/:id/accesos`
+- `GET /proyectos/:id/solicitudes`
+- `POST /solicitudes/:id/asignacion`: 1.ª firma de inversiones y 2.ª de cumplimiento. Un trigger impide que firme dos veces la misma persona.
+- `POST /solicitudes/:id/rechazar`, `/firma`, `/aportaciones` y `/confirmar`
+- `POST /movimientos/:id/conciliar`
+- `GET /auditoria`
+
+Reutilizado: sesiones (`src/auth/sessions.js`), `audit_log` y el control de origen. Pendiente para la fase 1: enviar la invitación por email a nuevos miembros (reutilizando la cola de `NOTIFICATIONS.md`), documentos en Blob con registro de accesos, extractos CSV/PDF y comunicaciones.
 
 ## 8. Despliegue
 
@@ -121,7 +145,7 @@ El frontend de Capital es **una app aparte** (otro Static Web App y otro dominio
 
 - **Un Container App solo puede enlazarse como backend a un Static Web App** (comprobar en la documentación de Azure SWA «linked backends»). Hoy `ledens-backend` está enlazado a `swa-ledens` y rechaza llamadas directas con 401. Opciones: a) un segundo Container App con la misma imagen (por ejemplo `ledens-capital-api`), enlazado al SWA de Capital; b) un API propio para Capital.
 - **Cookie de sesión:** `ledens_session` es `sameSite=lax` y va ligada al host del SWA. Con un dominio distinto, la sesión de Capital es independiente de la de reformas, lo que es aceptable y probablemente deseable.
-- **MFA:** el backend actual no lo tiene. Es requisito de la fase 1 de Capital (TOTP o WebAuthn), o pasar a Microsoft Entra External ID.
+- **MFA:** propio (TOTP + códigos de recuperación), decidido el 27/10/2026 e implementado. Necesita `MFA_ENCRYPTION_KEY` (32 bytes en base64, en Key Vault).
 
 ## 9. Fase 1 · MVP
 
@@ -131,9 +155,9 @@ Fuera de la fase 1: el editor de estructuras E, el cálculo y pago automático d
 
 ## 10. Decisiones abiertas
 
-1. ¿Backend de Capital dentro de `ledens/backend` (recomendado: reutiliza auth, invitaciones, Blob, notificaciones y Postgres) o en un servicio aparte?
+1. ~~Backend~~: dentro de `ledens/backend`, decidido. El frontend va en una app aparte.
 2. ¿Segundo Container App con la misma imagen, o código separado?
-3. ¿MFA propio (TOTP/WebAuthn) o Entra External ID?
+3. ~~MFA~~: propio, decidido.
 4. Proveedor de firma electrónica y de KYC.
 5. ¿El gestor es una sociedad por operación (como «Ledens Marbella I, S.L.» en el prototipo) o una sola sociedad?
 6. Validación legal de las estructuras A–D antes de publicar ninguna operación real.

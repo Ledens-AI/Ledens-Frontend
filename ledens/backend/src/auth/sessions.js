@@ -32,6 +32,24 @@ export async function getSessionUser(token) {
   return rows[0] || null;
 }
 
+// The session itself, not only its user: whether it has passed the second
+// factor (src/auth/mfa.js) belongs to this login, not to the account.
+// `db` lets tests pass their own database.
+export async function getSession(token, db = getPool()) {
+  if (!token) return null;
+  const { rows } = await db.query(
+    `SELECT s.id AS session_id, s.mfa_verified_at,
+            u.id, u.email, u.name, u.role, u.email_verified, u.created_at
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+      WHERE s.token_hash = $1 AND s.expires_at > now()`,
+    [hashToken(token)],
+  );
+  if (!rows[0]) return null;
+  const { session_id: sessionId, mfa_verified_at: mfaVerifiedAt, ...user } = rows[0];
+  return { sessionId, mfaVerifiedAt, user };
+}
+
 export async function destroySession(token) {
   if (!token) return;
   await getPool().query('DELETE FROM sessions WHERE token_hash = $1', [hashToken(token)]);
