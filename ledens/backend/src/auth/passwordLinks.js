@@ -95,8 +95,11 @@ export async function describeLink(pool, token) {
 export async function usePasswordLink(pool, token, password) {
   if (!isPassword(password)) fail(400, 'La contraseña debe tener al menos 8 caracteres');
   return tx(pool, async (db) => {
+    // Same lock order as asking for a link (user, then its links), or the two
+    // could deadlock: find the account, lock it, then lock and recheck the link.
+    const { user_id: userId } = await byToken(db, token);
+    const u = (await db.query('SELECT id, email, name, role, email_verified FROM users WHERE id=$1 FOR UPDATE', [userId])).rows[0];
     const l = await byToken(db, token, { lock: true });
-    const u = (await db.query('SELECT id, email, name, role, email_verified FROM users WHERE id=$1 FOR UPDATE', [l.user_id])).rows[0];
     if (!u.email_verified) await db.query('DELETE FROM auth_identities WHERE user_id=$1', [u.id]);
     await db.query('UPDATE users SET password_hash=$2, email_verified=true, updated_at=now() WHERE id=$1', [u.id, hashPassword(password)]);
     await db.query('DELETE FROM sessions WHERE user_id=$1', [u.id]); // a new password closes every session
