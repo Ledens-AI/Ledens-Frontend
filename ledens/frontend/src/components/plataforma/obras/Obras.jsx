@@ -4,6 +4,7 @@ import { eur } from '../finanzas/format.js';
 import { Empty, ErrorBox, Kpi } from '../finanzas/ui.jsx';
 import Detalle, { PhaseBadge, Progress } from './Detalle.jsx';
 import Editor from './Editor.jsx';
+import Propuestas from './Propuestas.jsx';
 import { useObrasI18n } from './i18n.js';
 import '../../../styles/finanzas.css';
 import '../../../styles/obras.css';
@@ -33,6 +34,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
 
   if (creating) return <div className="fin obr"><Editor mode="new" onCancel={() => setCreating(false)} onSaved={(d) => { setCreating(false); load(); toast?.('Borrador guardado'); setOpen({ id: d.id }); }} /></div>;
   if (importing) return <div className="fin obr"><PdfImport toast={toast} onCancel={() => setImporting(false)} onDone={(id) => { setImporting(false); load(); setOpen({ id }); }} /></div>;
+  if (screen === 'propuestas') return <Propuestas toast={toast} readOnly={readOnly} onCount={() => countRef.current?.()} />;
   if (open) {
     return (
       <div className="fin obr">
@@ -211,7 +213,7 @@ function PdfImport({ onCancel, onDone, toast }) {
     setBusy(false);
   };
   if (draft) {
-    return <Editor mode="new" initial={draft} onCancel={onCancel} onSaved={async (d, { send }) => {
+    return <Editor mode="new" initial={draft} sourceFile={file?.name} onCancel={onCancel} onSaved={async (d, { send }) => {
       const notes = [];
       // Files hang from the obra: an added presupuesto keeps its PDF there, under its reference.
       const title = d.parent ? `Presupuesto original (PDF) · ${d.ref}` : 'Presupuesto original (PDF)';

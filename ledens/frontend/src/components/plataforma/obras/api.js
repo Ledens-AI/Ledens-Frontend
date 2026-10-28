@@ -51,6 +51,10 @@ export const api = {
     if (!r.ok) throw new ApiError(r.status, data.error || (r.status === 413 ? 'El PDF es demasiado grande (máximo 20 MB).' : 'No se pudo leer el PDF.'), data);
     return data;
   },
+  // Proposed new partidas for the base (admins; backend: presupuestos/propuestas.js).
+  propuestas: (estado) => request('GET', `${base}/propuestas?estado=${encodeURIComponent(estado || 'pending')}`),
+  aprobarPropuesta: (id, body) => request('POST', `${base}/propuestas/${id}/aprobar`, body),
+  rechazarPropuesta: (id, body) => request('POST', `${base}/propuestas/${id}/rechazar`, body),
   assignJefe: (id, body) => request('PUT', `${base}/${id}/jefe`, body),
   schedule: (id, body) => request('PUT', `${base}/${id}/fechas`, body),
   declare: (id, body) => request('PUT', `${base}/${id}/produccion`, body),

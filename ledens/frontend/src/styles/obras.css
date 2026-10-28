@@ -128,3 +128,12 @@
 
 /* Lines read from a PDF whose quantity × price does not match their total. */
 .fin-table tr.obr-check td { background: #FFF6E5; }
+
+/* Match of a line with the base de partidas (BaseMatch.jsx, team only). */
+.obr-base { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; font-size: 12px; }
+.obr-base-chip { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; background: #F2F4FA; color: #3E4D85; border-radius: 6px; padding: 2px 8px; font-weight: 600; }
+.obr-base-chip.is-new { background: #FBF1DE; color: #7A4E0E; }
+.obr-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; color: #3A3A38; }
+.obr-notes li { display: flex; gap: 6px; align-items: flex-start; }
+.obr-notes li.is-precio, .obr-notes li.is-base { color: #7A4E0E; }
+.obr-notes li.is-nueva { color: #9E2F2F; }

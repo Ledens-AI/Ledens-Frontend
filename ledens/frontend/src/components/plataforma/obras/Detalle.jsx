@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, archivos, parseDecimal } from './api.js';
 import { Badge, Dialog, Empty, ErrorBox, Kpi } from '../finanzas/ui.jsx';
 import Editor from './Editor.jsx';
+import BaseMatch from './BaseMatch.jsx';
 import Archivos from './Archivos.jsx';
 import Clientes from './Clientes.jsx';
 import { useObrasI18n } from './i18n.js';
@@ -149,6 +150,7 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
                               {i.kind !== 'confirmada' ? <Badge bg={KIND[i.kind].bg} fg={KIND[i.kind].fg}>{i.selected ? `${KIND[i.kind].label} · ${t.chosen}` : KIND[i.kind].label}</Badge> : null}
                             </div>
                             {i.description ? <div className="fin-muted obr-desc">{i.description}</div> : null}
+                            <BaseMatch item={i} />
                           </td>
                           <td>{i.unit}</td>
                           <td className="fin-num">{num(i.quantity)}</td>
