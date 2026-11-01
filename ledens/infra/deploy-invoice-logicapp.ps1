@@ -37,6 +37,11 @@ $taskWorkflow=Invoke-InvoiceArm -Method PUT -Path ($taskWorkflowPath+'?api-versi
 $taskSecretScope=$taskResourceRoot+'/providers/Microsoft.KeyVault/vaults/kv-ledens-ee069061/secrets/invoice-ingest-token'
 az role assignment create --subscription $taskSubscription --assignee-object-id $taskWorkflow.identity.principalId --assignee-principal-type ServicePrincipal --role 'Key Vault Secrets User' --scope $taskSecretScope --output none
 if($LASTEXITCODE -ne 0){throw 'Could not grant access to the single ingestion secret'}
+# Run and action outcomes (status, codes, durations; never bodies) go to log-ledens, so failures can be queried with KQL.
+$taskWorkspace=$taskResourceRoot+'/providers/Microsoft.OperationalInsights/workspaces/log-ledens'
+Invoke-InvoiceArm -Method PUT -Path ($taskWorkflowPath+'/providers/Microsoft.Insights/diagnosticSettings/ledens-invoice-runs?api-version=2021-05-01-preview') -Body @{
+    properties=@{workspaceId=$taskWorkspace;logs=@(@{category='WorkflowRuntime';enabled=$true})}
+}|Out-Null
 [pscustomobject]@{name=$taskWorkflow.name;state=$taskWorkflow.properties.state;sharepointStatus=$taskConnection.properties.statuses.status}|ConvertTo-Json
 if($taskWorkflow.properties.state -eq 'Disabled'){Write-Output 'Authorize the SharePoint API connection in Azure, then rerun with -Enable. No polling runs while disabled.'}
 Write-Output ('Generated definition: '+$taskDefinitionFile)
