@@ -8,8 +8,9 @@ import { Kpi, Badge, Dialog, Empty, ErrorBox, Pager } from './ui.jsx';
 const key = (r) => r.type + ':' + r.id;
 const EMPTY_FILTERS = { q: '', tipo: '', estado: '', proyecto: null, desde: '', hasta: '', min: '', max: '' };
 
-/* One screen for "Pendientes de asignación" (mode="pendientes", all three
- * types, only records without a project) and for each table's own screen
+/* One screen for "Materiales pendiente de asignación" (mode="pendientes": only
+ * what the Materiales tab lists, without a project — never worker payments or
+ * client receipts) and for each table's own screen
  * (mode = material | trabajador | cliente, every record of that table).
  * Filtering, sorting and paging all happen on the server. */
 export default function RecordsView({ mode, summary, initialProject, onChanged, toast }) {
@@ -40,7 +41,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
     let cancelled = false;
     setLoading(true);
     api.records({
-      pendientes: pending ? 1 : undefined, tipo: pending ? filters.tipo : mode, estado: filters.estado,
+      pendientes: pending ? 1 : undefined, tipo: pending ? 'material' : mode, estado: filters.estado,
       proyecto: filters.proyecto?.id, q: filters.q, desde: filters.desde, hasta: filters.hasta,
       min: filters.min, max: filters.max, orden: sort.by, dir: sort.dir, pagina: page, tam: 25,
     }).then(
@@ -188,18 +189,14 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
   );
 
   const hasFilters = filters.q || filters.tipo || filters.estado || filters.proyecto || filters.desde || filters.hasta || filters.min || filters.max;
-  const terceroLabel = pending ? 'Proveedor / Cliente / Trabajador' : TIPO[mode].tercero;
+  const terceroLabel = TIPO[pending ? 'material' : mode].tercero;
 
   return (
     <div className="fin-stack">
       {pending ? (
         <div className="fin-kpis">
-          <Kpi label="Registros pendientes" value={summary ? num(summary.pendientes) : '…'} icon="ri-inbox-line" />
-          <Kpi label="Importe pendiente de asignar" value={summary ? eur(summary.importePendiente) : '…'} icon="ri-money-euro-circle-line" hint="Suma en valor absoluto de costes y cobros sin proyecto" />
-          {Object.entries(TIPO).map(([t, d]) => (
-            <Kpi key={t} label={d.plural} value={summary ? num(summary.porTipo[t].pendientes) : '…'} icon={d.icon}
-              active={filters.tipo === t} onClick={() => setF({ tipo: filters.tipo === t ? '' : t })} />
-          ))}
+          <Kpi label="Materiales pendientes" value={summary?.materiales ? num(summary.materiales.pendientes) : '…'} icon="ri-inbox-line" />
+          <Kpi label="Importe pendiente de asignar" value={summary?.materiales ? eur(summary.materiales.importe_pendiente) : '…'} icon="ri-money-euro-circle-line" hint="Suma en valor absoluto de los materiales sin proyecto" />
         </div>
       ) : null}
 
@@ -208,15 +205,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
           <span>Buscar</span>
           <input type="search" value={draftQ} onChange={(e) => setDraftQ(e.target.value)} placeholder="Proveedor, trabajador, cliente, concepto o nº de factura" />
         </label>
-        {pending ? (
-          <label className="fin-field">
-            <span>Tipo</span>
-            <select value={filters.tipo} onChange={(e) => setF({ tipo: e.target.value })}>
-              <option value="">Todos</option>
-              {Object.entries(TIPO).map(([t, d]) => <option key={t} value={t}>{d.label}</option>)}
-            </select>
-          </label>
-        ) : (
+        {pending ? null : (
           <>
             <label className="fin-field">
               <span>Estado</span>
@@ -270,7 +259,6 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
               <thead>
                 <tr>
                   {readOnly ? null : <th className="fin-col-check"><input type="checkbox" aria-label="Seleccionar todos los de esta página" checked={allOnPage} onChange={toggleAll} /></th>}
-                  {pending ? th('Tipo', 'tipo') : null}
                   {th('Fecha', 'fecha')}
                   <th>Nº de documento / línea</th>
                   {th(terceroLabel, 'tercero')}
@@ -291,7 +279,6 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
                   return (
                     <tr key={k} className={(selected.has(k) ? 'is-selected' : '') + (st ? ' is-staged' : '')}>
                       {readOnly ? null : <td className="fin-col-check"><input type="checkbox" aria-label="Seleccionar registro" checked={selected.has(k)} onChange={() => toggle(r)} /></td>}
-                      {pending ? <td><Badge {...TIPO[r.type]} icon={TIPO[r.type].icon}>{TIPO[r.type].label}</Badge></td> : null}
                       <td className="fin-nowrap">{fecha(r.fecha)}</td>
                       <td className="fin-nowrap">{r.numerodocumento || (r.document_id ? 'Sin número' : <span className="fin-muted">Sin documento</span>)}{r.line_number&&r.line_number<10000?<div className="fin-muted">Línea {r.line_number}{r.product_code?' · Ref. '+r.product_code:''}</div>:null}</td>
                       <td className="fin-ellipsis" title={r.tercero || ''}>{r.tercero || <span className="fin-muted">—</span>}</td>
@@ -334,7 +321,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
             </table>
             {!loading && !rows.length ? (
               pending && !hasFilters
-                ? <Empty icon="ri-checkbox-circle-line" title="No hay registros pendientes" text="Todos los materiales, pagos a trabajadores y cobros tienen proyecto." />
+                ? <Empty icon="ri-checkbox-circle-line" title="No hay registros pendientes" text="Todos los materiales tienen proyecto." />
                 : <Empty icon="ri-search-line" title="Ningún registro coincide" text="Prueba con otros filtros." />
             ) : null}
             {loading && !rows.length ? <div className="fin-loading">Cargando registros…</div> : null}

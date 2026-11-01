@@ -35,7 +35,7 @@ class PlataformaView extends React.Component {
   // anything else is ignored. The backend enforces the same split for data.
   // Gestión financiera is w_fin / a_fin (jefe de obra and admin), never c_.
   go=(screen,x)=>{if(!screen.startsWith(PREFIX[this.state.role]))return;this.setState(Object.assign({screen,notifOpen:false},x||{}));window.scrollTo(0,0);};
-  componentDidMount(){if(this.state.role==='admin'){this.loadUsers();this.loadAudit();this.getJSON('/api/bridge/workspace/counts').then(d=>this.setState({finBridgePending:d.pending,finConciliationPending:d.reconciliation??d.pending}),()=>{});}if(this.state.role!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.pendientes}),()=>{});this.loadPresu();}
+  componentDidMount(){if(this.state.role==='admin'){this.loadUsers();this.loadAudit();this.getJSON('/api/bridge/workspace/counts').then(d=>this.setState({finBridgePending:d.pending,finConciliationPending:d.reconciliation??d.pending}),()=>{});}if(this.state.role!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.materiales?.pendientes??d.pendientes}),()=>{});this.loadPresu();}
   // Badge and notification counts: presupuestos waiting for this user.
   loadPresu=()=>{this.getJSON('/api/presupuestos').then(d=>{const n=k=>d.presupuestos.filter(p=>p.phase===k&&(k!=='pendiente'||p.decides!==false)).length;this.setState({presu:{pendiente:n('pendiente'),cambios:n('cambios')}});},()=>this.setState({presu:null}));
     if(this.props.user.role==='admin'&&this.state.role==='admin')this.getJSON('/api/presupuestos/propuestas').then(d=>this.setState({propuestas:d.propuestas.length}),()=>{});}
@@ -54,7 +54,7 @@ class PlataformaView extends React.Component {
         const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'No se pudo abrir la vista de ese usuario.');}
       setViewAs(panel==='admin'?null:user?.id);
       this.setState({role:panel,screen:HOME[panel],viewAs:panel==='admin'?null:user||null,finTab:'resumen',finPending:undefined,notifOpen:false,switching:false},
-        ()=>{if(panel!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.pendientes}),()=>{});this.loadPresu();});
+        ()=>{if(panel!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.materiales?.pendientes??d.pendientes}),()=>{});this.loadPresu();});
       window.scrollTo(0,0);
     }catch(e){this.setState({switching:false});this.flash(e.message);}
   };
@@ -73,7 +73,7 @@ class PlataformaView extends React.Component {
     // Admin-only finance tabs follow the panel on screen: an admin in the jefe
     // panel (or viewing as a jefe) sees the jefe's tabs.
     if(role!=='client')nav.push({header:'Gestión financiera'},...FIN_TABS.filter(t=>!t[3]||(role==='admin'&&this.props.user.role==='admin')).map(([k,label,icon])=>{const on=isFin&&s.finTab===k;
-      return {label,icon,badge:k==='pendientes'?s.finPending:k==='conciliacion'?s.finConciliationPending:k==='pendiente-bridge'?s.finBridgePending:0,finConciliationPending:0,go:()=>this.go(finScreen,{finTab:k}),bg:on?'#F2F4FA':'transparent',fg:on?'#3E4D85':'#3A3A38',fw:on?700:500};}));
+      return {label,icon,badge:k==='pendientes'?s.finPending:k==='conciliacion'?s.finConciliationPending:0,go:()=>this.go(finScreen,{finTab:k}),bg:on?'#F2F4FA':'transparent',fg:on?'#3E4D85':'#3A3A38',fw:on?700:500};}));
     const U=this.props.user,shown=s.viewAs||U,meName=shown.name||shown.email;
     const me={name:meName,initials:initials(meName),role:shown.role&&shown.role!=='client'?ROLE_LABEL[shown.role]:L.clientRole,avBg:role==='client'?'#EC6090':role==='worker'?'#68C0B5':'#0C062B'};
     const titles={c_home:[L.nav.home],c_obras:[L.nav.obras],c_presupuestos:[L.nav.presupuestos],c_perfil:[L.nav.perfil],w_home:['Hoy'],w_obras:['Obras asignadas'],a_home:['Panel de administración'],a_users:['Usuarios'],a_user:['Usuarios',user.name],a_audit:['Auditoría'],a_presu:['Presupuestos y obras'],w_avance:['Actualizar avance'],a_avance:['Actualizar avance'],a_propuestas:['Partidas propuestas']};

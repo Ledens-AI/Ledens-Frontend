@@ -10,8 +10,8 @@ export default function Resumen({ summary, error, onRetry, go }) {
   return (
     <div className="fin-stack">
       <div className="fin-kpis">
-        <Kpi label="Pendientes de asignación" value={s ? num(s.pendientes) : '…'} icon="ri-inbox-line" onClick={() => go('pendientes')} tone={s?.pendientes ? 'warn' : undefined} />
-        <Kpi label="Importe sin proyecto" value={s ? eur(s.importePendiente) : '…'} icon="ri-money-euro-circle-line" onClick={() => go('pendientes')} />
+        <Kpi label="Materiales pendientes de asignación" value={s?.materiales ? num(s.materiales.pendientes) : '…'} icon="ri-inbox-line" onClick={() => go('pendientes')} tone={s?.materiales?.pendientes ? 'warn' : undefined} />
+        <Kpi label="Materiales sin proyecto (importe)" value={s?.materiales ? eur(s.materiales.importe_pendiente) : '…'} icon="ri-money-euro-circle-line" onClick={() => go('pendientes')} />
         <Kpi label="Marcados para revisión" value={s ? num(s.revision) : '…'} icon="ri-flag-line" hint="Filtra por estado «Revisión» en cada tabla" />
         <Kpi label="Registros en total" value={s ? num(s.total) : '…'} icon="ri-stack-line" />
       </div>

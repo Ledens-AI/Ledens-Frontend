@@ -16,7 +16,16 @@ El despliegue normal aplica la migración 010 después de las 005/006 ya despleg
 
 ## Pendiente de conciliación
 
-La pantalla Pendiente de conciliación muestra exclusivamente movimientos bancarios sin enlaces Bridge, con enlaces en revisión o con diferencias entre su total firmado y las imputaciones confirmadas. Cada movimiento aparece una sola vez, con los números de documentos relacionados. Los materiales y conceptos se gestionan en Pendientes de asignación. Las vistas de registros financieros y documentos se conservan solo como consultas compatibles de API. Solo administrador puede consultar la bandeja global. Es una consulta de revisión; no crea ni confirma conciliaciones desde la pantalla.
+La pantalla Pendiente de conciliación muestra exclusivamente movimientos bancarios sin enlaces Bridge, con enlaces en revisión o con diferencias entre su total firmado y las imputaciones confirmadas. Cada movimiento aparece una sola vez, con los números de documentos relacionados. Los materiales sin proyecto se gestionan en «Materiales pendiente de asignación» (solo lo que lista Materiales: nunca pagos a trabajadores ni cobros de clientes). Las vistas de registros financieros y documentos se conservan solo como consultas compatibles de API. Solo administrador puede consultar la bandeja global.
+
+La antigua pantalla «Pendiente de bridge movimientos documentos» está integrada aquí: cada movimiento bancario trae `bank` (`id, description, reference, total_amount, remaining, state, currency, bank_fingerprint`) y su botón «Asignar documento» abre en la propia fila la búsqueda de documentos existentes y confirma el enlace con `POST /api/bridge/:documentId/confirm`, como antes. «Bridge Movimientos Documentos» queda como consulta de los enlaces guardados.
+
+## Conceptos de facturas (facturas completas)
+
+Una fila por factura cuyas líneas son conceptos de factura (`financial_records.invoice_line_id`; nunca materiales, pagos a trabajadores o cobros importados), con sus líneas, total y clasificación (`sin_clasificar`, `materiales`, `trabajadores`, `clientes`, `mixta`, `otros`). Solo administrador.
+
+- `GET /api/finanzas/facturas` `clase, q, desde, hasta, pagina, tam`. `clase=sin_clasificar` (la vista por defecto) lista las facturas con alguna línea sin clasificar. `version` es un md5 de `id:version` de sus registros.
+- `PUT /api/finanzas/facturas/:documentId/clasificacion` `{ clase: materiales|trabajadores|clientes, version, reason? }`: cambia `financial_records.category` de todas sus líneas (`materials`/`labor`/`revenue`) en una transacción, con un `finance_events` `reclassified` por registro. Una factura de pago no puede ser de clientes y una de cobro solo de clientes; cambiar una clasificación previa exige motivo (≥ 5 caracteres). Las líneas pasan a la pestaña de su clase (Materiales, Pagos a trabajadores, Pagos de clientes) como en «Movimientos conciliados».
 
 GET /api/finanzas/conciliacion: vista=registros|movimientos|documentos (por defecto movimientos), motivo=sin_documento|sin_bridge|revision|parcial, q, desde, hasta, pagina, tam (máximo 100). Respuesta: rows, total, page, pageSize. Cada fila incluye id,type,fecha,tercero,concepto,numerodocumento,referencia,importe,document_id,enlaces,conciliado,por_conciliar,motivos. Los importes mantienen el signo original; conciliado es el total confirmado del documento o movimiento, no un coste adicional. Los registros financieros comparten el estado de su documento. Las transferencias internas se excluyen de la vista bancaria. No se modifica el esquema ni el Bridge.
 

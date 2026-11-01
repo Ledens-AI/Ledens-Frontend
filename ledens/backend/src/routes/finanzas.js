@@ -116,6 +116,16 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     res.json(await svc(req).reclassify({ recordId: req.params.recordId, clase: b.clase, version: b.version, reason: b.reason }));
   }));
 
+  // Conceptos de facturas: whole invoices and their classification (admins).
+  router.get('/facturas', handle(async (req, res) => {
+    res.json(await svc(req).invoices({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), clase: req.query.clase || '', from: req.query.desde, to: req.query.hasta }));
+  }));
+  // { clase: 'materiales' | 'trabajadores' | 'clientes', version, reason? }
+  router.put('/facturas/:documentId/clasificacion', traced('imputacion', 'Clasificación de factura', { entity: (req) => ({ type: 'documento', id: req.params.documentId }), summary: (b) => ({ message: `Factura clasificada como ${b.clase} (${b.changed} de ${b.lineas} líneas)`, detail: { clase: b.clase, categoria: b.category } }) })(async (req, res) => {
+    const b = req.body || {};
+    res.json(await svc(req).classifyInvoice({ documentId: req.params.documentId, clase: b.clase, version: b.version, reason: b.reason }));
+  }));
+
   router.get('/conciliacion', handle(async (req, res) => {
     const view = req.query.vista || 'movimientos';
     res.json(await svc(req).reconciliation({ view, page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), reason:req.query.motivo, from:req.query.desde, to:req.query.hasta }));

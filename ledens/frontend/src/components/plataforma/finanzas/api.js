@@ -50,6 +50,9 @@ export const api = {
   review: (type, id, body) => request('PUT', `/api/finanzas/registros/${type}/${id}/revision`, body),
   bulk: (body) => request('POST', '/api/finanzas/registros/lote', body),
   profitability: (projectId) => request('GET', `/api/finanzas/proyectos/${projectId}/rentabilidad`),
+  // Conceptos de facturas (admins): whole invoices and their classification.
+  invoices: (f) => request('GET', '/api/finanzas/facturas' + qs(f)),
+  classifyInvoice: (documentId, body) => request('PUT', `/api/finanzas/facturas/${documentId}/clasificacion`, body),
   reconciliation: (f) => request('GET', '/api/finanzas/conciliacion' + qs(f)),
   // Movimientos conciliados (admins): classification and its change.
   reconciled: (f) => request('GET', '/api/finanzas/conciliados' + qs(f)),
