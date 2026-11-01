@@ -1,4 +1,5 @@
 import {test,before,after} from 'node:test';
+import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {FinanzasService} from '../src/finanzas/service.js';
@@ -10,7 +11,7 @@ before(async()=>{
  const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
  await db.exec('ALTER TABLE users ADD COLUMN name text');
- for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql'])
+ for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','026_materiales_provisionales.sql'])
   await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
  [admin,jefe]=(await db.query("INSERT INTO users(email,role,name) VALUES('admin@mv.test','admin','Admin'),('jefe@mv.test','jefe','Jefe') RETURNING id,role")).rows;
  const bank=async(amount,description,extra='')=>(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state${extra?',is_internal_transfer':''})
@@ -90,4 +91,41 @@ test('Pendiente de conciliación carries what «Asignar documento» needs for ea
  const r=(await asAdmin().reconciliation({pageSize:100})).rows.find(x=>x.id===m.pago.id);
  const b=(await db.query('SELECT * FROM ledens.bank_movements WHERE id=$1',[m.pago.id])).rows[0];
  assert.deepEqual(r.bank,{id:b.id,description:'Pago sin factura',reference:null,total_amount:'-90',remaining:r.por_conciliar,state:'COMPLETED',currency:'EUR',bank_fingerprint:bankFingerprint(b)});
+});
+
+test('a provisional material payment is replaced by its invoice when the Bridge reconciles it: class and obra carried, never counted twice',async()=>{
+ const q=(sql,p)=>db.query(sql,p);
+ const project=(await q("INSERT INTO ledens.projects(name,project_id) VALUES('Obra Calle Larios','P-LARIOS') RETURNING id")).rows[0].id;
+ const bankRow=async(amount,description)=>(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES($1,$2,$2,'2026-10-12',$3,'EUR','COMPLETED') RETURNING id`,['MOV-'+description,amount,description])).rows[0].id;
+ const document=async(total,numero)=>(await q(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento,tercero) VALUES($1,'Pagar','2026-10-11',$2,'OBRAMAT') RETURNING id`,[total,numero])).rows[0].id;
+ const addLine=async(d,n,gross)=>{const l=(await q('INSERT INTO ledens.invoice_lines(document_id,line_number,description) VALUES($1,$2,$3) RETURNING id',[d,n,'Línea '+n])).rows[0].id;
+  return (await q(`INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,gross_amount,currency) VALUES($1,$2,'2026-10-11',$3,$4,'EUR') RETURNING id`,[l,d,'Línea '+n,gross])).rows[0].id;};
+ const confirm=(b,d,amount)=>q("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state,reconciled_on) VALUES($1,$2,$3,'Confirmado','2026-10-12')",[b,d,amount]);
+ const live=async(b)=>(await q(`SELECT r.category,r.gross_amount::text gross,(SELECT project_id FROM ledens.project_financial_allocations a WHERE a.record_id=r.id) project
+  FROM ledens.financial_records r WHERE r.source_valid AND r.status<>'excluded' AND (r.bank_movement_id=$1 OR r.document_id IN(SELECT document_id FROM ledens.bank_document_allocations WHERE bank_movement_id=$1))
+  ORDER BY r.gross_amount`,[b])).rows;
+
+ // 1) Reconciled first, invoice lines registered afterwards.
+ const b1=await bankRow(-120,'Obramat sin factura');
+ const {materialId}=await classify(b1,'materiales');
+ assert.equal((await row(b1)).origen,'provisional');
+ const rec=(await asAdmin().listRecords({type:'material',pending:true,q:'Obramat sin factura'})).rows[0];
+ await asAdmin().assign({type:'material',id:materialId,projectId:project,version:rec.version,requestId:crypto.randomUUID()});
+ const d1=await document(-120,'OB-1');await confirm(b1,d1,-120);
+ assert.deepEqual((await live(b1)).map(r=>r.gross),['120.00'],'without lines the provisional record stays');
+ await addLine(d1,1,'70');await addLine(d1,2,'50');
+ assert.deepEqual(await live(b1),[{category:'materials',gross:'50',project},{category:'materials',gross:'70',project}]);
+ const replaced=(await q('SELECT replaced_by_document_id doc,carried_project_id project FROM ledens.provisional_material_payments WHERE material_id=$1',[materialId])).rows[0];
+ assert.deepEqual(replaced,{doc:d1,project});
+ assert.equal((await q("SELECT count(*)::int n FROM ledens.finance_events e JOIN ledens.financial_records r ON r.id=e.record_id WHERE r.material_id=$1 AND e.action='provisional_replaced'",[materialId])).rows[0].n,1);
+ assert.deepEqual([(await row(b1)).clase,(await row(b1)).origen],['materiales','bridge']);
+
+ // 2) Invoice registered first, reconciled afterwards; no obra to carry.
+ const b2=await bankRow(-60,'Ferretería sin factura');
+ await classify(b2,'materiales');
+ const d2=await document(-60,'FE-1');await addLine(d2,1,'60');
+ await confirm(b2,d2,-60);
+ assert.deepEqual(await live(b2),[{category:'materials',gross:'60',project:null}]);
+ assert.equal((await row(b2)).clase,'materiales');
 });

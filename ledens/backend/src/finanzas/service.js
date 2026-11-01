@@ -71,14 +71,15 @@ const MOVEMENTS_SQL=`WITH links AS(SELECT bank_movement_id,document_id FROM lede
  movs AS(
   SELECT b.id,'banco'::text tipo,b.completed_on fecha,coalesce(b.beneficiary_name,b.payer) tercero,coalesce(nullif(b.description,''),b.reference) concepto,b.source_id referencia,b.total_amount importe,
    d.documentos,coalesce(d.n,0) n_docs,coalesce(d.sin_registros,false) doc_sin_registros,
-   EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=b.id) lote
+   EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=b.id) lote,
+   EXISTS(SELECT 1 FROM ledens.provisional_material_payments pm WHERE pm.bank_movement_id=b.id AND pm.replaced_at IS NULL) provisional
   FROM ledens.bank_movements b LEFT JOIN LATERAL(SELECT string_agg(DISTINCT coalesce(dd.numerodocumento,'Sin número'),', ') documentos,count(*)::int n,
     bool_or(NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=dd.id AND r.source_valid AND r.status<>'excluded')) sin_registros
    FROM links l JOIN ledens.documents dd ON dd.id=l.document_id WHERE l.bank_movement_id=b.id) d ON true
   WHERE NOT coalesce(b.is_internal_transfer,false) AND b.total_amount<>0
   UNION ALL
   SELECT k.id,'efectivo',k.occurred_on,k.counterparty,k.concept,'Efectivo',CASE WHEN k.kind='pago' THEN -k.amount ELSE k.amount END,NULL,0,false,
-   EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=k.id)
+   EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=k.id),false
   FROM ledens.cash_movements k WHERE k.kind IN ('pago','cobro')),
  cls AS(SELECT m.*,coalesce(a.n,0) registros,coalesce(a.version,md5('')) version,
   ARRAY(SELECT DISTINCT e FROM unnest(array_remove(coalesce(a.clases,'{}'::text[]),'x')||CASE WHEN m.lote THEN ARRAY['trabajadores'] ELSE '{}'::text[] END) e ORDER BY e) conocidas,
@@ -296,7 +297,7 @@ export class FinanzasService {
   const resumen=Object.fromEntries(MOVEMENT_CLASSES.map(k=>[k,0]));for(const r of counts)resumen[r.clase]=r.n;
   if(clase){if(!MOVEMENT_CLASSES.includes(clase))throw new FinError(400,'Clasificación no válida');params.push(clase);where.push('clase=$'+params.length);}
   const sql=MOVEMENTS_SQL+' SELECT id,tipo,fecha::text fecha,tercero,concepto,referencia,importe::text importe,documentos,clase,conocidas,sentido,version,registros,lote,'+
-   "CASE WHEN n_docs>0 THEN 'bridge' WHEN lote THEN 'trabajadores' WHEN registros>0 THEN 'registro' ELSE 'ninguno' END origen FROM fin WHERE "+where.join(' AND ');
+   "CASE WHEN n_docs>0 THEN 'bridge' WHEN lote THEN 'trabajadores' WHEN provisional THEN 'provisional' WHEN registros>0 THEN 'registro' ELSE 'ninguno' END origen FROM fin WHERE "+where.join(' AND ');
   const rows=(await this.query(sql+` ORDER BY fecha DESC NULLS LAST,id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows;
   const total=(await this.query('SELECT count(*)::int n FROM ('+sql+') x',params)).rows[0].n;
   return {rows,total,resumen,page:p,pageSize:size};
@@ -355,7 +356,9 @@ export class FinanzasService {
   });
  }
  // A bank payment with no document classified as materials: a material expense
- // tied to the movement, signed like the import (a cost is negative there).
+ // tied to the movement, signed like the import (a cost is negative there). It is
+ // provisional: when the Bridge confirms the movement's invoice, 026 excludes it
+ // and the invoice's records inherit its class and obra (no double count).
  async materialPaymentOne(c,b){
   if(b.currency&&b.currency!=='EUR')throw new FinError(409,'Solo movimientos en euros');
   if((await c.query('SELECT 1 FROM ledens.material_expenses WHERE bank_movement_id=$1 LIMIT 1',[b.id])).rows.length)throw new FinError(409,'Ya está registrado como material');
@@ -364,7 +367,9 @@ export class FinanzasService {
    VALUES('ud',$1,1,$2,$2,$3,$4) RETURNING id`,[b.description||b.reference||b.source_id||'Pago de materiales',total,b.completed_on,b.id])).rows[0];
   const r=(await c.query('SELECT id FROM ledens.financial_records WHERE material_id=$1',[m.id])).rows[0];
   if(!r)throw new FinError(503,'No se pudo registrar el material en la contabilidad');
-  return {materialId:m.id,recordId:r.id};
+  // Provisional until the Bridge reconciles its invoice (026 replaces it then).
+  await c.query('INSERT INTO ledens.provisional_material_payments(material_id,bank_movement_id,created_by) VALUES($1,$2,$3)',[m.id,b.id,this.user.id]);
+  return {materialId:m.id,recordId:r.id,provisional:true};
  }
  // ------------------------------------------------------------- pago a trabajadores
  // «Pago a trabajadores» in Pendiente de conciliación (admin, like that inbox):

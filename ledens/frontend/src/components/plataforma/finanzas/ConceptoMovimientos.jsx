@@ -10,10 +10,10 @@ export const CLASE_MOV = {
   clientes: { label: 'Cobro de clientes', bg: '#FDF0F4', fg: '#B84371', icon: 'ri-hand-coin-line' },
   mixto: { label: 'Varias clases', bg: '#F2F2EF', fg: '#3A3A38', icon: 'ri-shuffle-line' },
 };
-const ORIGEN = { bridge: 'Deducido del Bridge con documentos', trabajadores: 'En Pendiente de trabajador', registro: 'Registro contable del movimiento', ninguno: 'Sin documento conciliado' };
+const ORIGEN = { bridge: 'Deducido del Bridge con documentos', trabajadores: 'En Pendiente de trabajador', registro: 'Registro contable del movimiento', provisional: 'Provisional hasta conciliar su factura', ninguno: 'Sin documento conciliado' };
 // What a manual class does when the movement has nothing registered yet.
 const EFECTO = {
-  materiales: 'Se registrará como pago de materiales y aparecerá en «Materiales pendiente de asignación» para elegir la obra.',
+  materiales: 'Se registrará como pago de materiales provisional y aparecerá en «Materiales pendiente de asignación» para elegir la obra. Cuando el Bridge concilie su factura, la factura lo sustituirá con esta clasificación y esta obra.',
   trabajadores: 'Pasará a «Pendiente de trabajador» para repartirlo entre trabajadores y obras.',
   clientes: 'Se registrará como cobro de cliente en «Pagos de clientes».',
 };
