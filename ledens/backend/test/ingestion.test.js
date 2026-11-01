@@ -259,6 +259,8 @@ test('when the OCR places no tax id, our NIF after a buyer label in the PDF text
   assert.equal(buyerFromText('SOCIEDAD INVERSORA NAVARRO ROBINSON B19753805 Calle X · Cliente: Pepe Pérez 12345678Z',own),null,'our own issued invoice: our id comes before the label');
   assert.equal(buyerFromText('CLIENTE Ledens B19753805',own),null,'no other tax id: no supplier');
   assert.equal(buyerFromText('CLIENTE Pepe Pérez 12345678Z '+'x '.repeat(200)+'B19753805',own),null,'too far from the label');
+  assert.equal(buyerFromText('CLIENTE: Empresa Cliente NIF A82009812\nEMISOR: Ledens NIF B19753805',own),null,'customer block first, our id is the issuer');
+  assert.equal(buyerFromText('CLIENTE: Empresa Cliente · EMISOR: Ledens NIF B19753805 · A82009812',own),null,'issuer label between the buyer label and our id');
   // Extraction: the OCR read no tax id at all.
   const inv={analyzeResult:{documents:[{fields:{InvoiceDate:{valueDate:'2026-10-09',confidence:.965},InvoiceId:{valueString:'F-0001',confidence:.9},
     InvoiceTotal:{valueCurrency:{amount:338.8,currencyCode:'EUR'},confidence:.948},SubTotal:{valueCurrency:{amount:280}},TotalTax:{valueCurrency:{amount:58.8}}}}]}};

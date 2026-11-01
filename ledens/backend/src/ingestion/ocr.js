@@ -30,16 +30,21 @@ export function textTotals(text) {
 // «B 19753805», «12345678 Z», «X 1234567 L»).
 const SPANISH_TAX_ID = /\b(?:([A-HJNPQRSUVW]) ?(\d{7}) ?([0-9A-J])|(\d{8}) ?([A-Z])|([XYZ]) ?(\d{7}) ?([A-Z]))\b/g;
 const BUYER_LABEL = /\b(?:CLIENTE|DATOS DEL CLIENTE|FACTURAR A|FACTURADO A|BILL TO|BILLED TO|CUSTOMER|DESTINATARIO)\b/g;
+const SELLER_LABEL = /\b(?:EMISOR|PROVEEDOR|VENDEDOR|FACTURADO POR|EMITIDA POR|SELLER|SUPPLIER|VENDOR)\b/;
 // When the OCR placed no tax id on either side: our tax id printed shortly
 // (≤160 characters) after a buyer label («CLIENTE», «Facturar a», «Bill to»…)
-// means we are the buyer. One other Spanish tax id in the text is the
-// supplier's. Our own issued invoices print our id as issuer, before the label.
+// means we are the buyer, as long as it is the first tax id after the label and
+// no issuer label («Emisor», «Proveedor»…) comes in between: that is still the
+// customer block. One other Spanish tax id in the text is the supplier's. Our
+// own issued invoices print our id as issuer, outside the customer block.
 export function buyerFromText(pdfText, own) {
   const text = normalize(pdfText);
   const ids = [...text.matchAll(SPANISH_TAX_ID)].map((m) => ({ at: m.index, id: m.slice(1).filter(Boolean).join('') }));
   const ours = ids.filter((x) => x.id === own);
   const labels = [...text.matchAll(BUYER_LABEL)].map((m) => m.index + m[0].length);
-  if (!ours.some((o) => labels.some((l) => l <= o.at && o.at - l <= 160))) return null;
+  const inCustomerBlock = (o, l) => l <= o.at && o.at - l <= 160 &&
+    !ids.some((x) => x.at >= l && x.at < o.at) && !SELLER_LABEL.test(text.slice(l, o.at));
+  if (!ours.some((o) => labels.some((l) => inCustomerBlock(o, l)))) return null;
   const others = [...new Set(ids.filter((x) => x.id !== own).map((x) => x.id))];
   return others.length ? { supplierTaxId: others.length === 1 ? others[0] : null } : null;
 }
