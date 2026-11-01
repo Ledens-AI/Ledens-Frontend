@@ -10,7 +10,7 @@ import Proyectos from './Proyectos.jsx';
 import Trabajadores from './Trabajadores.jsx';
 import Logs from './Logs.jsx';
 import Rentabilidad from './Rentabilidad.jsx';
-import Facturas from './Facturas.jsx';
+import ConceptoMovimientos from './ConceptoMovimientos.jsx';
 import { FIN_TABS } from './tabs.js';
 import '../../../styles/finanzas.css';
 
@@ -20,7 +20,7 @@ const INTRO = {
   material: 'Cada concepto de factura se imputa por separado: una misma factura puede repartirse entre obras.',
   trabajador: 'Vista de consulta de los pagos a trabajadores, con su rol y proyecto. Los pagos nuevos se preparan en «Pendiente de trabajador».',
   cliente: 'Cobros recibidos de clientes. Son cobros, no ingresos reconocidos: un anticipo no es facturación.',
-  concepto: 'Facturas completas cuyo tipo no se ha podido reconocer automáticamente. Clasifica cada factura como pago de materiales, pago a trabajadores o cobro de clientes; todas sus líneas pasan a esa sección.',
+  concepto: 'Todos los movimientos, bancarios y en efectivo, clasificados como pago de materiales, pago a trabajadores o cobro de clientes. La clasificación sale de los documentos conciliados en el Bridge; si no se puede deducir, el movimiento queda «Pendiente de clasificación». La rentabilidad por proyecto solo es completa cuando no queda ninguno pendiente.',
   conciliados: 'Movimientos ya conciliados con su factura y cómo está clasificado cada concepto: materiales, pagos a trabajadores o cobro de clientes. Si no estás de acuerdo, pulsa «Cambiar» e indica el motivo.',
   conciliacion: 'Movimientos bancarios pendientes de conciliar con sus documentos. Pulsa «Asignar documento» para conciliar un movimiento con una factura existente, o selecciona los pagos de nóminas y pulsa «Pago a trabajadores» para segregarlos.',
   bridge:'Enlaces entre movimientos y documentos existentes, con importes, estado y motivo de conciliación.',
@@ -73,13 +73,13 @@ export default function GestionFinanciera({ tab, go, toast, onPending, onBridgeP
       {tab === 'conciliacion' ? <Conciliacion toast={toast} onChanged={changed} go={go} /> : null}
       {tab === 'conciliados' ? <Conciliados toast={toast} onChanged={changed} /> : null}
       {tab === 'bridge' ? <BridgeMovimientos go={go} /> : null}
-      {tab === 'concepto' ? <Facturas toast={toast} onChanged={changed} /> : null}
+      {tab === 'concepto' ? <ConceptoMovimientos toast={toast} onChanged={changed} /> : null}
       {tab === 'pendiente-trabajador' ? <PendienteTrabajador toast={toast} onChanged={changed} /> : null}
       {tab === 'proyectos' ? <Proyectos toast={toast} /> : null}
       {tab === 'trabajadores' ? <Trabajadores toast={toast} /> : null}
       {tab === 'logs' ? <Logs /> : null}
       {tab === 'rentabilidad' ? (
-        <Rentabilidad project={rentProject} onProject={setRentProject} version={version}
+        <Rentabilidad project={rentProject} onProject={setRentProject} version={version} go={go}
           drill={(t) => { setDrill({ tab: t, project: rentProject }); go(t); }} />
       ) : null}
     </div>

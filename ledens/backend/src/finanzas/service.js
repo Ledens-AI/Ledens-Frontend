@@ -57,6 +57,35 @@ const TYPE_FILTER={
  trabajador:t=>`((l.type=${t} AND l.category NOT IN ('materials','overhead')) OR (l.type<>${t} AND l.type<>'cliente' AND l.category='labor'))`,
  cliente:t=>`(l.type=${t} OR (l.type='concepto' AND l.category='revenue'))`,
 };
+// «Concepto de movimientos»: the class a record gives its movement ('x' = not one
+// of the three, so the movement stays pending).
+const CAT_CLASE=c=>`CASE WHEN ${c} IN ('materials','overhead') THEN 'materiales' WHEN ${c}='labor' THEN 'trabajadores' WHEN ${c} IN ('revenue','advance') THEN 'clientes' ELSE 'x' END`;
+export const MOVEMENT_CLASSES=['pendiente','materiales','trabajadores','clientes','mixto'];
+const MOVEMENTS_SQL=`WITH links AS(SELECT bank_movement_id,document_id FROM ledens.bank_document_allocations WHERE state='Confirmado'),
+ recs AS(SELECT DISTINCT x.mov,r.id,r.version,r.category FROM (
+  SELECT f.bank_movement_id mov,f.id FROM ledens.financial_records f WHERE f.bank_movement_id IS NOT NULL
+  UNION ALL SELECT l.bank_movement_id,f.id FROM links l JOIN ledens.financial_records f ON f.document_id=l.document_id
+  UNION ALL SELECT k.id,f.id FROM ledens.cash_movements k JOIN ledens.financial_records f ON f.material_id=k.material_id OR f.customer_payment_id=k.customer_payment_id
+ ) x JOIN ledens.financial_records r ON r.id=x.id WHERE r.source_valid AND r.status<>'excluded'),
+ agg AS(SELECT mov,count(*)::int n,array_agg(DISTINCT ${CAT_CLASE('category')}) clases,md5(string_agg(id::text||':'||version,',' ORDER BY id)) version FROM recs GROUP BY mov),
+ movs AS(
+  SELECT b.id,'banco'::text tipo,b.completed_on fecha,coalesce(b.beneficiary_name,b.payer) tercero,coalesce(nullif(b.description,''),b.reference) concepto,b.source_id referencia,b.total_amount importe,
+   d.documentos,coalesce(d.n,0) n_docs,coalesce(d.sin_registros,false) doc_sin_registros,
+   EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=b.id) lote
+  FROM ledens.bank_movements b LEFT JOIN LATERAL(SELECT string_agg(DISTINCT coalesce(dd.numerodocumento,'Sin número'),', ') documentos,count(*)::int n,
+    bool_or(NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=dd.id AND r.source_valid AND r.status<>'excluded')) sin_registros
+   FROM links l JOIN ledens.documents dd ON dd.id=l.document_id WHERE l.bank_movement_id=b.id) d ON true
+  WHERE NOT coalesce(b.is_internal_transfer,false) AND b.total_amount<>0
+  UNION ALL
+  SELECT k.id,'efectivo',k.occurred_on,k.counterparty,k.concept,'Efectivo',CASE WHEN k.kind='pago' THEN -k.amount ELSE k.amount END,NULL,0,false,
+   EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=k.id)
+  FROM ledens.cash_movements k WHERE k.kind IN ('pago','cobro')),
+ cls AS(SELECT m.*,coalesce(a.n,0) registros,coalesce(a.version,md5('')) version,
+  ARRAY(SELECT DISTINCT e FROM unnest(array_remove(coalesce(a.clases,'{}'::text[]),'x')||CASE WHEN m.lote THEN ARRAY['trabajadores'] ELSE '{}'::text[] END) e ORDER BY e) conocidas,
+  ('x'=ANY(coalesce(a.clases,'{}'::text[])) OR m.doc_sin_registros) desconocido
+  FROM movs m LEFT JOIN agg a ON a.mov=m.id),
+ fin AS(SELECT c.*,CASE WHEN c.desconocido OR cardinality(c.conocidas)=0 THEN 'pendiente' WHEN cardinality(c.conocidas)=1 THEN c.conocidas[1] ELSE 'mixto' END clase,
+  CASE WHEN c.importe<0 THEN 'pago' ELSE 'cobro' END sentido FROM cls c)`;
 const labels={reclassified:'Cambio de clasificación',replace_allocations:'Asignación a proyecto',recognition:'Validación contable',review_flag:'Revisión',source_changed:'Origen actualizado',document_changed:'Factura actualizada'};
 const requestFor=(seed,key)=>{const h=createHash('sha256').update(seed+'|'+key).digest('hex').slice(0,32);return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;};
 // Pago a trabajadores: how a paid amount (absolute, in cents) is split.
@@ -250,61 +279,92 @@ export class FinanzasService {
   }
   return {rows,total,page:p,pageSize:size};
  }
- // ------------------------------------------------------------- facturas completas
- // «Conceptos de facturas»: each invoice whose lines are invoice concepts (not an
- // imported material, worker payment or client payment), as one row, with how its
- // lines are classified. Classifying the invoice changes the category of all of
- // them at once (materiales / trabajadores / clientes), audited per record.
- async invoices({page=1,pageSize=25,q='',clase='',from='',to=''}={}){
-  if(this.user.role!=='admin')throw new FinError(403,'Clasificar facturas requiere administrador');
+ // ------------------------------------------------------------- concepto de movimientos
+ // Every bank movement (internal transfers aside) and cash entry, classified as
+ // Pago de materiales, Pago a trabajadores or Cobro de clientes. The class is
+ // concluded from what is registered for it: the records of the documents the
+ // Bridge confirmed for it, its own records (imported source rows, client
+ // receipts, cash) and its worker batch. Anything unknown, or nothing at all,
+ // leaves it «pendiente»: profitability needs every movement classified.
+ async movements({page=1,pageSize=25,q='',clase='',from='',to=''}={}){
+  if(this.user.role!=='admin')throw new FinError(403,'Clasificar movimientos requiere administrador');
   const size=Math.min(100,Math.max(1,Number(pageSize)||25)),p=Math.max(1,Math.min(4000,Number(page)||1));
   if(!Number.isInteger(size)||!Number.isInteger(p))throw new FinError(400,'Paginación no válida');
-  const params=[...this.params(),'%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',numerodocumento,tercero,conceptos) ILIKE $3"];
-  if(clase){if(![...Object.keys(CLASES),'sin_clasificar','mixta','otros'].includes(clase))throw new FinError(400,'Clasificación no válida');
-   // «Sin clasificar»: any line still unclassified, even if the others are not.
-   if(clase==='sin_clasificar')where.push("'sin_clasificar'=ANY(clases)");else{params.push(clase);where.push('clase=$'+params.length);}}
+  const params=['%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',tercero,concepto,referencia,documentos) ILIKE $1"];
   for(const [v,op] of [[from,'>='],[to,'<=']])if(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v)))throw new FinError(400,'Fecha no válida');params.push(v);where.push('fecha '+op+' $'+params.length+'::date');}
-  const sql=BASE+`, lines AS(SELECT l.*,${CLASE_SQL} clase FROM listed l WHERE l.type='concepto' AND l.document_id IS NOT NULL),
-   inv AS(SELECT d.id,d.numerodocumento,d.tercero,d.document_on fecha,d.total,d.tipo doc_tipo,count(*)::int lineas,sum(x.importe)::text importe_lineas,
-    array_agg(DISTINCT x.clase) clases,CASE WHEN count(DISTINCT x.clase)=1 THEN min(x.clase) ELSE 'mixta' END clase,
-    string_agg(coalesce(x.concepto,''),' · ' ORDER BY x.line_number NULLS LAST,x.record_id) conceptos,
-    md5(string_agg(x.record_id::text||':'||x.version,',' ORDER BY x.record_id)) version,
-    CASE WHEN d.tipo='Cobrar' THEN 'cobro' WHEN d.tipo='Pagar' THEN 'pago' WHEN d.total<0 THEN 'pago' WHEN d.total>0 THEN 'cobro' END sentido
-    FROM lines x JOIN ledens.documents d ON d.id=x.document_id GROUP BY d.id)
-   SELECT * FROM inv WHERE `+where.join(' AND ');
-  const rows=(await this.query(sql+` ORDER BY fecha DESC NULLS LAST,numerodocumento,id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows;
+  const counts=(await this.query(MOVEMENTS_SQL+' SELECT clase,count(*)::int n FROM fin WHERE '+where.join(' AND ')+' GROUP BY clase',params)).rows;
+  const resumen=Object.fromEntries(MOVEMENT_CLASSES.map(k=>[k,0]));for(const r of counts)resumen[r.clase]=r.n;
+  if(clase){if(!MOVEMENT_CLASSES.includes(clase))throw new FinError(400,'Clasificación no válida');params.push(clase);where.push('clase=$'+params.length);}
+  const sql=MOVEMENTS_SQL+' SELECT id,tipo,fecha::text fecha,tercero,concepto,referencia,importe::text importe,documentos,clase,conocidas,sentido,version,registros,lote,'+
+   "CASE WHEN n_docs>0 THEN 'bridge' WHEN lote THEN 'trabajadores' WHEN registros>0 THEN 'registro' ELSE 'ninguno' END origen FROM fin WHERE "+where.join(' AND ');
+  const rows=(await this.query(sql+` ORDER BY fecha DESC NULLS LAST,id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows;
   const total=(await this.query('SELECT count(*)::int n FROM ('+sql+') x',params)).rows[0].n;
-  return {rows,total,page:p,pageSize:size};
+  return {rows,total,resumen,page:p,pageSize:size};
  }
- async classifyInvoice({documentId,clase,version,reason}={}){
-  if(this.user.role!=='admin')throw new FinError(403,'Clasificar facturas requiere administrador');
-  if(!uuid(documentId))throw new FinError(404,'Factura no encontrada');
+ // Manual class of one movement. With records (its documents' or its own) their
+ // category changes, audited per record; with nothing registered the movement
+ // enters through the usual flow: Pendiente de trabajador, a client payment or a
+ // material expense tied to it (006's triggers then create its record).
+ async classifyMovement({id,clase,version,reason}={}){
+  if(this.user.role!=='admin')throw new FinError(403,'Clasificar movimientos requiere administrador');
+  if(!uuid(id))throw new FinError(404,'Movimiento no encontrado');
   if(!CLASES[clase])throw new FinError(400,'Clasificación no válida');
   if(typeof version!=='string'||!/^[0-9a-f]{32}$/.test(version))throw new FinError(400,'Versión no válida');
   const why=typeof reason==='string'?reason.trim():'';
   if(why.length>500)throw new FinError(400,'Motivo no válido (máximo 500 caracteres)');
   return this.finance.transaction(async c=>{
-   const records=(await c.query(`SELECT f.* FROM ledens.financial_records f WHERE f.document_id=$1 AND f.invoice_line_id IS NOT NULL
-    AND f.source_valid AND f.status<>'excluded' ORDER BY f.id FOR UPDATE`,[documentId])).rows;
-   if(!records.length)throw new FinError(404,'Factura no encontrada o sin conceptos');
+   const b=(await c.query('SELECT * FROM ledens.bank_movements WHERE id=$1 FOR UPDATE',[id])).rows[0];
+   const k=b?null:(await c.query('SELECT * FROM ledens.cash_movements WHERE id=$1 FOR UPDATE',[id])).rows[0];
+   if(!b&&!k)throw new FinError(404,'Movimiento no encontrado');
+   if(b?.is_internal_transfer)throw new FinError(409,'Es un traspaso interno');
+   const amount=b?cents(b.total_amount):k.kind==='pago'?-cents(k.amount):cents(k.amount);
+   if(amount===null||amount===0n)throw new FinError(409,'El movimiento no tiene un importe válido');
+   if(amount<0n&&clase==='clientes')throw new FinError(409,'Un pago no puede clasificarse como cobro de clientes');
+   if(amount>0n&&clase!=='clientes')throw new FinError(409,'Un cobro solo puede clasificarse como cobro de clientes');
+   const ids=(await c.query(`SELECT DISTINCT r.id FROM ledens.financial_records r WHERE r.source_valid AND r.status<>'excluded' AND (
+     r.bank_movement_id=$1 OR r.document_id IN(SELECT document_id FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado')
+     OR r.material_id=$2 OR r.customer_payment_id=$3)`,[id,k?.material_id||null,k?.customer_payment_id||null])).rows.map(r=>r.id);
+   const records=(await c.query('SELECT * FROM ledens.financial_records WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE',[ids])).rows;
    const current=createHash('md5').update(records.map(r=>r.id+':'+r.version).join(',')).digest('hex');
-   if(current!==version)throw new FinError(409,'La factura ha cambiado. Actualiza la lista.');
-   const doc=(await c.query('SELECT tipo,total FROM ledens.documents WHERE id=$1',[documentId])).rows[0];
-   const sentido=doc.tipo==='Cobrar'?'cobro':doc.tipo==='Pagar'?'pago':Number(doc.total)<0?'pago':Number(doc.total)>0?'cobro':null;
-   if(sentido==='pago'&&clase==='clientes')throw new FinError(409,'Una factura de pago no puede clasificarse como cobro de clientes');
-   if(sentido==='cobro'&&clase!=='clientes')throw new FinError(409,'Una factura de cobro solo puede clasificarse como de clientes');
-   const target=CLASES[clase],same=r=>r.category===target||(target==='materials'&&r.category==='overhead');
-   const changing=records.filter(r=>!same(r));
-   if(!changing.length)throw new FinError(409,'La factura ya está clasificada así');
-   // Changing what was already classified needs its reason, like «Movimientos conciliados».
-   if(changing.some(r=>r.category!=='unclassified')&&why.length<5)throw new FinError(400,'Indica el motivo del cambio (al menos cinco caracteres)');
-   const text=why||'Clasificación de la factura completa';
-   for(const r of changing){
-    const after=(await c.query('UPDATE ledens.financial_records SET category=$2,version=version+1,updated_at=now() WHERE id=$1 RETURNING *',[r.id,target])).rows[0];
-    await this.finance.audit(c,r,this.user,'reclassified',text,after);
+   if(current!==version)throw new FinError(409,'El movimiento ha cambiado. Actualiza la lista.');
+   if((await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1 OR cash_movement_id=$1',[id])).rows.length)
+    throw new FinError(409,clase==='trabajadores'?'Ya está en pagos a trabajadores':'Está en Pendiente de trabajador: devuélvelo a conciliación desde esa pantalla para cambiarlo');
+   if(b){
+    const bare=(await c.query(`SELECT d.numerodocumento FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id
+     WHERE a.bank_movement_id=$1 AND a.state='Confirmado' AND NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded')`,[id])).rows;
+    if(bare.length)throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta antes de clasificar el movimiento`);
    }
-   return {document_id:documentId,clase,category:target,changed:changing.length,lineas:records.length};
+   if(records.length){
+    const target=CLASES[clase],same=r=>r.category===target||(target==='materials'&&r.category==='overhead');
+    const changing=records.filter(r=>!same(r));
+    if(!changing.length)throw new FinError(409,'Ya está clasificado así');
+    if(changing.some(r=>r.customer_payment_id))throw new FinError(409,'Un cobro de cliente siempre es de clientes');
+    // Changing what was already classified needs its reason, like «Movimientos conciliados».
+    if(changing.some(r=>r.category!=='unclassified')&&why.length<5)throw new FinError(400,'Indica el motivo del cambio (al menos cinco caracteres)');
+    const text=why||'Clasificación del movimiento en Concepto de movimientos';
+    for(const r of changing){
+     const after=(await c.query('UPDATE ledens.financial_records SET category=$2,version=version+1,updated_at=now() WHERE id=$1 RETURNING *',[r.id,target])).rows[0];
+     await this.finance.audit(c,r,this.user,'reclassified',text,after);
+    }
+    return {id,clase,via:'registros',changed:changing.length};
+   }
+   if(clase==='trabajadores')return {id,clase,via:'pendiente-trabajador',...(b?await this.classifyOne(c,id):await this.classifyCash(c,id))};
+   if(!b){const kk=await this.cashForUpdate(c,id);return {id,clase,via:'efectivo',...await this.assignCashIn(c,kk,clase,null,'')};}
+   if(clase==='clientes')return {id,clase,via:'cobro-cliente',...await this.customerPaymentOne(c,id,null)};
+   return {id,clase,via:'material',...await this.materialPaymentOne(c,b)};
   });
+ }
+ // A bank payment with no document classified as materials: a material expense
+ // tied to the movement, signed like the import (a cost is negative there).
+ async materialPaymentOne(c,b){
+  if(b.currency&&b.currency!=='EUR')throw new FinError(409,'Solo movimientos en euros');
+  if((await c.query('SELECT 1 FROM ledens.material_expenses WHERE bank_movement_id=$1 LIMIT 1',[b.id])).rows.length)throw new FinError(409,'Ya está registrado como material');
+  const total=decimal(cents(b.total_amount));
+  const m=(await c.query(`INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id)
+   VALUES('ud',$1,1,$2,$2,$3,$4) RETURNING id`,[b.description||b.reference||b.source_id||'Pago de materiales',total,b.completed_on,b.id])).rows[0];
+  const r=(await c.query('SELECT id FROM ledens.financial_records WHERE material_id=$1',[m.id])).rows[0];
+  if(!r)throw new FinError(503,'No se pudo registrar el material en la contabilidad');
+  return {materialId:m.id,recordId:r.id};
  }
  // ------------------------------------------------------------- pago a trabajadores
  // «Pago a trabajadores» in Pendiente de conciliación (admin, like that inbox):
@@ -431,27 +491,28 @@ export class FinanzasService {
   if(projectId&&!uuid(projectId))throw new FinError(400,'Obra no válida');
   const text=String(description??'').trim();
   if(text.length>300)throw new FinError(400,'La descripción admite 300 caracteres como máximo');
-  return this.finance.transaction(async c=>{
-   const k=await this.cashForUpdate(c,id);
-   if(CASH_TARGETS[target]!==k.kind)throw new FinError(409,target==='clientes'?'Solo un cobro puede ir a Pagos de clientes':'Solo un pago puede ir a Pagos de materiales');
-   if(projectId&&!(await c.query('SELECT 1 FROM ledens.projects WHERE id=$1',[projectId])).rows.length)throw new FinError(400,'Obra no encontrada');
-   let source;
-   if(target==='materiales'){
-    const m=(await c.query(`INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on)
-     VALUES('ud',$1,1,$2,$2,$3) RETURNING id`,[text||k.concept,decimal(-cents(k.amount)),k.occurred_on])).rows[0];
-    await c.query("UPDATE ledens.cash_movements SET assigned_to='materiales',material_id=$2,assigned_by=$3,assigned_at=now() WHERE id=$1",[id,m.id,this.user.id]);
-    source=(await c.query('SELECT id,version,gross_amount FROM ledens.financial_records WHERE material_id=$1',[m.id])).rows[0];
-   }else{
-    const p=(await c.query(`INSERT INTO ledens.customer_payments(occurred_on,id_pago,cliente,total)
-     VALUES($1,'Efectivo',$2,$3) RETURNING id`,[k.occurred_on,k.counterparty,k.amount])).rows[0];
-    await c.query("UPDATE ledens.cash_movements SET assigned_to='clientes',customer_payment_id=$2,assigned_by=$3,assigned_at=now() WHERE id=$1",[id,p.id,this.user.id]);
-    source=(await c.query('SELECT id,version,gross_amount FROM ledens.financial_records WHERE customer_payment_id=$1',[p.id])).rows[0];
-   }
-   if(!source)throw new FinError(503,'No se pudo registrar el efectivo en la contabilidad');
-   if(projectId)await this.finance.replace(c,this.user,{record_id:source.id,version:source.version,allocations:[{project_id:projectId,amount:source.gross_amount}]},
-    `${k.kind==='pago'?'Pago':'Cobro'} en efectivo del ${k.occurred_on}`);
-   return {assigned:target,recordId:source.id};
-  });
+  return this.finance.transaction(async c=>this.assignCashIn(c,await this.cashForUpdate(c,id),target,projectId,text));
+ }
+ async assignCashIn(c,k,target,projectId,text){
+  const id=k.id;
+  if(CASH_TARGETS[target]!==k.kind)throw new FinError(409,target==='clientes'?'Solo un cobro puede ir a Pagos de clientes':'Solo un pago puede ir a Pagos de materiales');
+  if(projectId&&!(await c.query('SELECT 1 FROM ledens.projects WHERE id=$1',[projectId])).rows.length)throw new FinError(400,'Obra no encontrada');
+  let source;
+  if(target==='materiales'){
+   const m=(await c.query(`INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on)
+    VALUES('ud',$1,1,$2,$2,$3) RETURNING id`,[text||k.concept,decimal(-cents(k.amount)),k.occurred_on])).rows[0];
+   await c.query("UPDATE ledens.cash_movements SET assigned_to='materiales',material_id=$2,assigned_by=$3,assigned_at=now() WHERE id=$1",[id,m.id,this.user.id]);
+   source=(await c.query('SELECT id,version,gross_amount FROM ledens.financial_records WHERE material_id=$1',[m.id])).rows[0];
+  }else{
+   const p=(await c.query(`INSERT INTO ledens.customer_payments(occurred_on,id_pago,cliente,total)
+    VALUES($1,'Efectivo',$2,$3) RETURNING id`,[k.occurred_on,k.counterparty,k.amount])).rows[0];
+   await c.query("UPDATE ledens.cash_movements SET assigned_to='clientes',customer_payment_id=$2,assigned_by=$3,assigned_at=now() WHERE id=$1",[id,p.id,this.user.id]);
+   source=(await c.query('SELECT id,version,gross_amount FROM ledens.financial_records WHERE customer_payment_id=$1',[p.id])).rows[0];
+  }
+  if(!source)throw new FinError(503,'No se pudo registrar el efectivo en la contabilidad');
+  if(projectId)await this.finance.replace(c,this.user,{record_id:source.id,version:source.version,allocations:[{project_id:projectId,amount:source.gross_amount}]},
+   `${k.kind==='pago'?'Pago':'Cobro'} en efectivo del ${k.occurred_on}`);
+  return {assigned:target,recordId:source.id};
  }
  // The pending lines are unassigned money: admins, or whoever an admin gave the
  // global «bandeja de pendientes» grant (same rule as unassigned records).
