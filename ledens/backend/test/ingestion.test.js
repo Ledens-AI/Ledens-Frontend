@@ -249,3 +249,24 @@ test('process reads the text layer of the PDF sent to the OCR and archives an Or
   const i=(await db.query('SELECT total_confidence::float t,direction_confidence::float d FROM ledens.invoice_ingestions WHERE id=$1',[row.ingestion_id])).rows[0];
   assert.deepEqual(i,{t:.9,d:.9});
 });
+test('when the OCR places no tax id, our NIF after a buyer label in the PDF text makes it a supplier invoice to pay',async()=>{
+  const {buyerFromText}=await import('../src/ingestion/ocr.js');
+  const {archiveIssue}=await import('../src/ingestion/completeness.js');
+  const own='B19753805';
+  const septic='12345678Z 1 / 1 Autónomo Ejemplo 12345678 Z C/ Ficticia 1 CLIENTE SOCIEDAD INVERSORA NAVARRO ROBINSON S . L . B 19753805 AVENIDA DE LA PALOMA FACTURA Nº F-0001 Total 338,80 €';
+  assert.deepEqual(buyerFromText(septic,own),{supplierTaxId:'12345678Z'});
+  assert.deepEqual(buyerFromText('Bill to: Ledens B-19753805 · Seller A82009812 · Bank B12345674',own),{supplierTaxId:null},'two other ids: buyer still, supplier unknown');
+  assert.equal(buyerFromText('SOCIEDAD INVERSORA NAVARRO ROBINSON B19753805 Calle X · Cliente: Pepe Pérez 12345678Z',own),null,'our own issued invoice: our id comes before the label');
+  assert.equal(buyerFromText('CLIENTE Ledens B19753805',own),null,'no other tax id: no supplier');
+  assert.equal(buyerFromText('CLIENTE Pepe Pérez 12345678Z '+'x '.repeat(200)+'B19753805',own),null,'too far from the label');
+  // Extraction: the OCR read no tax id at all.
+  const inv={analyzeResult:{documents:[{fields:{InvoiceDate:{valueDate:'2026-10-09',confidence:.965},InvoiceId:{valueString:'F-0001',confidence:.9},
+    InvoiceTotal:{valueCurrency:{amount:338.8,currencyCode:'EUR'},confidence:.948},SubTotal:{valueCurrency:{amount:280}},TotalTax:{valueCurrency:{amount:58.8}}}}]}};
+  assert.equal(extractInvoice(inv).direction,null,'without text: still in review');
+  const x=extractInvoice(inv,{pdfText:septic});
+  assert.deepEqual([x.direction,x.total,x.directionConfidence,x.taxId,x.corroborated?.direction],['Pagar',-338.8,.9,'12345678Z','customer_label_in_text']);
+  assert.equal(archiveIssue({document_on:x.date,total:x.total,tipo:x.direction,invoice_currency:x.currency,date_confidence:x.confidence,total_confidence:x.totalConfidence,direction_confidence:x.directionConfidence}),null);
+  // A direction the OCR did set is never overridden by the label rule.
+  const issued={analyzeResult:{documents:[{fields:{...inv.analyzeResult.documents[0].fields,VendorTaxId:{valueString:'B19753805',confidence:.9}}}]}};
+  assert.equal(extractInvoice(issued,{pdfText:septic}).direction,'Cobrar');
+});
