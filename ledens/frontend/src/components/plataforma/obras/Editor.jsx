@@ -2,18 +2,21 @@ import React, { useEffect, useState } from 'react';
 import { api, KIND, parseDecimal } from './api.js';
 import { eur } from '../finanzas/format.js';
 import { ErrorBox } from '../finanzas/ui.jsx';
+import BaseMatch from './BaseMatch.jsx';
 
 const blankItem = () => ({ code: '', name: '', description: '', unit: 'ud', quantity: '', unitPrice: '', kind: 'confirmada' });
 const fromVersion = (v) => (v?.chapters || []).map((c) => ({
   name: c.name,
-  items: c.items.map((i) => ({ code: i.code || '', name: i.name, description: i.description || '', unit: i.unit, quantity: String(Number(i.quantity)).replace('.', ','), unitPrice: String(Number(i.unitPrice)).replace('.', ','), kind: i.kind, check: !!i.check })),
+  items: c.items.map((i) => ({ code: i.code || '', name: i.name, description: i.description || '', unit: i.unit, quantity: String(Number(i.quantity)).replace('.', ','), unitPrice: String(Number(i.unitPrice)).replace('.', ','), kind: i.kind, check: !!i.check,
+    // Match with the base de partidas (PDF import), kept through edits.
+    baseCode: i.baseCode || null, baseName: i.baseName || null, annotations: i.annotations || [], proposal: i.proposal || null, translation: i.translation || null })),
 }));
 
 /* Budget editor: chapters with coded lines (unit, quantity, net unit price,
  * kind), one VAT rate, conditions/exclusions. mode: 'new' (admin picks client
  * and jefe), 'ampliacion' (of `parent`) or 'edit' (the presupuesto `doc`). The
  * server validates everything again. */
-export default function Editor({ mode, doc, parent, initial, onSaved, onCancel }) {
+export default function Editor({ mode, doc, parent, initial, sourceFile, onSaved, onCancel }) {
   const [title, setTitle] = useState(doc?.title || initial?.title || (mode === 'ampliacion' ? `Ampliación de ${parent.title}` : ''));
   const [address, setAddress] = useState(doc?.address || initial?.address || '');
   // An ampliación starts with the VAT rate of the obra it extends.
@@ -61,6 +64,7 @@ export default function Editor({ mode, doc, parent, initial, onSaved, onCancel }
     else if (mode === 'new') { body.clientId = clientId; body.jefeId = jefeId || undefined; }
     if (mode === 'ampliacion') body.parentId = parent.id;
     if (mode === 'edit') body.version = doc.versions[0]?.number;
+    if (sourceFile) body.sourceFile = sourceFile;
     setSaving(true);
     try {
       onSaved(mode === 'edit' ? await api.save(doc.id, body) : await api.create(body), { send: send === true });
@@ -125,6 +129,7 @@ export default function Editor({ mode, doc, parent, initial, onSaved, onCancel }
                     <td>
                       <input aria-label="Partida" value={it.name} maxLength={300} onChange={(e) => setItem(ci, ii, { name: e.target.value })} className="obr-in" placeholder="Nombre de la partida" />
                       <textarea aria-label="Descripción" value={it.description} maxLength={4000} rows={2} onChange={(e) => setItem(ci, ii, { description: e.target.value })} className="obr-in obr-in-desc" placeholder="Descripción (opcional)" />
+                      <BaseMatch item={it} onDiscardProposal={it.proposal ? () => setItem(ci, ii, { proposal: null }) : undefined} />
                     </td>
                     <td><select aria-label="Tipo" value={it.kind} onChange={(e) => setItem(ci, ii, { kind: e.target.value })}>{Object.entries(KIND).map(([k, d]) => <option key={k} value={k}>{d.label}</option>)}</select></td>
                     <td><input aria-label="Unidad" value={it.unit} maxLength={20} onChange={(e) => setItem(ci, ii, { unit: e.target.value })} className="obr-in obr-in-unit" /></td>

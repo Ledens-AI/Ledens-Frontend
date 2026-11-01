@@ -1,5 +1,6 @@
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { PresupuestoError } from './service.js';
+import { loadCatalog, matchLines } from './catalog.js';
 
 // Reads a budget PDF (the one presented to the client) into chapters and
 // lines: code, name, description, unit, quantity, unit price and total.
@@ -293,17 +294,34 @@ export async function readBudgetPdf(content, { ocr } = {}) {
 
 // What the editor receives: net unit prices (6 decimals, like imports), the
 // figures as read, and the warnings to review. Only the team may read PDFs.
-export async function pdfDraft(user, content, { ocr } = {}) {
+// With `db`, each line is matched against the base de partidas (catalog.js):
+// baseCode, annotations and, when no partida covers it, a proposed new one.
+export async function pdfDraft(user, content, { ocr, db, translator } = {}) {
   if (!['admin', 'jefe'].includes(user?.role)) fail(403, 'Solo el equipo puede subir presupuestos');
   const b = await readBudgetPdf(content, { ocr });
   const vat = Number(b.vatRate) >= 0 && Number(b.vatRate) < 100 ? Number(b.vatRate) : 21;
+  const lines = b.chapters.flatMap((c) => c.items);
+  let matches = lines.map(() => null);
+  const warnings = [...b.warnings];
+  if (db) {
+    try {
+      matches = await matchLines(lines, await loadCatalog(db), { translator, pricesIncludeVat: b.pricesIncludeVat, vatRate: vat });
+    } catch (e) {
+      console.error('[presupuestos] base de partidas no disponible', e.message);
+      warnings.push('No se ha podido consultar la base de partidas: las líneas no se han casado con ella.');
+    }
+  }
+  let n = 0;
   const net = (p) => (p == null ? null : b.pricesIncludeVat ? (p / (1 + vat / 100)).toFixed(6) : String(Math.round(p * 1e6) / 1e6));
   return {
     source: b.source, title: b.title, address: b.address, vatRate: String(vat), pricesIncludeVat: b.pricesIncludeVat, notes: b.notes,
-    totalDocument: b.totalDocument.toFixed(2), warnings: b.warnings,
+    totalDocument: b.totalDocument.toFixed(2), warnings,
     chapters: b.chapters.map((c) => ({ name: c.name.slice(0, 200), items: c.items.map((i) => ({
       code: i.code ? i.code.slice(0, 40) : '', name: i.name.slice(0, 300), description: (i.description || '').slice(0, 4000), unit: i.unit,
       quantity: String(Math.round(i.quantity * 1000) / 1000), unitPrice: net(i.unitPrice) ?? '0', kind: i.kind, check: !!i.check,
+      ...matchFields(matches[n++]),
     })) })),
   };
 }
+
+const matchFields = (m) => (m ? { baseCode: m.baseCode, baseName: m.baseName, annotations: m.annotations, translation: m.translation, proposal: m.proposal } : {});

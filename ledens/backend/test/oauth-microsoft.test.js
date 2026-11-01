@@ -211,3 +211,45 @@ test('a staff account created without a password (migration 004) is claimed by a
     await cleanupByEmail(email);
   }
 });
+
+test('a personal Microsoft account on a Microsoft mail domain claims the client the team invited (pending, never registered)', { skip }, async () => {
+  // A hotmail/outlook address is a mailbox Microsoft issues to that very
+  // account, so the consumer tenant's id_token makes it verified; a personal
+  // account signed in with any other address does not.
+  const email = `cliente-${Date.now()}@hotmail.com`;
+  const consumer = '9188040d-6c67-4c5b-b112-36a304b66dad';
+  const idToken = (over = {}) => ['e30', Buffer.from(JSON.stringify({ tid: consumer, aud: process.env.MICROSOFT_CLIENT_ID,
+    iss: `https://login.microsoftonline.com/${consumer}/v2.0`, preferred_username: email, ...over })).toString('base64url'), 'sig'].join('.');
+  try {
+    await getPool().query("INSERT INTO users (email, name, role) VALUES ($1, $1, 'client')", [email]); // as an invitation leaves it
+    const login = async (token) => {
+      const { state, stateCookie } = await startLogin('microsoft');
+      nextTokenResponse = { access_token: 'fake-token', id_token: token };
+      nextUserinfoResponse = { sub: `ms-consumer-${email}`, email, name: 'Cliente Hotmail' };
+      return fetch(`${appBase}/api/auth/microsoft/callback?code=abc&state=${state}`, { redirect: 'manual', headers: { Cookie: stateCookie } });
+    };
+    const other = await login(idToken({ preferred_username: 'otra@gmail.com' }));
+    assert.equal(other.headers.get('location'), '/auth?error=microsoft_email_in_use', 'sign-in name is not the email: unverified');
+    const cb = await login(idToken());
+    assert.equal(cb.headers.get('location'), '/');
+    const row = (await getPool().query('SELECT email_verified, registered_at, name FROM users WHERE email=$1', [email])).rows[0];
+    assert.equal(row.email_verified, true);
+    assert.ok(row.registered_at, 'registered with this first login');
+    assert.equal(row.name, 'Cliente Hotmail');
+  } finally {
+    nextTokenResponse = null;
+    await cleanupByEmail(email);
+  }
+});
+
+test('a login started on another address of the site goes through the callback host first, so the state cookie survives', { skip }, async () => {
+  const res = await fetch(`${appBase}/api/auth/microsoft`, { redirect: 'manual', headers: { 'X-Forwarded-Host': 'otra-direccion.example' } });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), 'http://localhost/api/auth/microsoft/inicio');
+  assert.equal(cookieFrom(res, 'oauth_state'), null, 'no cookie on the wrong host');
+  const same = await fetch(`${appBase}/api/auth/microsoft`, { redirect: 'manual', headers: { 'X-Forwarded-Host': 'localhost' } });
+  assert.ok(cookieFrom(same, 'oauth_state'), 'already on the callback host: straight to Microsoft');
+  const hop = await fetch(`${appBase}/api/auth/microsoft/inicio`, { redirect: 'manual', headers: { 'X-Forwarded-Host': 'otra-direccion.example' } });
+  assert.ok(cookieFrom(hop, 'oauth_state'), '/inicio always starts, never redirects again');
+  assert.equal(new URL(hop.headers.get('location')).origin + new URL(hop.headers.get('location')).pathname, `${fakeIdpBase}/microsoft/authorize`);
+});

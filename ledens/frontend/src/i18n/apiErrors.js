@@ -34,6 +34,9 @@ const EN = {
   'Login con Google no disponible todavía': 'Google sign-in is not available yet.',
   'Login con Microsoft no disponible todavía': 'Microsoft sign-in is not available yet.',
   'No autenticado': 'You are not logged in.',
+  // /api/auth/contrasena — the password link (ContrasenaPage)
+  'El enlace para crear la contraseña no es válido o ha caducado': 'The link to create the password is not valid or has expired.',
+  'No se pudo completar la operación': 'The operation could not be completed.',
 };
 
 export function apiErrorText(msg, lang, fallbackEn = 'Something went wrong. Please try again.') {

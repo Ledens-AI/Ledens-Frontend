@@ -25,6 +25,8 @@ Las invitaciones de cliente (migración 023, `src/invitaciones/service.js`) usan
 - Un reintento tras un fallo de Outlook vuelve a reclamar y genera un token nuevo, que invalida el anterior: con la entrega al menos una vez, si llegan dos correos solo funciona el último enlace.
 - El correo no incluye datos del presupuesto, solo el título de la obra, quién invita y la caducidad.
 
+Los **enlaces para crear o restablecer la contraseña** (migración 025, `src/auth/passwordLinks.js`) siguen el mismo camino con `event_type = 'password_link'` y `payload = { link_id }`: el token se genera al reclamar, el enlace es `<base>/contrasena#<token>` y un enlace usado, caducado o sustituido por otro más reciente se cierra sin enviarse (`password_link_not_pending`).
+
 `PUBLIC_APP_URL` (opcional) es la base del enlace; por defecto el host de SWA de producción.
 
 ## Despliegue

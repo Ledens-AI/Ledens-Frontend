@@ -16,7 +16,7 @@ import { AlertService } from '../src/notifications/service.js';
 // with Google — ending in a session, a verified email and the obra in sight.
 const skip = !isDbConfigured() && 'DATABASE_URL not set — start the local db to run these';
 const ORIGIN = 'http://ledens.local';
-const EMAILS = ['jefe.inv@auth.test', 'admin.inv@auth.test', 'titular.inv@auth.test', 'clave.inv@auth.test', 'google.inv@auth.test', 'registro.inv@auth.test'];
+const EMAILS = ['jefe.inv@auth.test', 'admin.inv@auth.test', 'titular.inv@auth.test', 'clave.inv@auth.test', 'google.inv@auth.test', 'registro.inv@auth.test', 'ascendido.inv@auth.test'];
 let server, base, google, googleBase, obraId, nextUserinfo;
 
 const cookieFrom = (res, name) => (res.headers.getSetCookie?.() || []).find((c) => c.startsWith(`${name}=`))?.split(';')[0] || null;
@@ -163,6 +163,17 @@ test('registering on their own with the invited email takes the pending row, but
   assert.equal((await fetch(`${base}/api/auth/me`, { headers: { cookie: held } })).status, 401, 'the session of the unproven registration is closed');
   const now = await (await fetch(`${base}/api/presupuestos`, { headers: { cookie: cookieFrom(accepted, 'ledens_session') } })).json();
   assert.ok(now.presupuestos.some((p) => p.id === obraId), 'the link proves the email: the obra is there');
+});
+
+test('a pending row promoted to staff before signing in is never taken by registering its email', { skip }, async () => {
+  const jefe = await jefeCookie();
+  assert.equal((await post(`/api/invitaciones/obras/${obraId}`, { email: 'ascendido.inv@auth.test' }, jefe)).status, 201);
+  await getPool().query("UPDATE users SET role='admin' WHERE email='ascendido.inv@auth.test'"); // as PATCH /api/admin/users/:id/role or the CLI would
+  const reg = await post('/api/auth/register', { name: 'Intruso', email: 'ascendido.inv@auth.test', password: 'me-hago-admin-1' });
+  assert.equal(reg.status, 409);
+  assert.equal(cookieFrom(reg, 'ledens_session'), null);
+  const row = (await getPool().query("SELECT role, password_hash, registered_at FROM users WHERE email='ascendido.inv@auth.test'")).rows[0];
+  assert.deepEqual(row, { role: 'admin', password_hash: null, registered_at: null }, 'untouched');
 });
 
 test('a client never reaches the team routes', { skip }, async () => {

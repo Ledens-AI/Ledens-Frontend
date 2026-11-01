@@ -36,7 +36,7 @@ before(async () => {
     email_verified boolean NOT NULL DEFAULT false, access_held boolean NOT NULL DEFAULT false, registered_at timestamptz);
     CREATE TABLE audit_log(id bigint GENERATED ALWAYS AS IDENTITY, actor_id uuid REFERENCES users(id), actor_label text, action text,
       target_id uuid REFERENCES users(id), target_label text, detail text);`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql']) await db.exec(await fs.readFile(new URL('../src/db/migrations/' + m, import.meta.url), 'utf8'));
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql']) await db.exec(await fs.readFile(new URL('../src/db/migrations/' + m, import.meta.url), 'utf8'));
   [admin, jefe, otroJefe, cliente, otroCliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES
     ('admin@pre.test','Admin Test','admin'),('jefe@pre.test','Jefe Test','jefe'),('jefe2@pre.test','Otro Jefe','jefe'),
     ('cliente@pre.test','Cliente Test','client'),('cliente2@pre.test','Otro Cliente','client') RETURNING id,email,name,role`)).rows;
@@ -260,4 +260,34 @@ test('the assigned jefe (or an admin) renames the obra at any stage, also once a
   const log = (await db.query("SELECT detail FROM audit_log WHERE action='Nombre de obra' ORDER BY id")).rows.map((r) => r.detail);
   assert.equal(log.length, 2);
   assert.match(log[0], /→ «Casa Marbella · Fontanería»/);
+});
+
+test('an admin approves on behalf of the client a budget the client already approved outside the platform', async () => {
+  // A draft (never sent) and a sent one with an option.
+  const draft = await as(admin).create({ ...fontaneria(), title: 'Aprobado por teléfono', clientId: cliente.id });
+  await assert.rejects(as(jefe).approveOnBehalf(draft.id, { reason: 'Me lo dijo por teléfono' }), { status: 403 }, 'only admins');
+  await assert.rejects(as(cliente).approveOnBehalf(draft.id, { reason: 'Aprobado' }), { status: 403 });
+  await assert.rejects(as(admin).approveOnBehalf(draft.id, {}), { status: 400 }, 'a reason is required');
+  assert.equal((await as(admin).get(draft.id)).can.approveOnBehalf, true);
+  const d = await as(admin).approveOnBehalf(draft.id, { reason: 'Aprobado por correo el 20/10' });
+  assert.equal(d.phase, 'aprobado');
+  assert.equal(d.version.status, 'approved');
+  assert.ok(d.version.sentAt, 'a draft is sent and approved in one step');
+  assert.equal(d.versions[0].decidedBy, 'Admin Test', 'the admin is recorded, not the client');
+  assert.equal(d.can.approveOnBehalf, false);
+  await assert.rejects(as(admin).approveOnBehalf(draft.id, { reason: 'Otra vez' }), { status: 409 });
+  // The client sees it approved, with the note in the conversation.
+  const seen = await as(cliente).get(draft.id);
+  assert.equal(seen.phase, 'aprobado');
+  assert.match(seen.comments.at(-1).body, /^Aprobado en nombre de Cliente Test: Aprobado por correo el 20\/10/);
+  // A sent budget, approving its option on the client's behalf.
+  const sent = await as(admin).create({ ...fontaneria(), title: 'Enviado y aprobado en obra', clientId: cliente.id });
+  await as(admin).send(sent.id);
+  const option = items(await as(admin).get(sent.id)).find((i) => i.kind === 'opcion');
+  const s = await as(admin).approveOnBehalf(sent.id, { reason: 'Firmado en la visita', selected: [option.id] });
+  assert.equal(s.version.status, 'approved');
+  assert.equal(items(s).find((i) => i.id === option.id).selected, true);
+  const log = (await db.query("SELECT detail FROM audit_log WHERE action='Presupuesto aprobado en nombre del cliente' ORDER BY id")).rows.map((r) => r.detail);
+  assert.equal(log.length, 2);
+  assert.match(log[1], /Firmado en la visita · 1 partidas opcionales elegidas/);
 });
