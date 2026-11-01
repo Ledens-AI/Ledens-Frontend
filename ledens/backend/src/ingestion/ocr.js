@@ -26,6 +26,23 @@ export function textTotals(text) {
   }
   return [...out];
 }
+// Spanish tax ids printed in normalized text (one optional space between parts:
+// «B 19753805», «12345678 Z», «X 1234567 L»).
+const SPANISH_TAX_ID = /\b(?:([A-HJNPQRSUVW]) ?(\d{7}) ?([0-9A-J])|(\d{8}) ?([A-Z])|([XYZ]) ?(\d{7}) ?([A-Z]))\b/g;
+const BUYER_LABEL = /\b(?:CLIENTE|DATOS DEL CLIENTE|FACTURAR A|FACTURADO A|BILL TO|BILLED TO|CUSTOMER|DESTINATARIO)\b/g;
+// When the OCR placed no tax id on either side: our tax id printed shortly
+// (≤160 characters) after a buyer label («CLIENTE», «Facturar a», «Bill to»…)
+// means we are the buyer. One other Spanish tax id in the text is the
+// supplier's. Our own issued invoices print our id as issuer, before the label.
+export function buyerFromText(pdfText, own) {
+  const text = normalize(pdfText);
+  const ids = [...text.matchAll(SPANISH_TAX_ID)].map((m) => ({ at: m.index, id: m.slice(1).filter(Boolean).join('') }));
+  const ours = ids.filter((x) => x.id === own);
+  const labels = [...text.matchAll(BUYER_LABEL)].map((m) => m.index + m[0].length);
+  if (!ours.some((o) => labels.some((l) => l <= o.at && o.at - l <= 160))) return null;
+  const others = [...new Set(ids.filter((x) => x.id !== own).map((x) => x.id))];
+  return others.length ? { supplierTaxId: others.length === 1 ? others[0] : null } : null;
+}
 // The text without separators, to look a tax id up in it («B-84406289» → B84406289).
 const compact = (text) => normalize(text).replace(/\s/g, '');
 
@@ -93,7 +110,11 @@ export function extractInvoice(result, {businessTaxId=process.env.BRIDGE_BUSINES
   // Ours on both sides stays ambiguous.
   const vendorTax=taxId(text('VendorTaxId'));
   const supplier=!sellerOwn&&!buyerOwn&&vendorTax.length>=8&&vendorTax!==own;
-  const direction=supplier?'Pagar':sellerOwn===buyerOwn?null:sellerOwn?'Cobrar':'Pagar';
+  let direction=supplier?'Pagar':sellerOwn===buyerOwn?null:sellerOwn?'Cobrar':'Pagar';
+  // The OCR placed no tax id at all (neither side): the PDF text may still show
+  // ours as the customer's, after a buyer label (buyerFromText).
+  const textBuyer=!direction&&!sellerOwn&&!buyerOwn&&pdfText?buyerFromText(pdfText,own):null;
+  if(textBuyer)direction='Pagar';
   const directionField=sellerOwn||supplier?'VendorTaxId':'CustomerTaxId';
   const party=direction==='Cobrar'?'Customer':'Vendor';
   const multiplier=direction==='Pagar'?-1:1;
@@ -108,10 +129,11 @@ export function extractInvoice(result, {businessTaxId=process.env.BRIDGE_BUSINES
   // Direction: the confidence of the tax id that set it, confirmed when that id is printed in the text.
   let directionConfidence=direction&&total>0?(f[directionField]?.confidence||0):0;
   const directionId=taxId(text(directionField));
-  if(direction&&total>0&&directionConfidence<INVOICE_MIN_CONFIDENCE&&directionId.length>=8&&pdfText&&compact(pdfText).includes(directionId)){
+  if(textBuyer){directionConfidence=total>0?TEXT_CONFIDENCE:0;corroborated.direction='customer_label_in_text';}
+  else if(direction&&total>0&&directionConfidence<INVOICE_MIN_CONFIDENCE&&directionId.length>=8&&pdfText&&compact(pdfText).includes(directionId)){
     directionConfidence=TEXT_CONFIDENCE;corroborated.direction=directionField;}
   return { date, confidence, quarter, number:text('InvoiceId'), vendor:text(party+'Name'),
-    taxId:text(party+'TaxId'), subtotal:signed('SubTotal'), tax:signed('TotalTax'), total:total===null?null:multiplier*total,
+    taxId:text(party+'TaxId')||textBuyer?.supplierTaxId||null, subtotal:signed('SubTotal'), tax:signed('TotalTax'), total:total===null?null:multiplier*total,
     direction,currency,totalConfidence,numberConfidence:f.InvoiceId?.confidence||0,
     partyConfidence:f[party+'Name']?.confidence||0,taxIdConfidence:f[party+'TaxId']?.confidence||0,partyEvidence:partyNameEvidence(result,party),
     directionConfidence,...(Object.keys(corroborated).length?{corroborated}:{}) };
