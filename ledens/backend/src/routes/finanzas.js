@@ -127,6 +127,12 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     res.json(await svc(req).classifyWorkerPayments({ movementIds: req.body?.movementIds }));
   }));
 
+  // Pago de clientes. { movementIds: [uuid], projectId? } → incoming movements the
+  // Bridge did not recognise become client payments and leave Pendiente de conciliación.
+  router.post('/conciliacion/pago-clientes', traced('cobros_clientes', 'Envío desde conciliación', { summary: b=>({status:b.ok===0&&b.failed?'rechazado':'ok',message:`${b.ok} correctos · ${b.failed} con error`,detail:{correctos:b.ok,errores:b.failed}}) })(async (req, res) => {
+    res.json(await svc(req).classifyCustomerPayments({ movementIds: req.body?.movementIds, projectId: req.body?.projectId || null }));
+  }));
+
   // Pagos y cobros en efectivo (admins). They wait in Pendiente de conciliación;
   // a pago goes to trabajadores through /conciliacion/pago-trabajadores above.
   router.post('/conciliacion/efectivo', traced('efectivo', 'Alta de efectivo', { summary: b=>({ message: `${b.kind==='pago'?'Pago':'Cobro'} de ${b.amount} €`, detail: { tipo: b.kind, importe: b.amount, fecha: b.fecha } }) })(async (req, res) => {

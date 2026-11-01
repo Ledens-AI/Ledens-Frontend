@@ -20,6 +20,23 @@ La pantalla Pendiente de conciliación muestra exclusivamente movimientos bancar
 
 GET /api/finanzas/conciliacion: vista=registros|movimientos|documentos (por defecto movimientos), motivo=sin_documento|sin_bridge|revision|parcial, q, desde, hasta, pagina, tam (máximo 100). Respuesta: rows, total, page, pageSize. Cada fila incluye id,type,fecha,tercero,concepto,numerodocumento,referencia,importe,document_id,enlaces,conciliado,por_conciliar,motivos. Los importes mantienen el signo original; conciliado es el total confirmado del documento o movimiento, no un coste adicional. Los registros financieros comparten el estado de su documento. Las transferencias internas se excluyen de la vista bancaria. No se modifica el esquema ni el Bridge.
 
+**Pago de clientes.** Si el Bridge no reconoce un cobro recibido, el administrador lo selecciona en la bandeja y lo registra como pago de cliente. La selección debe contener solo cobros: los pagos van a «Pago a trabajadores» y una selección mixta deshabilita los dos botones.
+
+- `POST /api/finanzas/conciliacion/pago-clientes` `{ movementIds, projectId? }`, solo admin, de 1 a 50 movimientos.
+- Por cada movimiento crea una fila en `ledens.customer_payments` con:
+  - `bank_movement_id` del movimiento;
+  - `id_pago` = `source_id` del movimiento;
+  - `cliente` = el ordenante;
+  - `total` y `occurred_on` del movimiento.
+- El trigger de 006 la registra como cobro de cliente (`advance`). Si se indica obra, se imputa entera con FinanceService; si no, queda en Pendientes de asignación.
+- **Se rechaza**, con el motivo por movimiento, si:
+  - no es positivo o no está en EUR;
+  - es un traspaso interno;
+  - ya está conciliado con un documento;
+  - está en Pendiente de trabajador;
+  - ya tiene un pago de cliente.
+- Los movimientos con `customer_payments` salen de la bandeja y del contador del menú (`counts().reconciliation`). Siguen en el Bridge, así que una factura emitida que llegue después se puede conciliar con ese cobro. La rentabilidad ya no cuenta el anticipo en tesorería en cuanto el banco tiene un enlace confirmado. Queda en Logs de transacciones, proceso «Cobros de clientes».
+
 ## Efectivo
 
 Los pagos y cobros en efectivo no tienen banco detrás, así que viven en su propia tabla `ledens.cash_movements` (migración 016), no en `ledens.bank_movements`. Solo administrador. Mientras no se asignan aparecen en Pendiente de conciliación (vista movimientos) con `type=efectivo`, importe firmado como un movimiento (pago negativo, cobro positivo) y motivo `efectivo`.

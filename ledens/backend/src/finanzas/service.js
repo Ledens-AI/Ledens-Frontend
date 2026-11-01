@@ -231,7 +231,7 @@ export class FinanzasService {
   else {const bank=view==='movimientos';base='WITH '+bridge+`, candidates AS(SELECT x.id,'`+(bank?'movimiento':'documento')+`'::text type,`+(bank?'x.completed_on':'x.document_on')+` fecha,`+(bank?"coalesce(x.beneficiary_name,x.payer)":"x.tercero")+` tercero,`+(bank?'x.description':"to_jsonb(x)->>'descripcion'")+` concepto,`+(bank?'a.documentos':'x.numerodocumento')+` numerodocumento,`+(bank?'x.source_id':'x.id::text')+` referencia,`+(bank?'x.total_amount':'x.total')+` importe,`+(bank?'NULL::uuid':'x.id')+` document_id,coalesce(a.enlaces,0) enlaces,coalesce(a.confirmado,0)::text conciliado,
     array_remove(ARRAY[CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_bridge' END,`+(bank?"CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_documento' END,":"")+`CASE WHEN a.revision>0 THEN 'revision' END,CASE WHEN a.enlaces>0 AND coalesce(a.confirmado,0)<>`+(bank?'x.total_amount':'x.total')+` THEN 'parcial' END],NULL) motivos,
     (coalesce(a.enlaces,0)=0 OR a.revision>0 OR coalesce(a.confirmado,0)<>`+(bank?'x.total_amount':'x.total')+`) pendiente
-    FROM ledens.`+(bank?'bank_movements':'documents')+` x LEFT JOIN `+(bank?'bridge_bank a ON a.bank_movement_id':'bridge_doc a ON a.document_id')+`=x.id `+(bank?'WHERE NOT coalesce(x.is_internal_transfer,false) AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=x.id)'+CASH_CANDIDATES:'WHERE '+hideCovered)+`)`;}
+    FROM ledens.`+(bank?'bank_movements':'documents')+` x LEFT JOIN `+(bank?'bridge_bank a ON a.bank_movement_id':'bridge_doc a ON a.document_id')+`=x.id `+(bank?'WHERE NOT coalesce(x.is_internal_transfer,false) AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=x.id) AND NOT EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=x.id)'+CASH_CANDIDATES:'WHERE '+hideCovered)+`)`;}
   const filtered=base+' SELECT *, (importe-coalesce(conciliado::numeric,0))::text por_conciliar FROM candidates WHERE '+where.join(' AND ');
   const rows=(await this.query(filtered+' ORDER BY fecha DESC NULLS LAST,id LIMIT '+size+' OFFSET '+((p-1)*size),params)).rows;
   const total=(await this.query('SELECT count(*)::int n FROM ('+filtered+') matching',params)).rows[0].n;
@@ -269,6 +269,44 @@ export class FinanzasService {
   const b=(await c.query(`INSERT INTO ledens.worker_payment_batches(bank_movement_id,role,unit_amount,total_amount,occurred_on,created_by)
    VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,[id,plan.role,decimal(plan.unit),decimal(-total),m.completed_on,this.user.id])).rows[0];
   return this.splitBatch(c,b.id,plan);
+ }
+ // «Pago de clientes» in Pendiente de conciliación (admin): an incoming bank
+ // movement the Bridge did not recognise becomes a ledens.customer_payments row
+ // tied to that movement (006's trigger registers it as a client receipt, an
+ // advance), allocated to a project when one is given. It leaves the inbox; an
+ // issued invoice can still be reconciled with it later through the Bridge.
+ async classifyCustomerPayments({movementIds,projectId}){
+  if(this.user.role!=='admin')throw new FinError(403,'Clasificar movimientos requiere administrador');
+  const ids=[...new Set(Array.isArray(movementIds)?movementIds:[])];
+  if(!ids.length||ids.length>50||ids.some(id=>!uuid(id)))throw new FinError(400,'Selecciona entre 1 y 50 movimientos');
+  if(projectId&&!uuid(projectId))throw new FinError(400,'Obra no válida');
+  return this.finance.transaction(async c=>{
+   if(projectId&&!(await c.query('SELECT 1 FROM ledens.projects WHERE id=$1',[projectId])).rows.length)throw new FinError(400,'Obra no encontrada');
+   const results=[];
+   for(const [i,id] of ids.entries()){
+    await c.query(`SAVEPOINT c${i}`);
+    try{const r=await this.customerPaymentOne(c,id,projectId);await c.query(`RELEASE SAVEPOINT c${i}`);results.push({id,ok:true,...r});}
+    catch(e){await c.query(`ROLLBACK TO SAVEPOINT c${i}`);if(!(e instanceof FinanceError))throw e;results.push({id,ok:false,error:e.message});}
+   }
+   return {results,ok:results.filter(r=>r.ok).length,failed:results.filter(r=>!r.ok).length};
+  });
+ }
+ async customerPaymentOne(c,id,projectId){
+  const m=(await c.query('SELECT id,source_id,total_amount,currency,completed_on,is_internal_transfer,payer,beneficiary_name FROM ledens.bank_movements WHERE id=$1 FOR UPDATE',[id])).rows[0];
+  if(!m)throw new FinError(404,'Movimiento no encontrado');
+  if(m.is_internal_transfer)throw new FinError(409,'Es un traspaso interno');
+  if(m.currency&&m.currency!=='EUR')throw new FinError(409,'Solo movimientos en euros');
+  const total=cents(m.total_amount);
+  if(total===null||total<=0n)throw new FinError(409,'Solo se registran cobros (importe positivo)');
+  if((await c.query('SELECT 1 FROM ledens.customer_payments WHERE bank_movement_id=$1 LIMIT 1',[id])).rows.length)throw new FinError(409,'Ya está registrado como pago de cliente');
+  if((await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1',[id])).rows.length)throw new FinError(409,'Está en Pendiente de trabajador');
+  if((await c.query("SELECT 1 FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado' LIMIT 1",[id])).rows.length)throw new FinError(409,'Ya está conciliado con un documento');
+  const p=(await c.query(`INSERT INTO ledens.customer_payments(occurred_on,id_pago,cliente,total,bank_movement_id)
+   VALUES($1,$2,$3,$4,$5) RETURNING id`,[m.completed_on,m.source_id,m.payer||m.beneficiary_name||null,decimal(total),id])).rows[0];
+  const r=(await c.query('SELECT id,version,gross_amount FROM ledens.financial_records WHERE customer_payment_id=$1',[p.id])).rows[0];
+  if(!r)throw new FinError(503,'No se pudo registrar el cobro en la contabilidad');
+  if(projectId)await this.finance.replace(c,this.user,{record_id:r.id,version:r.version,allocations:[{project_id:projectId,amount:r.gross_amount}]},`Cobro de cliente del movimiento ${m.source_id}`);
+  return {customerPaymentId:p.id,recordId:r.id};
  }
  async splitBatch(c,batchId,plan){
   for(const [i,amount] of plan.lines.entries())await c.query('INSERT INTO ledens.worker_payment_splits(batch_id,line_number,amount,role) VALUES($1,$2,$3,$4)',[batchId,i+1,decimal(amount),plan.role]);
