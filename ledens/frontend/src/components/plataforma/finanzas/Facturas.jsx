@@ -4,7 +4,7 @@ import { eur, fecha } from './format.js';
 import { Badge, Dialog, Empty, ErrorBox, Pager } from './ui.jsx';
 import { CLASE } from './Conciliados.jsx';
 
-const CLASES = { ...CLASE, mixta: { label: 'Mixta', bg: '#F2F2EF', fg: '#3A3A38', icon: 'ri-shuffle-line' } };
+const CLASES = { ...CLASE, mixta: { label: 'Mixta (clasificar de nuevo)', bg: '#F2F2EF', fg: '#3A3A38', icon: 'ri-shuffle-line' } };
 // Where the lines go once classified (the tab that then lists them).
 const DESTINO = { materiales: 'Materiales', trabajadores: 'Pagos a trabajadores', clientes: 'Pagos de clientes' };
 // A payment invoice is Materiales or Trabajadores; a receipt only Clientes (the backend enforces it too).
@@ -29,7 +29,7 @@ function Classify({ row, onClose, onDone }) {
       </>}>
       <p><strong>{row.numerodocumento || 'Factura sin número'}</strong> · {row.tercero || '—'} · {eur(row.total)}</p>
       <p className="fin-muted fin-small">
-        {row.lineas === 1 ? '1 línea' : `${row.lineas} líneas`}. Ahora: {CLASES[row.clase]?.label || row.clase}.{' '}
+        Ahora: {CLASES[row.clase]?.label || row.clase}. Se clasifica el documento entero de una vez.{' '}
         {row.sentido === 'cobro' ? 'Es una factura de cobro: solo puede ser de clientes.' : row.sentido === 'pago' ? 'Es una factura de pago: puede ser de materiales o de trabajadores.' : ''}
       </p>
       {options.length ? (
@@ -39,7 +39,7 @@ function Classify({ row, onClose, onDone }) {
             <label key={c} className="fin-choice">
               <input type="radio" name="clase-factura" checked={clase === c} onChange={() => setClase(c)} />
               <span><strong>{c === 'materiales' ? 'Pago de materiales' : c === 'trabajadores' ? 'Pago de trabajadores' : 'Cobro de clientes'}</strong>
-                <span className="fin-muted"> · sus líneas pasan a «{DESTINO[c]}»</span></span>
+                <span className="fin-muted"> · la factura pasa entera a «{DESTINO[c]}»</span></span>
             </label>
           ))}
         </fieldset>
@@ -51,8 +51,8 @@ function Classify({ row, onClose, onDone }) {
   );
 }
 
-/* Conceptos de facturas (admins): one row per invoice whose type was not
- * recognised automatically, classified as a whole as Materiales, Pagos a
+/* Conceptos de facturas (admins): one row per invoice (never per line) whose
+ * type was not recognised automatically, classified as a whole document as Materiales, Pagos a
  * trabajadores or Cobro de clientes. */
 export default function Facturas({ toast, onChanged }) {
   const [q, setQ] = useState(''), [query, setQuery] = useState('');
@@ -68,12 +68,12 @@ export default function Facturas({ toast, onChanged }) {
   const filter = (setter) => (e) => { setter(e.target.value); setPage(1); };
   const done = (res) => {
     setEditing(null); setReload((n) => n + 1); onChanged?.();
-    toast?.(`Factura clasificada: ${res.lineas === 1 ? 'su línea pasa' : `sus ${res.lineas} líneas pasan`} a «${DESTINO[res.clase]}».`);
+    toast?.(`Factura clasificada: pasa entera a «${DESTINO[res.clase]}».`);
   };
   return (
     <div className="fin-stack">
       <div className="fin-card fin-filters">
-        <label className="fin-field fin-grow"><span>Buscar</span><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nº de factura, emisor o concepto" /></label>
+        <label className="fin-field fin-grow"><span>Buscar</span><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nº de factura o emisor" /></label>
         <label className="fin-field"><span>Clasificación</span>
           <select value={clase} onChange={filter(setClase)}>
             <option value="sin_clasificar">Pendientes de clasificar</option>
@@ -93,7 +93,7 @@ export default function Facturas({ toast, onChanged }) {
           : <Empty icon="ri-search-line" title="Ninguna factura coincide" text="Prueba con otros filtros." />) : null}
         {data && data.rows.length ? <>
           <div className="fin-table-wrap"><table className="fin-table">
-            <thead><tr><th>Fecha</th><th>Factura</th><th>Emisor / receptor</th><th>Conceptos</th><th className="fin-num">Líneas</th><th className="fin-num">Total</th><th>Clasificación</th><th><span className="fin-sr">Acciones</span></th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Factura</th><th>Emisor / receptor</th><th className="fin-num">Total</th><th>Clasificación</th><th><span className="fin-sr">Acciones</span></th></tr></thead>
             <tbody>{data.rows.map((r) => {
               const c = CLASES[r.clase] || CLASES.otros;
               const can = choices(r).some((x) => x !== r.clase);
@@ -102,8 +102,6 @@ export default function Facturas({ toast, onChanged }) {
                   <td className="fin-nowrap">{fecha(r.fecha)}</td>
                   <td className="fin-nowrap">{r.numerodocumento || <span className="fin-muted">Sin número</span>}</td>
                   <td className="fin-ellipsis" title={r.tercero || ''}>{r.tercero || '—'}</td>
-                  <td className="fin-ellipsis is-wide" title={r.conceptos}>{r.conceptos || '—'}</td>
-                  <td className="fin-num">{r.lineas}</td>
                   <td className="fin-num fin-nowrap">{eur(r.total)}</td>
                   <td><Badge bg={c.bg} fg={c.fg} icon={c.icon}>{c.label}</Badge></td>
                   <td>{can ? <button type="button" className="fin-btn" onClick={() => setEditing(r)}>{r.clase === 'sin_clasificar' ? 'Clasificar' : 'Cambiar'}</button> : null}</td>
