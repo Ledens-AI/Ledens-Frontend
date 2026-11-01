@@ -4,6 +4,7 @@ import { eur, fecha } from './format.js';
 import { Dialog, Empty, ErrorBox, Pager } from './ui.jsx';
 import { AssignCash, CashForm } from './Efectivo.jsx';
 import ProjectPicker from './ProjectPicker.jsx';
+import { Assignment } from './BridgeMovimientos.jsx';
 const MOTIVOS = {sin_documento:'Sin documento',sin_bridge:'Sin registros en el Bridge',revision:'Bridge en revisión',parcial:'Conciliación parcial o con diferencia',efectivo:'Efectivo sin asignar'};
 const TIPOS = {material:'Material',trabajador:'Trabajador',cliente:'Cliente',concepto:'Concepto de factura',movimiento:'Movimiento bancario',documento:'Documento',efectivo:'Efectivo'};
 // Only outgoing movements (bank or cash) can be sent to «Pago a trabajadores»;
@@ -24,7 +25,7 @@ function ClientesDialog({ count, total, busy, onClose, onConfirm }) {
         ? `El cobro seleccionado (${eur(total)}) se registrará en «Pagos de clientes», con el ordenante como cliente, y saldrá de esta lista.`
         : `Los ${count} cobros seleccionados (${eur(total)}) se registrarán en «Pagos de clientes», con el ordenante como cliente, y saldrán de esta lista.`}</p>
       <div className="fin-field"><span>Obra (opcional)</span><ProjectPicker value={project} onChange={setProject} label="Obra" /></div>
-      <p className="fin-muted fin-small">{project ? 'Se imputarán enteros a esta obra.' : 'Sin obra quedarán en Pendientes de asignación.'} Si después llega la factura emitida, se podrá conciliar con el cobro en el Bridge.</p>
+      <p className="fin-muted fin-small">{project ? 'Se imputarán enteros a esta obra.' : 'Sin obra quedarán sin proyecto en «Pagos de clientes».'} Si después llega la factura emitida, se podrá conciliar con el cobro en el Bridge.</p>
     </Dialog>
   );
 }
@@ -43,6 +44,11 @@ export default function Conciliacion({ toast,go,onChanged }) {
   const filter=(setter)=>(e)=>{setter(e.target.value);setPage(1);};
   useEffect(()=>{setSelected(new Set());},[query,motivo,desde,hasta,page]);
   const [adding,setAdding]=useState(false),[assigning,setAssigning]=useState(null);
+  // Bank movement whose «Asignar documento» panel is open (Bridge, inline).
+  const [linking,setLinking]=useState(null);
+  useEffect(()=>{setLinking(null);},[data]);
+  const canLink=(r)=>r.bank&&r.bank.state==='COMPLETED'&&r.bank.currency==='EUR'&&Number(r.bank.remaining)!==0;
+  const linked=()=>{setLinking(null);setReload(n=>n+1);onChanged?.();toast?.('Conciliación guardada. Los importes restantes siguen pendientes.');};
   const drop=(id)=>{setData(d=>d&&({...d,total:Math.max(0,d.total-1),rows:d.rows.filter(r=>r.id!==id)}));setSelected(s=>{const n=new Set(s);n.delete(id);return n;});};
   const removeCash=async(r)=>{
     if(!window.confirm(`¿Eliminar el ${Number(r.importe)<0?'pago':'cobro'} en efectivo de ${eur(Math.abs(r.importe))}?`))return;
@@ -79,7 +85,6 @@ export default function Conciliacion({ toast,go,onChanged }) {
       <label className="fin-field"><span>Desde</span><input type="date" value={desde} onChange={filter(setDesde)} /></label>
       <label className="fin-field"><span>Hasta</span><input type="date" value={hasta} onChange={filter(setHasta)} /></label>
       <button className="fin-btn" type="button" onClick={()=>setReload(n=>n+1)}>Actualizar</button>
-      <button className="fin-btn is-primary" type="button" onClick={()=>go?.('pendiente-bridge')}>Resolver Bridge</button>
       <button className="fin-btn is-primary" type="button" onClick={()=>setAdding(true)}><i className="ri-money-euro-circle-line"></i>Añadir efectivo</button>
     </div>
     {adding?<CashForm onClose={()=>setAdding(false)} onSaved={(k)=>{setAdding(false);setReload(n=>n+1);toast?.(k.kind==='pago'?'Pago en efectivo añadido.':'Cobro en efectivo añadido.');}} />:null}
@@ -102,7 +107,7 @@ export default function Conciliacion({ toast,go,onChanged }) {
       {data&&!data.rows.length?<Empty icon="ri-checkbox-circle-line" title="Nada pendiente" text="No hay elementos pendientes de conciliación con estos filtros." />:null}
       {data&&data.rows.length?<><div className="fin-table-wrap"><table className="fin-table">
         <thead><tr><th className="fin-col-check"><input type="checkbox" aria-label="Seleccionar los movimientos de esta página" disabled={!selectable.length} checked={allOn} onChange={()=>setSelected(s=>{const n=new Set(s);selectable.forEach(r=>allOn?n.delete(r.id):n.add(r.id));return n;})} /></th><th>Fecha</th><th>Tipo</th><th>Tercero</th><th>Concepto / referencia</th><th>Documento</th><th className="fin-num">Importe</th><th className="fin-num">Conciliado</th><th className="fin-num">Pendiente</th><th className="fin-num">Enlaces Bridge</th><th>Motivo pendiente</th><th><span className="fin-sr">Acciones</span></th></tr></thead>
-        <tbody>{data.rows.map(r=><tr key={r.type+':'+r.id} className={selected.has(r.id)?'is-selected':''}>
+        <tbody>{data.rows.map(r=><React.Fragment key={r.type+':'+r.id}><tr className={selected.has(r.id)?'is-selected':''}>
           <td className="fin-col-check">{choosable(r)?<input type="checkbox" aria-label="Seleccionar movimiento" checked={selected.has(r.id)} onChange={()=>toggle(r.id)} />:null}</td>
           <td className="fin-nowrap">{fecha(r.fecha)}</td><td>{TIPOS[r.type]||r.type}</td><td>{r.tercero||'—'}</td>
           <td className="fin-ellipsis is-wide" title={r.concepto||r.referencia}>{r.concepto||r.referencia||'—'}</td><td>{r.type==='efectivo'?'—':r.numerodocumento||(r.enlaces?'Sin número':'Sin documento')}</td>
@@ -111,8 +116,8 @@ export default function Conciliacion({ toast,go,onChanged }) {
           <td>{r.type==='efectivo'?<div className="fin-cash-actions">
             <button type="button" className="fin-btn" onClick={()=>setAssigning(r)}>Asignar</button>
             <button type="button" className="fin-iconbtn" title="Eliminar efectivo" aria-label="Eliminar efectivo" onClick={()=>removeCash(r)}><i className="ri-delete-bin-line"></i></button>
-          </div>:null}</td>
-        </tr>)}</tbody>
+          </div>:r.bank?<button type="button" className="fin-btn" disabled={!canLink(r)} title={canLink(r)?undefined:'El movimiento debe estar completado, en euros y con importe pendiente'} aria-expanded={linking===r.id} onClick={()=>setLinking(linking===r.id?null:r.id)}>Asignar documento</button>:null}</td>
+        </tr>{linking===r.id&&r.bank?<tr><td colSpan={12}><Assignment bank={r.bank} onSaved={linked} onCancel={()=>setLinking(null)} onConflict={m=>{setLinking(null);setReload(n=>n+1);onChanged?.();toast?.(m+' Selecciona de nuevo el movimiento y el documento.');}} /></td></tr>:null}</React.Fragment>)}</tbody>
       </table></div><Pager page={page} pageSize={25} total={data.total} onPage={setPage} /></>:null}
     </div>
   </div>;

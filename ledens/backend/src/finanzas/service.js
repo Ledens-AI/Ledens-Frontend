@@ -2,7 +2,7 @@ import {hasPurchases} from '../finance/purchases.js';
 // Spanish UI facade: never writes source project_id or a parallel money ledger.
 import {createHash} from 'node:crypto';
 import {FinanceService,FinanceError,uuid} from '../finance/service.js';
-import {cents,decimal} from '../bridge/rules.js';
+import {cents,decimal,bankFingerprint} from '../bridge/rules.js';
 export class FinError extends FinanceError {constructor(status,message,extra){super(status,message);this.extra=extra;}}
 export const isUuid=uuid;
 export const TYPES={material:{label:'Material'},trabajador:{label:'Trabajador'},cliente:{label:'Cliente'},concepto:{label:'Concepto de factura'}};
@@ -107,7 +107,12 @@ export class FinanzasService {
    coalesce(sum(abs(importe-allocated)) FILTER(WHERE sin_proyecto),0)::text importe_pendiente,
    count(*) FILTER(WHERE needs_review)::int revision FROM listed GROUP BY type`,this.params())).rows;
   const porTipo=Object.fromEntries(Object.keys(TYPES).map(t=>[t,{total:0,pendientes:0,revision:0,importe_pendiente:'0'}]));for(const r of rows)porTipo[r.type]=r;
-  return {porTipo,total:rows.reduce((s,r)=>s+r.total,0),pendientes:rows.reduce((s,r)=>s+r.pendientes,0),revision:rows.reduce((s,r)=>s+r.revision,0),importePendiente:decimal(rows.reduce((s,r)=>s+cents(r.importe_pendiente),0n))};
+  // «Materiales pendiente de asignación» lists what the Materiales tab shows
+  // (imported materials and anything classified as materials), without a project.
+  const params=this.params();params.push('material');
+  const materiales=(await this.query(`${BASE} SELECT count(*)::int pendientes,coalesce(sum(abs(l.importe-l.allocated)),0)::text importe_pendiente
+   FROM listed l WHERE l.sin_proyecto AND ${TYPE_FILTER.material('$3')}`,params)).rows[0];
+  return {porTipo,materiales,total:rows.reduce((s,r)=>s+r.total,0),pendientes:rows.reduce((s,r)=>s+r.pendientes,0),revision:rows.reduce((s,r)=>s+r.revision,0),importePendiente:decimal(rows.reduce((s,r)=>s+cents(r.importe_pendiente),0n))};
  }
  async source(type,id){if(!TYPES[type]||!uuid(id))throw new FinError(404,'Registro no encontrado');const r=(await this.query(`${BASE} SELECT * FROM listed WHERE type=$3 AND id=$4`,[...this.params(),type,id])).rows[0];if(!r)throw new FinError(404,'Registro no encontrado o sin permiso');return r;}
  async history(type,id){const r=await this.source(type,id);const events=await this.finance.history(this.user,r.record_id);const ids=[...new Set(events.map(e=>e.actor_id).filter(Boolean))];const names=ids.length?(await this.query('SELECT id,coalesce(name,email) label FROM users WHERE id=ANY($1::uuid[])',[ids])).rows:[];return events.map(e=>({id:e.id,at:e.created_at,actor_label:names.find(n=>n.id===e.actor_id)?.label||'Sistema',origin:e.actor_id?'manual':'automatica',action:labels[e.action]||e.action,reason:e.reason,old_allocations:e.before_value.allocations,new_allocations:e.after_value.allocations,old_label:e.before_value.allocations?.length===1?e.before_value.allocations[0].project_name:undefined,new_label:e.after_value.allocations?.length===1?e.after_value.allocations[0].project_name:undefined}));}
@@ -235,7 +240,71 @@ export class FinanzasService {
   const filtered=base+' SELECT *, (importe-coalesce(conciliado::numeric,0))::text por_conciliar FROM candidates WHERE '+where.join(' AND ');
   const rows=(await this.query(filtered+' ORDER BY fecha DESC NULLS LAST,id LIMIT '+size+' OFFSET '+((p-1)*size),params)).rows;
   const total=(await this.query('SELECT count(*)::int n FROM ('+filtered+') matching',params)).rows[0].n;
+  // «Asignar documento» (former «Pendiente de bridge movimientos documentos») works
+  // on each bank movement of this inbox: it needs the movement as the Bridge sees it.
+  const ids=rows.filter(r=>r.type==='movimiento').map(r=>r.id);
+  if(ids.length){
+   const banks=new Map((await this.query('SELECT * FROM ledens.bank_movements WHERE id=ANY($1::uuid[])',[ids])).rows.map(b=>[b.id,b]));
+   for(const r of rows){const b=r.type==='movimiento'&&banks.get(r.id);if(b)r.bank={id:b.id,description:b.description,reference:b.reference,total_amount:String(b.total_amount),
+    remaining:r.por_conciliar,state:b.state,currency:b.currency,bank_fingerprint:bankFingerprint(b)};}
+  }
   return {rows,total,page:p,pageSize:size};
+ }
+ // ------------------------------------------------------------- facturas completas
+ // «Conceptos de facturas»: each invoice whose lines are invoice concepts (not an
+ // imported material, worker payment or client payment), as one row, with how its
+ // lines are classified. Classifying the invoice changes the category of all of
+ // them at once (materiales / trabajadores / clientes), audited per record.
+ async invoices({page=1,pageSize=25,q='',clase='',from='',to=''}={}){
+  if(this.user.role!=='admin')throw new FinError(403,'Clasificar facturas requiere administrador');
+  const size=Math.min(100,Math.max(1,Number(pageSize)||25)),p=Math.max(1,Math.min(4000,Number(page)||1));
+  if(!Number.isInteger(size)||!Number.isInteger(p))throw new FinError(400,'Paginación no válida');
+  const params=[...this.params(),'%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',numerodocumento,tercero,conceptos) ILIKE $3"];
+  if(clase){if(![...Object.keys(CLASES),'sin_clasificar','mixta','otros'].includes(clase))throw new FinError(400,'Clasificación no válida');
+   // «Sin clasificar»: any line still unclassified, even if the others are not.
+   if(clase==='sin_clasificar')where.push("'sin_clasificar'=ANY(clases)");else{params.push(clase);where.push('clase=$'+params.length);}}
+  for(const [v,op] of [[from,'>='],[to,'<=']])if(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v)))throw new FinError(400,'Fecha no válida');params.push(v);where.push('fecha '+op+' $'+params.length+'::date');}
+  const sql=BASE+`, lines AS(SELECT l.*,${CLASE_SQL} clase FROM listed l WHERE l.type='concepto' AND l.document_id IS NOT NULL),
+   inv AS(SELECT d.id,d.numerodocumento,d.tercero,d.document_on fecha,d.total,d.tipo doc_tipo,count(*)::int lineas,sum(x.importe)::text importe_lineas,
+    array_agg(DISTINCT x.clase) clases,CASE WHEN count(DISTINCT x.clase)=1 THEN min(x.clase) ELSE 'mixta' END clase,
+    string_agg(coalesce(x.concepto,''),' · ' ORDER BY x.line_number NULLS LAST,x.record_id) conceptos,
+    md5(string_agg(x.record_id::text||':'||x.version,',' ORDER BY x.record_id)) version,
+    CASE WHEN d.tipo='Cobrar' THEN 'cobro' WHEN d.tipo='Pagar' THEN 'pago' WHEN d.total<0 THEN 'pago' WHEN d.total>0 THEN 'cobro' END sentido
+    FROM lines x JOIN ledens.documents d ON d.id=x.document_id GROUP BY d.id)
+   SELECT * FROM inv WHERE `+where.join(' AND ');
+  const rows=(await this.query(sql+` ORDER BY fecha DESC NULLS LAST,numerodocumento,id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows;
+  const total=(await this.query('SELECT count(*)::int n FROM ('+sql+') x',params)).rows[0].n;
+  return {rows,total,page:p,pageSize:size};
+ }
+ async classifyInvoice({documentId,clase,version,reason}={}){
+  if(this.user.role!=='admin')throw new FinError(403,'Clasificar facturas requiere administrador');
+  if(!uuid(documentId))throw new FinError(404,'Factura no encontrada');
+  if(!CLASES[clase])throw new FinError(400,'Clasificación no válida');
+  if(typeof version!=='string'||!/^[0-9a-f]{32}$/.test(version))throw new FinError(400,'Versión no válida');
+  const why=typeof reason==='string'?reason.trim():'';
+  if(why.length>500)throw new FinError(400,'Motivo no válido (máximo 500 caracteres)');
+  return this.finance.transaction(async c=>{
+   const records=(await c.query(`SELECT f.* FROM ledens.financial_records f WHERE f.document_id=$1 AND f.invoice_line_id IS NOT NULL
+    AND f.source_valid AND f.status<>'excluded' ORDER BY f.id FOR UPDATE`,[documentId])).rows;
+   if(!records.length)throw new FinError(404,'Factura no encontrada o sin conceptos');
+   const current=createHash('md5').update(records.map(r=>r.id+':'+r.version).join(',')).digest('hex');
+   if(current!==version)throw new FinError(409,'La factura ha cambiado. Actualiza la lista.');
+   const doc=(await c.query('SELECT tipo,total FROM ledens.documents WHERE id=$1',[documentId])).rows[0];
+   const sentido=doc.tipo==='Cobrar'?'cobro':doc.tipo==='Pagar'?'pago':Number(doc.total)<0?'pago':Number(doc.total)>0?'cobro':null;
+   if(sentido==='pago'&&clase==='clientes')throw new FinError(409,'Una factura de pago no puede clasificarse como cobro de clientes');
+   if(sentido==='cobro'&&clase!=='clientes')throw new FinError(409,'Una factura de cobro solo puede clasificarse como de clientes');
+   const target=CLASES[clase],same=r=>r.category===target||(target==='materials'&&r.category==='overhead');
+   const changing=records.filter(r=>!same(r));
+   if(!changing.length)throw new FinError(409,'La factura ya está clasificada así');
+   // Changing what was already classified needs its reason, like «Movimientos conciliados».
+   if(changing.some(r=>r.category!=='unclassified')&&why.length<5)throw new FinError(400,'Indica el motivo del cambio (al menos cinco caracteres)');
+   const text=why||'Clasificación de la factura completa';
+   for(const r of changing){
+    const after=(await c.query('UPDATE ledens.financial_records SET category=$2,version=version+1,updated_at=now() WHERE id=$1 RETURNING *',[r.id,target])).rows[0];
+    await this.finance.audit(c,r,this.user,'reclassified',text,after);
+   }
+   return {document_id:documentId,clase,category:target,changed:changing.length,lineas:records.length};
+  });
  }
  // ------------------------------------------------------------- pago a trabajadores
  // «Pago a trabajadores» in Pendiente de conciliación (admin, like that inbox):

@@ -10,20 +10,20 @@ import Proyectos from './Proyectos.jsx';
 import Trabajadores from './Trabajadores.jsx';
 import Logs from './Logs.jsx';
 import Rentabilidad from './Rentabilidad.jsx';
+import Facturas from './Facturas.jsx';
 import { FIN_TABS } from './tabs.js';
 import '../../../styles/finanzas.css';
 
 const INTRO = {
   resumen: 'Estado de la imputación de materiales, pagos a trabajadores y cobros a proyectos.',
-  pendientes: 'Registros sin proyecto. Elige el proyecto en cada fila o selecciona varios para asignarlos juntos.',
+  pendientes: 'Materiales sin proyecto: compras importadas y facturas clasificadas como materiales. Los pagos a trabajadores y los cobros de clientes no aparecen aquí. Elige el proyecto en cada fila o selecciona varios para asignarlos juntos.',
   material: 'Cada concepto de factura se imputa por separado: una misma factura puede repartirse entre obras.',
   trabajador: 'Vista de consulta de los pagos a trabajadores, con su rol y proyecto. Los pagos nuevos se preparan en «Pendiente de trabajador».',
   cliente: 'Cobros recibidos de clientes. Son cobros, no ingresos reconocidos: un anticipo no es facturación.',
-  concepto:'Líneas de facturas y documentos pendientes de clasificar, sin duplicar el original.',
+  concepto: 'Facturas completas cuyo tipo no se ha podido reconocer automáticamente. Clasifica cada factura como pago de materiales, pago a trabajadores o cobro de clientes; todas sus líneas pasan a esa sección.',
   conciliados: 'Movimientos ya conciliados con su factura y cómo está clasificado cada concepto: materiales, pagos a trabajadores o cobro de clientes. Si no estás de acuerdo, pulsa «Cambiar» e indica el motivo.',
-  conciliacion: 'Movimientos bancarios pendientes de conciliar con sus documentos. Selecciona los pagos de nóminas y pulsa «Pago a trabajadores» para segregarlos.',
+  conciliacion: 'Movimientos bancarios pendientes de conciliar con sus documentos. Pulsa «Asignar documento» para conciliar un movimiento con una factura existente, o selecciona los pagos de nóminas y pulsa «Pago a trabajadores» para segregarlos.',
   bridge:'Enlaces entre movimientos y documentos existentes, con importes, estado y motivo de conciliación.',
-  'pendiente-bridge':'Selecciona el documento existente y guarda la conciliación. Los movimientos completamente conciliados salen de esta bandeja.',
   'pendiente-trabajador': 'Pagos a trabajadores segregados de un movimiento bancario: más de 450 € en pagos de 100 € (Oficial), 450 € o menos en pagos de 60 € (Ayudante). Asigna trabajador y proyecto a cada uno y guárdalo.',
   rentabilidad: 'Costes imputados, cobros y margen previsto de un proyecto.',
   proyectos: 'Alta y edición de proyectos: código, cliente, dirección, estado y fechas. Los cambios quedan en la auditoría.',
@@ -47,7 +47,7 @@ export default function GestionFinanciera({ tab, go, toast, onPending, onBridgeP
   const bridgeRef=useRef(onBridgePending);bridgeRef.current=onBridgePending;
   const loadBridge=useCallback(()=>api.bridgeCounts().then(d=>bridgeRef.current?.(d.pending,d.reconciliation??d.pending),()=>{}),[]);
   const loadSummary = useCallback(() => api.summary().then(
-    (s) => { setSummary(s); setSummaryError(''); pendingRef.current?.(s.pendientes); },
+    (s) => { setSummary(s); setSummaryError(''); pendingRef.current?.(s.materiales?.pendientes ?? s.pendientes); },
     (e) => setSummaryError(e.message),
   ), []);
   useEffect(() => { loadSummary(); }, [loadSummary]);
@@ -57,7 +57,7 @@ export default function GestionFinanciera({ tab, go, toast, onPending, onBridgeP
   useEffect(() => { setDrill((d) => (d && d.tab !== tab ? null : d)); }, [tab]);
 
   const label = FIN_TABS.find((t) => t[0] === tab)?.[1] || '';
-  const isRecords = ['pendientes', 'material', 'trabajador', 'cliente','concepto'].includes(tab);
+  const isRecords = ['pendientes', 'material', 'trabajador', 'cliente'].includes(tab);
   const project = drill && drill.tab === tab ? drill.project : null;
 
   return (
@@ -72,7 +72,8 @@ export default function GestionFinanciera({ tab, go, toast, onPending, onBridgeP
       ) : null}
       {tab === 'conciliacion' ? <Conciliacion toast={toast} onChanged={changed} go={go} /> : null}
       {tab === 'conciliados' ? <Conciliados toast={toast} onChanged={changed} /> : null}
-      {tab==='bridge'||tab==='pendiente-bridge'?<BridgeMovimientos key={tab} pending={tab==='pendiente-bridge'} toast={toast} onChanged={changed} go={go} />:null}
+      {tab === 'bridge' ? <BridgeMovimientos go={go} /> : null}
+      {tab === 'concepto' ? <Facturas toast={toast} onChanged={changed} /> : null}
       {tab === 'pendiente-trabajador' ? <PendienteTrabajador toast={toast} onChanged={changed} /> : null}
       {tab === 'proyectos' ? <Proyectos toast={toast} /> : null}
       {tab === 'trabajadores' ? <Trabajadores toast={toast} /> : null}

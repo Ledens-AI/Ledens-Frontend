@@ -43,7 +43,7 @@ export function CashForm({ onClose, onSaved }) {
 
 /* Asignar un efectivo: a pago goes to Pagos a trabajadores (split in Pendiente
  * de trabajador) or to Pagos de materiales; a cobro goes to Pagos de clientes.
- * The project is optional: without it the record waits in Pendiente de asignación. */
+ * The project is optional: without it a material waits in Materiales pendiente de asignación. */
 export function AssignCash({ row, onClose, onDone }) {
   const pago = Number(row.importe) < 0;
   const [target, setTarget] = useState(pago ? 'trabajadores' : 'clientes');
@@ -85,7 +85,7 @@ export function AssignCash({ row, onClose, onDone }) {
         <div className="fin-grid-form">
           <div className="fin-field fin-span-all"><span>Proyecto (opcional)</span><ProjectPicker value={project} onChange={setProject} label="Proyecto" /></div>
           {target === 'materiales' ? <label className="fin-field fin-span-all"><span>Descripción del material</span><input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={300} /></label> : null}
-          {!project ? <p className="fin-muted fin-small fin-span-all">Sin proyecto quedará en Pendiente de asignación.</p> : null}
+          {!project ? <p className="fin-muted fin-small fin-span-all">{target === 'materiales' ? 'Sin proyecto quedará en «Materiales pendiente de asignación».' : 'Sin proyecto quedará sin obra en «Pagos de clientes».'}</p> : null}
         </div>
       ) : null}
       {error ? <p className="fin-error-inline" role="alert">{error}</p> : null}
