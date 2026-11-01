@@ -56,6 +56,8 @@ export const api = {
   reclassify: (recordId, body) => request('PUT', `/api/finanzas/conciliados/${recordId}/clasificacion`, body),
   // Pago a trabajadores (backend: FinanzasService.classifyWorkerPayments …).
   classifyWorkerPayments: (movementIds) => request('POST', '/api/finanzas/conciliacion/pago-trabajadores', { movementIds }),
+  // Pago de clientes: unrecognised incoming movements (FinanzasService.classifyCustomerPayments).
+  classifyCustomerPayments: (movementIds, projectId) => request('POST', '/api/finanzas/conciliacion/pago-clientes', { movementIds, projectId: projectId || null }),
   // Efectivo (backend: FinanzasService.createCash …; admins only).
   createCash: (body) => request('POST', '/api/finanzas/conciliacion/efectivo', body),
   assignCash: (id, body) => request('POST', `/api/finanzas/conciliacion/efectivo/${id}/asignar`, body),

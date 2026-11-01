@@ -19,6 +19,7 @@ export class BridgeWorkspace {
   const f=page(filters),workers=Boolean((await this.pool.query("SELECT to_regclass('ledens.worker_payment_batches') name")).rows[0].name);
   const where=`NOT coalesce(b.is_internal_transfer,false)
    ${workers?'AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=b.id)':''}
+   ${filters.withoutCustomerPayments?'AND NOT EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=b.id)':''}
    AND ($1::boolean=false OR x.links=0 OR x.review_links>0 OR x.confirmed<>b.total_amount)
    AND concat_ws(' ',b.description,b.reference,b.payer,b.beneficiary_name,x.documents) ILIKE $2
    AND ($3::date IS NULL OR b.completed_on>=$3) AND ($4::date IS NULL OR b.completed_on<=$4)`;
@@ -33,7 +34,9 @@ export class BridgeWorkspace {
   const pending=(await this.movements({limit:1})).total;
   const cash=Boolean((await this.pool.query("SELECT to_regclass('ledens.cash_movements') name")).rows[0].name);
   const cashPending=cash?(await this.pool.query("SELECT count(*)::int n FROM ledens.cash_movements WHERE kind IN ('pago','cobro') AND assigned_to IS NULL")).rows[0].n:0;
-  return {pending,reconciliation:pending+cashPending};
+  // Pendiente de conciliación leaves out receipts already recorded as client payments.
+  const inbox=(await this.movements({limit:1,withoutCustomerPayments:true})).total;
+  return {pending,reconciliation:inbox+cashPending};
  }
  async allocations(filters={}){
   const f=page(filters),params=[f.q,f.from,f.to];
