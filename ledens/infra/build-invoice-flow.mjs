@@ -9,21 +9,24 @@ export function buildInvoiceFlow(current, apiBase) {
   const site='https://ledenses.sharepoint.com/sites/ledens.es';
   const host={apiId:'/providers/Microsoft.PowerApps/apis/shared_sharepointonline',connectionName:'shared_sharepointonline'};
   const secure={secureData:{properties:['inputs','outputs']}};
+  // Ingest/Process inputs carry the bearer token and the invoice bytes, so they stay hidden.
+  // Their outputs are only the backend's verdict (status, reason, ids, folder): visible in the
+  // run history, so a document held for review can be diagnosed.
+  const verdict={secureData:{properties:['inputs']}};
   const sp=(op,parameters,runAfter={})=>({type:'OpenApiConnection',inputs:{host:{...host,operationId:op},parameters:{dataset:site,...parameters},authentication:"@parameters('$authentication')"},runAfter,runtimeConfiguration:secure});
-  const http=(uri,body,runAfter={})=>({type:'Http',inputs:{uri,method:'POST',headers:{Authorization:'Bearer __LEDENS_INGEST_TOKEN__','Content-Type':'application/json'},body,
-    retryPolicy:{type:'exponential',count:4,interval:'PT10S'}},runAfter,runtimeConfiguration:secure});
-  const after=name=>({[name]:['Succeeded']});
+  const http=(uri,body,runAfter={},{visible=false}={})=>({type:'Http',inputs:{uri,method:'POST',headers:{Authorization:'Bearer __LEDENS_INGEST_TOKEN__','Content-Type':'application/json'},body,
+    retryPolicy:{type:'exponential',count:4,interval:'PT10S'}},runAfter,runtimeConfiguration:visible?verdict:secure});  const after=name=>({[name]:['Succeeded']});
   const processUrl=`${apiBase}/@{body('Ingest')?['ingestion_id']}/process`;
   definition.actions={
     Get_content:sp('GetFileContent',{id:"@triggerBody()?['{Identifier}']",inferContentType:true}),
     Ingest:http(apiBase,{site_url:site,library:'Shared Documents',folder:'datasource/Landing facturas',item_id:"@string(triggerBody()?['ID'])",
-      filename:"@triggerBody()?['{FilenameWithExtension}']",content_base64:"@base64(body('Get_content'))"},after('Get_content')),
+      filename:"@triggerBody()?['{FilenameWithExtension}']",content_base64:"@base64(body('Get_content'))"},after('Get_content'),{visible:true}),
     Status:{type:'InitializeVariable',inputs:{variables:[{name:'ingestStatus',type:'string',value:"@body('Ingest')?['status']"}]},runAfter:after('Ingest')},
     Unique_file:{type:'If',expression:{equals:["@body('Ingest')?['duplicate']",false]},runAfter:after('Status'),actions:{
       Poll:{type:'Until',expression:"@or(equals(variables('ingestStatus'),'ready'),equals(variables('ingestStatus'),'review'),equals(variables('ingestStatus'),'archived'))",
         limit:{count:60,timeout:'PT15M'},actions:{
           Wait:{type:'Wait',inputs:{interval:{count:5,unit:'Second'}},runAfter:{}},
-          Process:http(processUrl,{},after('Wait')),
+          Process:http(processUrl,{},after('Wait'),{visible:true}),
           Set_status:{type:'SetVariable',inputs:{name:'ingestStatus',value:"@body('Process')?['status']"},runAfter:after('Process')}
         },runAfter:{}},
       Can_archive:{type:'If',expression:{equals:["@variables('ingestStatus')",'ready']},runAfter:after('Poll'),actions:{
