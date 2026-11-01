@@ -56,6 +56,7 @@ export const api = {
   aprobarPropuesta: (id, body) => request('POST', `${base}/propuestas/${id}/aprobar`, body),
   rechazarPropuesta: (id, body) => request('POST', `${base}/propuestas/${id}/rechazar`, body),
   assignJefe: (id, body) => request('PUT', `${base}/${id}/jefe`, body),
+  rename: (id, body) => request('PUT', `${base}/${id}/nombre`, body),
   schedule: (id, body) => request('PUT', `${base}/${id}/fechas`, body),
   declare: (id, body) => request('PUT', `${base}/${id}/produccion`, body),
 };
