@@ -457,8 +457,12 @@ export class FinanzasService {
      const allocated=(await c.query('SELECT DISTINCT record_id FROM ledens.project_financial_allocations WHERE record_id=ANY($1::uuid[])',[records.map(r=>r.id)])).rows.length;
      if(allocated||records.some(r=>!r.invoice_line_id||notes.get(r.document_id)!=='Cobrar'||r.status!=='pending'||r.category!=='unclassified'))
       throw new FinError(409,'Este cobro tiene registros ya clasificados, aprobados o con obra (o un cobro de cliente): revísalos antes de registrarlo como reembolso de proveedor');
+     // A credit note's lines may be stored negative (the usual sign of an abono) or
+     // positive (as a Cobrar document): they are excluded anyway, so only their
+     // size has to match the refund, all with the same sign.
      const sum=records.reduce((t,r)=>t+cents(r.gross_amount),0n);
-     if(sum!==amount)throw new FinError(409,`Los conceptos del abono conciliado suman ${decimal(sum)} € y el cobro ${decimal(amount)} €: revisa el abono antes de registrarlo como reembolso de proveedor`);
+     if(new Set(records.map(r=>cents(r.gross_amount)>0n)).size>1)throw new FinError(409,'Los conceptos del abono conciliado mezclan importes positivos y negativos: revisa el abono antes de registrarlo como reembolso de proveedor');
+     if((sum<0n?-sum:sum)!==amount)throw new FinError(409,`Los conceptos del abono conciliado suman ${decimal(sum)} € y el cobro ${decimal(amount)} €: revisa el abono antes de registrarlo como reembolso de proveedor`);
      for(const r of records){
       const after=(await c.query("UPDATE ledens.financial_records SET status='excluded',source_valid=false,version=version+1,updated_at=now() WHERE id=$1 RETURNING *",[r.id])).rows[0];
       await this.finance.audit(c,r,this.user,'refund_replaced','Concepto del abono sustituido por el reembolso de proveedor registrado desde el movimiento',after);
