@@ -3,6 +3,7 @@ import {hasPurchases} from '../finance/purchases.js';
 import {createHash} from 'node:crypto';
 import {FinanceService,FinanceError,uuid} from '../finance/service.js';
 import {cents,decimal,bankFingerprint} from '../bridge/rules.js';
+import {extractLines,storeInvoiceLines} from '../finance/ingestion.js';
 export class FinError extends FinanceError {constructor(status,message,extra){super(status,message);this.extra=extra;}}
 export const isUuid=uuid;
 export const TYPES={material:{label:'Material'},trabajador:{label:'Trabajador'},cliente:{label:'Cliente'},concepto:{label:'Concepto de factura'}};
@@ -74,15 +75,17 @@ const MOVEMENTS_SQL=`WITH links AS(SELECT bank_movement_id,document_id FROM lede
  agg AS(SELECT mov,count(*)::int n,array_agg(DISTINCT ${CAT_CLASE('category')}) clases,md5(string_agg(id::text||':'||version,',' ORDER BY id)) version FROM recs GROUP BY mov),
  movs AS(
   SELECT b.id,'banco'::text tipo,b.completed_on fecha,coalesce(b.beneficiary_name,b.payer) tercero,coalesce(nullif(b.description,''),b.reference) concepto,b.source_id referencia,b.total_amount importe,
-   d.documentos,coalesce(d.n,0) n_docs,coalesce(d.sin_registros,false) doc_sin_registros,
+   d.documentos,coalesce(d.n,0) n_docs,coalesce(d.sin_registros,false) doc_sin_registros,coalesce(d.sin_conceptos,'[]'::json) sin_conceptos,
    EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=b.id) lote,
    EXISTS(SELECT 1 FROM ledens.provisional_material_payments pm WHERE pm.bank_movement_id=b.id AND pm.replaced_at IS NULL) provisional
   FROM ledens.bank_movements b LEFT JOIN LATERAL(SELECT string_agg(DISTINCT coalesce(dd.numerodocumento,'Sin número'),', ') documentos,count(*)::int n,
-    bool_or(NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=dd.id AND r.source_valid AND r.status<>'excluded')) sin_registros
+    bool_or(NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=dd.id AND r.source_valid AND r.status<>'excluded')) sin_registros,
+    json_agg(json_build_object('id',dd.id,'numerodocumento',dd.numerodocumento,'total',dd.total::text) ORDER BY dd.numerodocumento)
+     FILTER(WHERE NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=dd.id AND r.source_valid AND r.status<>'excluded')) sin_conceptos
    FROM links l JOIN ledens.documents dd ON dd.id=l.document_id WHERE l.bank_movement_id=b.id) d ON true
   WHERE NOT coalesce(b.is_internal_transfer,false) AND b.total_amount<>0
   UNION ALL
-  SELECT k.id,'efectivo',k.occurred_on,k.counterparty,k.concept,'Efectivo',CASE WHEN k.kind='pago' THEN -k.amount ELSE k.amount END,NULL,0,false,
+  SELECT k.id,'efectivo',k.occurred_on,k.counterparty,k.concept,'Efectivo',CASE WHEN k.kind='pago' THEN -k.amount ELSE k.amount END,NULL,0,false,'[]'::json,
    EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=k.id),false
   FROM ledens.cash_movements k WHERE k.kind IN ('pago','cobro')),
  cls AS(SELECT m.*,coalesce(a.n,0) registros,coalesce(a.version,md5('')) version,
@@ -92,6 +95,15 @@ const MOVEMENTS_SQL=`WITH links AS(SELECT bank_movement_id,document_id FROM lede
  fin AS(SELECT c.*,CASE WHEN c.desconocido OR cardinality(c.conocidas)=0 THEN 'pendiente'
    WHEN cardinality(c.conocidas)=1 THEN CASE WHEN c.conocidas[1]='materiales' AND c.importe>0 THEN 'reembolso_proveedor' ELSE c.conocidas[1] END ELSE 'mixto' END clase,
   CASE WHEN c.importe<0 THEN 'pago' ELSE 'cobro' END sentido FROM cls c)`;
+// One row of «Concepto de movimientos» (list and single movement).
+const MOVEMENT_COLUMNS=' SELECT id,tipo,fecha::text fecha,tercero,concepto,referencia,importe::text importe,documentos,clase,conocidas,sentido,version,registros,lote,sin_conceptos,'+
+ "CASE WHEN n_docs>0 THEN 'bridge' WHEN lote THEN 'trabajadores' WHEN provisional THEN 'provisional' WHEN registros>0 THEN 'registro' ELSE 'ninguno' END origen";
+// «Adjuntar detalle»: the product detail of a reconciled document without
+// concepts is read with the invoice OCR (Document Intelligence, F0: 4 MB).
+export const DETAIL_MAX_BYTES=4*1024*1024;
+const DETAIL_TYPES=[['application/pdf',b=>b.subarray(0,5).toString()==='%PDF-'],['image/png',b=>b.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))],
+ ['image/jpeg',b=>b[0]===255&&b[1]===216&&b[2]===255]];
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const labels={reclassified:'Cambio de clasificación',replace_allocations:'Asignación a proyecto',recognition:'Validación contable',review_flag:'Revisión',source_changed:'Origen actualizado',document_changed:'Factura actualizada'};
 const requestFor=(seed,key)=>{const h=createHash('sha256').update(seed+'|'+key).digest('hex').slice(0,32);return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;};
 // Pago a trabajadores: how a paid amount (absolute, in cents) is split.
@@ -327,8 +339,7 @@ export class FinanzasService {
   const counts=(await this.query(MOVEMENTS_SQL+' SELECT clase,count(*)::int n FROM fin WHERE '+where.join(' AND ')+' GROUP BY clase',params)).rows;
   const resumen=Object.fromEntries(MOVEMENT_CLASSES.map(k=>[k,0]));for(const r of counts)resumen[r.clase]=r.n;
   if(clase){if(!MOVEMENT_CLASSES.includes(clase))throw new FinError(400,'Clasificación no válida');params.push(clase);where.push('clase=$'+params.length);}
-  const sql=MOVEMENTS_SQL+' SELECT id,tipo,fecha::text fecha,tercero,concepto,referencia,importe::text importe,documentos,clase,conocidas,sentido,version,registros,lote,'+
-   "CASE WHEN n_docs>0 THEN 'bridge' WHEN lote THEN 'trabajadores' WHEN provisional THEN 'provisional' WHEN registros>0 THEN 'registro' ELSE 'ninguno' END origen FROM fin WHERE "+where.join(' AND ');
+  const sql=MOVEMENTS_SQL+MOVEMENT_COLUMNS+' FROM fin WHERE '+where.join(' AND ');
   const rows=(await this.query(sql+` ORDER BY fecha DESC NULLS LAST,id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows;
   const total=(await this.query('SELECT count(*)::int n FROM ('+sql+') x',params)).rows[0].n;
   return {rows,total,resumen,page:p,pageSize:size};
@@ -363,9 +374,10 @@ export class FinanzasService {
    if((await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1 OR cash_movement_id=$1',[id])).rows.length)
     throw new FinError(409,clase==='trabajadores'?'Ya está en pagos a trabajadores':'Está en Pendiente de trabajador: devuélvelo a conciliación desde esa pantalla para cambiarlo');
    if(b){
-    const bare=(await c.query(`SELECT d.numerodocumento FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id
+    const bare=(await c.query(`SELECT d.id,d.numerodocumento,d.total FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id
      WHERE a.bank_movement_id=$1 AND a.state='Confirmado' AND NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded')`,[id])).rows;
-    if(bare.length)throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta antes de clasificar el movimiento`);
+    if(bare.length)throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; adjunta el documento con el detalle de sus productos o revisa su ingesta antes de clasificar el movimiento`,
+     {sin_conceptos:bare.map(d=>({id:d.id,numerodocumento:d.numerodocumento,total:String(d.total)}))});
    }
    // A supplier refund is registered as a material from the movement itself. A
    // receipt that already has records (its reconciled document, a client receipt)
@@ -396,6 +408,66 @@ export class FinanzasService {
    if(clase==='clientes')return {id,clase,via:'cobro-cliente',...await this.customerPaymentOne(c,id,null)};
    return {id,clase,via:'material',...await this.materialPaymentOne(c,b)};
   });
+ }
+ async movementRow(id){
+  if(!uuid(id))throw new FinError(404,'Movimiento no encontrado');
+  const row=(await this.query(MOVEMENTS_SQL+MOVEMENT_COLUMNS+' FROM fin WHERE id=$1',[id])).rows[0];
+  if(!row)throw new FinError(404,'Movimiento no encontrado');
+  return row;
+ }
+ // «Adjuntar detalle» in Concepto de movimientos: a document the Bridge reconciled
+ // with this bank movement has no concepts (its OCR found no lines), so the
+ // movement cannot be classified. The admin attaches the document with the detail
+ // of its products (albarán, ticket, invoice copy); the OCR reads its lines and
+ // they become the document's concepts, through the same storeInvoiceLines as the
+ // ingestion, only when they add up exactly to the document's total. Nothing is
+ // stored otherwise, and the file itself is not kept (only its hash, audited).
+ async attachDocumentDetail({id,documentId,content,ocr,timeoutMs=40000,pollMs=1500}={}){
+  if(this.user.role!=='admin')throw new FinError(403,'Adjuntar el detalle de un documento requiere administrador');
+  if(!uuid(id))throw new FinError(404,'Movimiento no encontrado');
+  if(!uuid(documentId))throw new FinError(404,'Documento no encontrado');
+  if(!Buffer.isBuffer(content)||!content.length)throw new FinError(400,'Adjunta el documento con el detalle de los productos');
+  if(content.length>DETAIL_MAX_BYTES)throw new FinError(413,'El documento supera 4 MB, el máximo que admite el lector');
+  const type=DETAIL_TYPES.find(([,ok])=>ok(content))?.[0];
+  if(!type)throw new FinError(415,'Formato no admitido: adjunta un PDF, JPG o PNG');
+  if(!ocr)throw new FinError(503,'La lectura de documentos no está configurada');
+  const check=async c=>{
+   const d=(await c.query(`SELECT d.* FROM ledens.documents d JOIN ledens.bank_document_allocations a ON a.document_id=d.id
+    WHERE d.id=$1 AND a.bank_movement_id=$2 AND a.state='Confirmado' LIMIT 1`,[documentId,id])).rows[0];
+   if(!d)throw new FinError(404,'El documento no está conciliado con este movimiento');
+   if((await c.query("SELECT 1 FROM ledens.financial_records WHERE document_id=$1 AND source_valid AND status<>'excluded' LIMIT 1",[documentId])).rows.length)
+    throw new FinError(409,'El documento ya tiene conceptos registrados');
+   if(!['Pagar','Cobrar'].includes(d.tipo))throw new FinError(409,'El documento no tiene dirección (pago o cobro); revisa su ingesta');
+   return d;
+  };
+  await check(this.pool);
+  // The OCR runs outside the transaction: no row stays locked while it reads.
+  let result;
+  try{
+   const url=await ocr.start(content,type),until=Date.now()+timeoutMs;
+   for(;;){result=await ocr.poll(url);if(!['running','notStarted'].includes(result.status))break;
+    if(Date.now()>until)throw new FinError(504,'El lector tarda más de lo normal; inténtalo de nuevo en un momento');await sleep(pollMs);}
+  }catch(e){if(e instanceof FinError)throw e;throw new FinError(e.transient===false?422:503,e.transient===false?'El lector no ha podido procesar el archivo':'El lector de documentos no está disponible; inténtalo de nuevo en un momento');}
+  if(result.status!=='succeeded')throw new FinError(422,'El lector no ha podido leer el documento');
+  const hash=createHash('sha256').update(content).digest('hex');
+  const lines=extractLines(result).map(l=>({...l,evidence:{...l.evidence,attached_detail:true,attachment_sha256:hash}}));
+  if(!lines.length)throw new FinError(422,'No se han encontrado productos en el documento adjunto');
+  return this.finance.transaction(async c=>{
+   const d=await check(c);
+   const r=await storeInvoiceLines(c,documentId,lines,{currency:'EUR',direction:d.tipo,actorId:this.user.id,reason:'Detalle de productos adjuntado en Concepto de movimientos'});
+   if(!r?.balanced){
+    const read=lines.map(l=>cents(l.gross_amount));
+    const sum=read.every(n=>n!==null)?decimal(read.reduce((a,n)=>a+n,0n)):null;
+    const total=decimal(cents(d.total)<0n?-cents(d.total):cents(d.total));
+    // Throwing rolls back the lines stored without records (and any envelope).
+    throw new FinError(422,sum===null
+     ?`Se han leído ${lines.length} productos, pero no se han podido cuadrar sus importes con el total del documento (${total} €). Adjunta un documento con el importe de cada producto.`
+     :`Los productos leídos suman ${sum} € y el documento ${d.numerodocumento||''} ${total} €: no cuadran, así que no se ha registrado nada.`);
+   }
+   await c.query('INSERT INTO ledens.bridge_events(document_id,bank_movement_id,actor_id,action,detail) VALUES($1,$2,$3,$4,$5)',
+    [documentId,id,this.user.id,'detail_attached',JSON.stringify({lineas:r.line_count,attachment_sha256:hash,type})]);
+   return {document_id:documentId,lineas:r.line_count};
+  }).then(async res=>({...res,movimiento:await this.movementRow(id)}));
  }
  // A bank payment with no document classified as materials: a material expense
  // tied to the movement, signed like the import (a cost is negative there). It is

@@ -26,13 +26,48 @@ const choices = (r) => (r.sentido === 'cobro' ? ['clientes', ...(refundable(r) ?
 // A registered supplier refund is a material: it is not reclassified from here.
 const canClassify = (r) => !r.lote && r.clase !== 'reembolso_proveedor' && choices(r).some((c) => c !== r.clase);
 
-function Classify({ row, onClose, onDone }) {
+const MAX_DETAIL = 4 * 1024 * 1024; // what the invoice reader (F0) accepts
+
+/* «Adjuntar detalle»: a document reconciled with the movement has no concepts, so
+ * the movement cannot be classified. The file with the detail of its products is
+ * read on the server; its lines become the document's concepts only when they add
+ * up to its total. */
+function DetailUpload({ movement, doc, onRead }) {
+  const [file, setFile] = useState(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const pick = (e) => {
+    const f = e.target.files?.[0] || null; setError('');
+    if (f && f.size > MAX_DETAIL) { setFile(null); setError('El archivo supera 4 MB, el máximo que admite el lector.'); return; }
+    setFile(f);
+  };
+  const read = async () => {
+    setBusy(true); setError('');
+    try { onRead(await api.attachDocumentDetail(movement.id, doc.id, file)); }
+    catch (e) { setError(e.message); setBusy(false); }
+  };
+  return (
+    <div className="fin-card">
+      <p><strong>{doc.numerodocumento || 'Documento sin número'}</strong> · {eur(Math.abs(Number(doc.total)))} · <span className="fin-muted">sin conceptos registrados</span></p>
+      <p className="fin-muted fin-small">Adjunta el documento con el detalle de los productos (albarán, ticket o copia de la factura). Se leerán sus líneas y se registrarán como conceptos si suman el total del documento.</p>
+      <label className="fin-field"><span>Documento con el detalle (PDF, JPG o PNG, máx. 4 MB)</span>
+        <input type="file" accept="application/pdf,image/jpeg,image/png" disabled={busy} onChange={pick} /></label>
+      <button type="button" className="fin-btn" disabled={!file || busy} onClick={read}>{busy ? 'Leyendo productos…' : 'Leer productos'}</button>
+      {error ? <p className="fin-error-inline" role="alert">{error}</p> : null}
+    </div>
+  );
+}
+
+function Classify({ row: initial, onClose, onDone }) {
+  // Attaching a detail changes the movement (its records and version): keep the latest.
+  const [row, setRow] = useState(initial), [read, setRead] = useState('');
   const options = choices(row).filter((c) => c !== row.clase);
   const [clase, setClase] = useState(options[0] || ''), [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false), [error, setError] = useState('');
   // Changing what is already classified needs a reason; a first classification does not.
   const needsReason = row.conocidas.length > 0;
   const withRecords = row.registros > 0;
+  const missing = row.sin_conceptos || [];
+  const blocked = missing.length > 0;
+  const onRead = (res) => { setRow(res.movimiento); setRead(`Se han registrado ${res.lineas} conceptos del documento.`); };
   const save = async () => {
     setSaving(true); setError('');
     try { onDone(await api.classifyMovement(row.id, { clase, version: row.version, reason: reason.trim() || undefined })); }
@@ -42,7 +77,7 @@ function Classify({ row, onClose, onDone }) {
     <Dialog title="Clasificar movimiento" onClose={() => !saving && onClose()}
       actions={<>
         <button type="button" className="fin-btn is-ghost" disabled={saving} onClick={onClose}>Cancelar</button>
-        <button type="button" className="fin-btn is-primary" disabled={saving || !clase || (needsReason && reason.trim().length < 5)} onClick={save}>{saving ? 'Guardando…' : 'Guardar'}</button>
+        <button type="button" className="fin-btn is-primary" disabled={saving || !clase || blocked || (needsReason && reason.trim().length < 5)} onClick={save}>{saving ? 'Guardando…' : 'Guardar'}</button>
       </>}>
       <p><strong>{row.concepto || row.referencia || 'Movimiento'}</strong> · {row.tercero || '—'} · {eur(row.importe)} · {fecha(row.fecha)}</p>
       <p className="fin-muted fin-small">
@@ -63,6 +98,12 @@ function Classify({ row, onClose, onDone }) {
           ))}
         </fieldset>
       ) : <p>No hay otra clasificación posible para este movimiento.</p>}
+      {read ? <p className="fin-muted fin-small" role="status"><i className="ri-checkbox-circle-line"></i> {read}</p> : null}
+      {blocked && clase === 'materiales' ? (
+        <div className="fin-stack">
+          {missing.map((d) => <DetailUpload key={d.id} movement={row} doc={d} onRead={onRead} />)}
+        </div>
+      ) : blocked ? <p className="fin-error-inline">{missing.length === 1 ? `El documento ${missing[0].numerodocumento || 'conciliado'} no tiene conceptos registrados` : 'Hay documentos conciliados sin conceptos registrados'}: para clasificarlo como pago de materiales puedes adjuntar el detalle de sus productos.</p> : null}
       <label className="fin-field"><span>{needsReason ? 'Motivo del cambio' : 'Motivo (opcional)'}</span>
         <input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder="Ej. es la factura de Obramat del baño" /></label>
       {error ? <p className="fin-error-inline" role="alert">{error}</p> : null}
