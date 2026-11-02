@@ -245,3 +245,17 @@
 .fin-choice:has(input:checked) { border-color: #3E4D85; background: #F2F4FA; }
 .fin-choice input { margin-top: 3px; }
 .fin-cash-actions { display: flex; gap: 4px; align-items: center; white-space: nowrap; }
+
+/* Rentabilidad por proyecto */
+.fin-pad { padding: 16px 18px 0; }
+.fin-rent-picker { display: flex; align-items: center; gap: 6px; }
+.fin-rent-picker > :first-child { flex: 1; min-width: 0; }
+.fin-rent-chart { position: relative; }
+.fin-rent-scroll { overflow-x: auto; }
+.fin-rent-scroll svg { display: block; }
+.fin-rent-bar { cursor: pointer; outline: none; }
+.fin-rent-bar:focus-visible path { stroke: #1F1F1D; stroke-width: 2; }
+.fin-rent-tip { min-height: 44px; margin-top: 8px; font-size: 13px; }
+.fin-rent-tip div { margin-top: 2px; color: #4A4A47; }
+.fin-rent-pos { color: #2F6B63; }
+.fin-rent-neg { color: #B84371; }

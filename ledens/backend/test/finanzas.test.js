@@ -104,3 +104,20 @@ test('pending invoice items expose their shared document number, line number, SK
  await svc.finance.transaction(c=>storeInvoiceLines(c,d,[{line_number:1,description:'Cemento',quantity:2,product_code:'CEM-01',net_amount:50,vat_amount:10.5},{line_number:2,description:'Pintura',quantity:1,product_code:'PIN-02',net_amount:50,vat_amount:10.5}],{direction:'Pagar',currency:'EUR'}));
  const rows=(await svc.listRecords({pending:true,q:'ITEMS-DOC-01'})).rows;assert.equal(rows.length,2);assert.deepEqual(rows.map(r=>r.line_number).sort(),[1,2]);assert.ok(rows.every(r=>r.numerodocumento==='ITEMS-DOC-01'&&r.project_id===null));assert.equal(rows.find(r=>r.concepto==='Cemento').quantity,'2');assert.equal(rows.find(r=>r.concepto==='Pintura').product_code,'PIN-02');
 });
+test('rentabilidad por proyecto: ingresos − costes of every assigned record, approved or not',async()=>{
+ const [p3,p4]=(await db.query("INSERT INTO ledens.projects(name,project_id) VALUES('Nerja','OBRA-R3'),('Ronda','OBRA-R4') RETURNING id")).rows.map(x=>x.id);
+ const mat=await source();await svc.distribute({type:mat.type,id:mat.id,version:mat.version,requestId:randomUUID(),parts:[{projectId:p3,amount:'1000'},{projectId:p4,amount:'200'}]});
+ const cid=(await db.query("INSERT INTO ledens.customer_payments(total,cliente,occurred_on) VALUES(5000,'Cliente Nerja','2025-09-10') RETURNING id")).rows[0].id;
+ const cobro=await svc.getRecord('cliente',cid);await assign(cobro,p3);
+ const all=await svc.projectResults({});
+ const nerja=all.proyectos.find(p=>p.id===p3),ronda=all.proyectos.find(p=>p.id===p4);
+ assert.equal(Number(nerja.ingresos),5000);assert.equal(Number(nerja.costes),1000);assert.equal(Number(nerja.resultado),4000);assert.equal(nerja.movimientos,2);
+ assert.equal(Number(ronda.resultado),-200);
+ const only=await svc.projectResults({project:p4});
+ assert.equal(only.total,1);assert.equal(only.rows[0].project_id,p4);assert.equal(only.rows[0].asignado,'200');assert.equal(Number(only.rows[0].resultado),-200);
+ assert.ok(only.proyectos.some(p=>p.id===p3),'the chart keeps every project');
+ assert.equal((await svc.projectResults({project:p3,tipo:'ingresos'})).total,1);
+ assert.equal((await svc.projectResults({project:p3,contable:'aprobado'})).total,0);
+ await assert.rejects(svc.projectResults({tipo:'x'}),{status:400});
+ const restricted=new FinanzasService(pool,jefe);assert.ok((await restricted.projectResults({})).proyectos.every(p=>p.id===p1));
+});

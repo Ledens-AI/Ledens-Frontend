@@ -27,7 +27,7 @@ const INTRO = {
   conciliacion: 'Movimientos bancarios pendientes de conciliar con sus documentos. Pulsa «Asignar documento» para conciliar un movimiento con una factura existente, o selecciona los pagos de nóminas y pulsa «Pago a trabajadores» para segregarlos.',
   bridge:'Enlaces entre movimientos y documentos existentes, con importes, estado y motivo de conciliación.',
   'pendiente-trabajador': 'Pagos a trabajadores segregados de un movimiento bancario: más de 450 € en pagos de 100 € (Oficial), 450 € o menos en pagos de 60 € (Ayudante). Asigna trabajador y proyecto a cada uno y guárdalo.',
-  rentabilidad: 'Costes imputados, cobros y margen previsto de un proyecto.',
+  rentabilidad: 'Resultado (ingresos − costes) de cada proyecto a partir de los movimientos asignados, validados o no. Pulsa una barra o elige un proyecto para ver solo sus movimientos.',
   proyectos: 'Alta y edición de proyectos: código, cliente, dirección, estado y fechas. Los cambios quedan en la auditoría.',
   logs: 'Cada ejecución de los procesos de transacciones: cuándo empieza, si termina bien, si se rechaza o si falla, con su duración y el registro afectado.',
   trabajadores: 'Alta, edición, baja y reactivación de trabajadores. Una baja no borra nada: el trabajador conserva sus pagos y deja de ofrecerse para pagos nuevos.',
@@ -85,8 +85,7 @@ export default function GestionFinanciera({ tab, go, toast, onPending, onBridgeP
       {tab === 'trabajadores' ? <Trabajadores toast={toast} /> : null}
       {tab === 'logs' ? <Logs /> : null}
       {tab === 'rentabilidad' ? (
-        <Rentabilidad project={rentProject} onProject={setRentProject} version={version} go={go}
-          drill={(t) => { setDrill({ tab: t, project: rentProject }); go(t); }} />
+        <Rentabilidad project={rentProject} onProject={setRentProject} version={version} toast={toast} />
       ) : null}
     </div>
   );
