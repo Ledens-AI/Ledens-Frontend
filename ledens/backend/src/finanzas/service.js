@@ -511,6 +511,39 @@ export class FinanzasService {
   }
   return {evaluados:rows.length,clasificados:results.filter(r=>r.ok).length,errores:results.filter(r=>!r.ok).length,results};
  }
+ // Read-only diagnosis of one movement (admins): everything Concepto de
+ // movimientos decides from, including excluded records and their last events,
+ // so a movement that cannot be classified can be explained without database
+ // access. Reads only; never changes anything.
+ async movementDiagnosis(id){
+  if(this.user.role!=='admin')throw new FinError(403,'El diagnóstico de movimientos requiere administrador');
+  if(!uuid(id))throw new FinError(404,'Movimiento no encontrado');
+  const one=async(sql,p=[id])=>(await this.query(sql,p)).rows;
+  const bank=(await one(`SELECT id,source_id,completed_on::text fecha,type,state,description,reference,payer,beneficiary_name,total_amount::text total_amount,currency,is_internal_transfer
+   FROM ledens.bank_movements WHERE id=$1`))[0]||null;
+  const cash=bank?null:(await one(`SELECT id,kind,amount::text amount,occurred_on::text fecha,concept,counterparty,assigned_to,material_id,customer_payment_id FROM ledens.cash_movements WHERE id=$1`))[0]||null;
+  if(!bank&&!cash)throw new FinError(404,'Movimiento no encontrado');
+  const fila=(await one((await this.movementsSql())+MOVEMENT_COLUMNS+' FROM fin WHERE id=$1'))[0]||null;
+  const purchases=await hasPurchases(this.pool);
+  const documentos=bank?await one(`SELECT a.document_id,d.numerodocumento,d.tipo,d.total::text total,d.tercero,a.state,a.allocated_amount::text asignado,
+    (SELECT count(*)::int FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded') conceptos_activos,
+    (SELECT count(*)::int FROM ledens.financial_records r WHERE r.document_id=d.id AND NOT (r.source_valid AND r.status<>'excluded')) conceptos_excluidos,
+    ${purchases?'(SELECT pd.kind FROM ledens.purchase_documents pd WHERE pd.document_id=d.id)':'NULL'} compra_nativa
+   FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id WHERE a.bank_movement_id=$1 ORDER BY d.numerodocumento`):[];
+  const registros=await one(`SELECT r.id,CASE WHEN r.material_id IS NOT NULL THEN 'material' WHEN r.worker_payment_id IS NOT NULL THEN 'trabajador' WHEN r.customer_payment_id IS NOT NULL THEN 'cliente' ELSE 'concepto' END tipo,
+    r.material_id,r.worker_payment_id,r.customer_payment_id,r.document_id,r.bank_movement_id,r.category,r.status,r.source_valid,r.gross_amount::text importe,r.created_at,
+    (SELECT json_agg(e ORDER BY e.id DESC) FROM (SELECT e.id,e.action,e.reason,e.created_at FROM ledens.finance_events e WHERE e.record_id=r.id ORDER BY e.id DESC LIMIT 5) e) eventos,
+    (SELECT json_agg(json_build_object('project_id',pa.project_id,'importe',pa.allocated_amount)) FROM ledens.project_financial_allocations pa WHERE pa.record_id=r.id) obras
+   FROM ledens.financial_records r WHERE r.bank_movement_id=$1
+    OR r.document_id IN(SELECT document_id FROM ledens.bank_document_allocations WHERE bank_movement_id=$1)
+    OR r.material_id IN(SELECT id FROM ledens.material_expenses WHERE bank_movement_id=$1)
+    OR r.material_id=$2 OR r.customer_payment_id=$3
+   ORDER BY r.created_at,r.id`,[id,cash?.material_id||null,cash?.customer_payment_id||null]);
+  const provisionales=bank?await one(`SELECT material_id,created_at,replaced_at,replaced_by_document_id,carried_project_id FROM ledens.provisional_material_payments WHERE bank_movement_id=$1`):[];
+  const lote=(await one('SELECT id,role,total_amount::text total FROM ledens.worker_payment_batches WHERE bank_movement_id=$1 OR cash_movement_id=$1'))[0]||null;
+  const transferencia=bank&&await hasTransfers(this.pool)?(await one('SELECT marked_at,reason FROM ledens.internal_transfers WHERE bank_movement_id=$1'))[0]||null:null;
+  return {movimiento:bank||cash,origen:bank?'banco':'efectivo',fila,documentos,registros,provisionales,lote,transferencia};
+ }
  // Sidebar badge of «Concepto de movimientos»: movements still pending of classification.
  async movementsPending(){
   if(this.user.role!=='admin')throw new FinError(403,'Clasificar movimientos requiere administrador');

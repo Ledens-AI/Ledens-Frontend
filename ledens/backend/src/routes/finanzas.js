@@ -143,6 +143,8 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     res.json(await svc(req).applyObramatRule());
   }));
   router.get('/movimientos/pendientes', handle(async (req, res) => { res.json(await svc(req).movementsPending()); }));
+  // Read-only diagnosis of one movement (admins): GET /api/finanzas/movimientos/:id/diagnostico.
+  router.get('/movimientos/:id/diagnostico', handle(async (req, res) => { res.json(await svc(req).movementDiagnosis(req.params.id)); }));
   router.get('/movimientos', handle(async (req, res) => {
     res.json(await svc(req).movements({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), clase: req.query.clase || '', from: req.query.desde, to: req.query.hasta }));
   }));

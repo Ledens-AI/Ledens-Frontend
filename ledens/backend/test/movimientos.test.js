@@ -206,3 +206,17 @@ test('a provisional payment replaced by an invoice that later lost its concepts 
  const b4=await mov(-12,'Pago parcial');await material(b4,-5,null);
  await assert.rejects(classify(b4,'materiales'),{status:409,message:/no se puede recuperar/});
 });
+
+test('the read-only diagnosis of a movement shows its documents, records with their last events and provisional payment',async()=>{
+ const b=(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES('MOV-diag',-15,-15,'2026-09-26','Pago diagnóstico','EUR','COMPLETED') RETURNING id`)).rows[0].id;
+ const {materialId,recordId}=await classify(b,'materiales');
+ const dg=await asAdmin().movementDiagnosis(b);
+ assert.equal(dg.origen,'banco');assert.equal(dg.movimiento.id,b);
+ assert.deepEqual([dg.fila.clase,dg.fila.origen],['materiales','provisional']);
+ assert.deepEqual(dg.registros.map(r=>[r.id,r.tipo,r.status]),[[recordId,'material','pending']]);
+ assert.equal(dg.provisionales[0].material_id,materialId);
+ assert.ok(Array.isArray(dg.documentos)&&dg.lote===null);
+ await assert.rejects(new FinanzasService(pool,jefe).movementDiagnosis(b),{status:403});
+ await assert.rejects(asAdmin().movementDiagnosis('nada'),{status:404});
+});
