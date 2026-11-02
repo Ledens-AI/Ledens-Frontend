@@ -17,7 +17,10 @@ export class BridgeWorkspace {
  constructor(pool){this.pool=pool;}
  async movements(filters={}){
   const f=page(filters),workers=Boolean((await this.pool.query("SELECT to_regclass('ledens.worker_payment_batches') name")).rows[0].name);
+  // Transfers between the company's accounts marked in Concepto de movimientos (027) are not pending.
+  const transfers=Boolean((await this.pool.query("SELECT to_regclass('ledens.internal_transfers') name")).rows[0].name);
   const where=`NOT coalesce(b.is_internal_transfer,false)
+   ${transfers?'AND NOT EXISTS(SELECT 1 FROM ledens.internal_transfers it WHERE it.bank_movement_id=b.id)':''}
    ${workers?'AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=b.id)':''}
    ${filters.withoutCustomerPayments?'AND NOT EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=b.id)':''}
    AND ($1::boolean=false OR x.links=0 OR x.review_links>0 OR x.confirmed<>b.total_amount)

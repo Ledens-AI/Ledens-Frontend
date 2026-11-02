@@ -44,7 +44,7 @@ test('every movement appears once with the class concluded from the Bridge, or p
  assert.deepEqual([(await row(m.factura.id)).clase,(await row(m.factura.id)).origen,(await row(m.factura.id)).documentos],['pendiente','bridge','F-AZULEJOS']);
  assert.deepEqual([(await row(m.material.id)).clase,(await row(m.material.id)).origen],['materiales','bridge']);
  for(const id of [m.pago.id,m.cobro.id,m.nomina.id,m.bare.id,m.cash.id])assert.equal((await row(id)).clase,'pendiente');
- assert.deepEqual(all.resumen,{pendiente:6,materiales:1,trabajadores:0,clientes:0,reembolso_proveedor:0,mixto:0});
+ assert.deepEqual(all.resumen,{pendiente:6,materiales:1,trabajadores:0,clientes:0,reembolso_proveedor:0,transferencia:0,mixto:0});
  assert.equal((await list({clase:'pendiente'})).total,6);
  assert.deepEqual(await asAdmin().movementsPending(),{pendientes:6},'the sidebar badge counts the same pending movements');
  await assert.rejects(new FinanzasService(pool,jefe).movementsPending(),{status:403});
