@@ -61,11 +61,15 @@ test('a refund whose credit note has concepts is registered once, from the movem
  assert.equal((await db.query("SELECT count(*)::int n FROM ledens.finance_events e JOIN ledens.financial_records r ON r.id=e.record_id WHERE r.document_id=$1 AND e.action='refund_replaced'",[m.otroDoc])).rows[0].n,1);
 });
 
-test('«Regla Obramat» classifies every pending Obramat movement as materials, as the system',async()=>{
+test('«Regla Obramat» classifies every pending, reconciled Obramat movement as materials, as the system',async()=>{
  const before=(await rows()).filter(r=>r.obramat&&r.clase==='pendiente').map(r=>r.id).sort();
  assert.deepEqual(before,[m.compra,m.refund,m.suelto].sort());
  const res=await system().applyObramatRule();
- assert.deepEqual([res.evaluados,res.clasificados,res.errores],[3,3,0]);
+ assert.deepEqual([res.evaluados,res.clasificados,res.errores],[2,2,0]);
+ // Without a reconciled document it waits: it could still turn out to be a native advance.
+ assert.equal((await row(m.suelto)).clase,'pendiente');
+ assert.equal((await db.query('SELECT count(*)::int n FROM ledens.material_expenses WHERE bank_movement_id=$1',[m.suelto])).rows[0].n,0);
+ await classify(m.suelto,'materiales');
  assert.equal((await row(m.compra)).clase,'materiales');
  assert.deepEqual((await db.query('SELECT category FROM ledens.financial_records WHERE id=ANY($1::uuid[])',[m.compraLines])).rows.map(r=>r.category),['materials','materials']);
  assert.deepEqual([(await row(m.refund)).clase,(await row(m.suelto)).clase,(await row(m.suelto)).origen],['reembolso_proveedor','materiales','provisional']);

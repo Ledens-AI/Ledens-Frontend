@@ -375,12 +375,14 @@ export class FinanzasService {
  }
  // «Regla Obramat»: every pending Obramat movement is classified as Pago de
  // materiales (a receipt, as Reembolso de proveedor), through classifyMovement,
- // so each one follows the usual paths and checks. Runs after each periodic
+ // so each one follows the usual paths and checks. Only movements the Bridge has
+ // already reconciled with a document: before that, it could not tell a native
+ // advance (no record must be created) from an ordinary purchase. Runs after each periodic
  // Bridge run and from Concepto de movimientos; what cannot be classified stays
  // pending with its reason.
  async applyObramatRule({limit=200}={}){
   if(this.user.role!=='admin')throw new FinError(403,'Clasificar movimientos requiere administrador');
-  const rows=(await this.query(await this.movementsSql()+" SELECT id,version,importe FROM fin WHERE obramat AND clase='pendiente' ORDER BY fecha,id LIMIT $1",[Math.min(500,Math.max(1,Number(limit)||200))])).rows;
+  const rows=(await this.query(await this.movementsSql()+" SELECT id,version,importe FROM fin WHERE obramat AND clase='pendiente' AND n_docs>0 ORDER BY fecha,id LIMIT $1",[Math.min(500,Math.max(1,Number(limit)||200))])).rows;
   const results=[];
   for(const r of rows){
    const clase=Number(r.importe)>0?'reembolso_proveedor':'materiales';
