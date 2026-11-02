@@ -2,9 +2,11 @@ import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {FinanzasService} from '../src/finanzas/service.js';
-// «Adjuntar detalle» in Concepto de movimientos on PGlite: a reconciled document
-// without concepts gets them from the OCR of an attached file. Synthetic rows only.
-let db,pool,admin,jefe,mov,doc;
+// A payment reconciled with an invoice without concepts: Concepto de movimientos
+// classifies it as a provisional material, and «Segregar conceptos» in Materiales
+// pendiente de asignación reports the missing concepts and takes the attached
+// detail of the products (read by a stand-in OCR). Synthetic rows only.
+let db,pool,admin,jefe,mov,doc,material;
 const asAdmin=()=>new FinanzasService(pool,admin);
 const PDF=Buffer.from('%PDF-1.4 detalle');
 const field=(amount)=>({valueCurrency:{amount,currencyCode:'EUR'},confidence:0.95});
@@ -26,14 +28,25 @@ before(async()=>{
 });
 after(()=>db?.close());
 const row=async()=>(await asAdmin().movements({pageSize:100})).rows.find(r=>r.id===mov);
+const pending=async()=>(await asAdmin().listRecords({type:'material',pending:true,pageSize:100})).rows;
 const attach=(result,extra={})=>asAdmin().attachDocumentDetail({id:mov,documentId:doc,content:PDF,ocr:reader(result),pollMs:1,...extra});
-const records=async()=>(await db.query("SELECT gross_amount::text gross FROM ledens.financial_records WHERE document_id=$1 AND source_valid AND status<>'excluded' ORDER BY gross_amount",[doc])).rows.map(r=>r.gross);
+const records=async()=>(await db.query("SELECT gross_amount::text gross,category FROM ledens.financial_records WHERE document_id=$1 AND source_valid AND status<>'excluded' ORDER BY gross_amount",[doc])).rows;
 
-test('the movement lists the reconciled document without concepts and classifying it says so',async()=>{
+test('Concepto de movimientos classifies it as Pago de materiales: a provisional material, no error about the concepts',async()=>{
  const r=await row();
- assert.deepEqual(r.sin_conceptos,[{id:doc,numerodocumento:'008-0010-471790',total:'-40'}]);
- await assert.rejects(asAdmin().classifyMovement({id:mov,clase:'materiales',version:r.version}),
-  e=>e.status===409&&/adjunta el documento con el detalle/.test(e.message)&&e.extra.sin_conceptos[0].id===doc);
+ assert.equal(r.clase,'pendiente');
+ const res=await asAdmin().classifyMovement({id:mov,clase:'materiales',version:r.version});
+ assert.equal(res.via,'material');material=res.materialId;
+ assert.deepEqual([(await row()).clase,(await row()).origen],['materiales','provisional']);
+ const p=(await pending()).find(x=>x.id===material);
+ assert.equal(p.provisional,true);
+ assert.equal((await pending()).filter(x=>x.provisional).length,1,'only the provisional payment can be segregated');
+});
+
+test('«Segregar conceptos» reports the invoice without concepts, with what the dialog needs',async()=>{
+ await assert.rejects(asAdmin().segregateMaterial(material),e=>e.status===409&&/008-0010-471790 no tiene conceptos registrados/.test(e.message)&&
+  e.extra.movimiento_id===mov&&e.extra.sin_conceptos[0].id===doc&&e.extra.sin_conceptos[0].total==='-40');
+ await assert.rejects(new FinanzasService(pool,jefe).segregateMaterial(material),{status:403});
 });
 
 test('a detail that does not add up to the document stores nothing',async()=>{
@@ -54,17 +67,19 @@ test('format, size, role, link and reader are checked before reading',async()=>{
  await assert.rejects(asAdmin().attachDocumentDetail({id:mov,documentId:other,content:PDF,ocr:reader(reading([40],40))}),{status:404,message:/no está conciliado/});
 });
 
-test('a detail that adds up becomes the document concepts, audited, and the movement can be classified as materiales',async()=>{
+test('a detail that adds up becomes the invoice concepts and replaces the provisional payment, audited',async()=>{
  const calls=[];
  const res=await asAdmin().attachDocumentDetail({id:mov,documentId:doc,content:PDF,ocr:reader(reading([25,15],40),{calls})});
  assert.deepEqual(calls,['application/pdf']);
- assert.equal(res.lineas,2);
- assert.deepEqual(res.movimiento.sin_conceptos,[]);
- assert.equal(res.movimiento.registros,2);
- assert.deepEqual(await records(),['15.00','25.00']);
+ assert.deepEqual([res.lineas,res.segregado],[2,true]);
+ assert.deepEqual(await records(),[{gross:'15.00',category:'materials'},{gross:'25.00',category:'materials'}],'the lines inherit Pago de materiales');
+ assert.equal((await db.query("SELECT status FROM ledens.financial_records WHERE material_id=$1",[material])).rows[0].status,'excluded');
+ const left=await pending();
+ assert.ok(!left.some(x=>x.id===material),'the provisional payment leaves the list');
+ assert.deepEqual(left.filter(x=>x.document_id===doc).map(x=>x.concepto).sort(),['Producto 1','Producto 2']);
+ assert.deepEqual([(await row()).clase,(await row()).origen],['materiales','bridge']);
  const ev=(await db.query("SELECT actor_id,detail FROM ledens.bridge_events WHERE document_id=$1 AND action='detail_attached'",[doc])).rows;
  assert.equal(ev.length,1);assert.equal(ev[0].actor_id,admin.id);assert.equal(ev[0].detail.lineas,2);assert.match(ev[0].detail.attachment_sha256,/^[0-9a-f]{64}$/);
- const done=await asAdmin().classifyMovement({id:mov,clase:'materiales',version:res.movimiento.version});
- assert.deepEqual([done.via,done.changed],['registros',2]);
  await assert.rejects(attach(reading([40],40)),{status:409,message:/ya tiene conceptos/});
+ await assert.rejects(asAdmin().segregateMaterial(material),{status:409,message:/No es un pago de materiales provisional/});
 });

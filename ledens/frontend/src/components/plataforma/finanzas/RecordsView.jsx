@@ -4,6 +4,7 @@ import { eur, num, fecha, TIPO, ESTADO } from './format.js';
 import ProjectPicker from './ProjectPicker.jsx';
 import RecordDrawer from './RecordDrawer.jsx';
 import { Kpi, Badge, Dialog, Empty, ErrorBox, Pager } from './ui.jsx';
+import SegregarConceptos from './SegregarConceptos.jsx';
 
 const key = (r) => r.type + ':' + r.id;
 const EMPTY_FILTERS = { q: '', tipo: '', estado: '', proyecto: null, desde: '', hasta: '', min: '', max: '' };
@@ -313,7 +314,9 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
                         ) : null}
                       </td>}
                       <td>{busy[k] ? <span className="fin-muted">Guardando…</span> : st ? <Badge bg="#FBF1DE" fg="#7A4E0E">Sin guardar</Badge> : <Badge {...ESTADO[r.estado]}>{ESTADO[r.estado].label}</Badge>}</td>
-                      {readOnly ? null : <td><button type="button" className="fin-iconbtn" aria-label="Ver detalle y editar" title="Ver detalle y editar" onClick={() => setOpen(r)}><i className="ri-side-bar-line"></i></button></td>}
+                      {readOnly ? null : <td className="fin-nowrap">
+                        {r.provisional ? <button type="button" className="fin-iconbtn" aria-label="Segregar conceptos de la factura" title="Segregar conceptos de la factura" onClick={() => setDialog({ kind: 'segregar', row: r })}><i className="ri-scissors-cut-line"></i></button> : null}
+                        <button type="button" className="fin-iconbtn" aria-label="Ver detalle y editar" title="Ver detalle y editar" onClick={() => setOpen(r)}><i className="ri-side-bar-line"></i></button></td>}
                     </tr>
                   );
                 })}
@@ -385,6 +388,10 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
             <textarea rows={2} maxLength={500} value={dialog.note} onChange={(e) => setDialog({ ...dialog, note: e.target.value })} /></label>
           {dialog.error ? <div className="fin-error-inline">{dialog.error}</div> : null}
         </Dialog>
+      ) : null}
+
+      {dialog?.kind === 'segregar' ? (
+        <SegregarConceptos row={dialog.row} onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />
       ) : null}
 
       {dialog?.kind === 'result' ? (

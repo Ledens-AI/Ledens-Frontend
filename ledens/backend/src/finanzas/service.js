@@ -75,29 +75,27 @@ const MOVEMENTS_SQL=`WITH links AS(SELECT bank_movement_id,document_id FROM lede
  agg AS(SELECT mov,count(*)::int n,array_agg(DISTINCT ${CAT_CLASE('category')}) clases,md5(string_agg(id::text||':'||version,',' ORDER BY id)) version FROM recs GROUP BY mov),
  movs AS(
   SELECT b.id,'banco'::text tipo,b.completed_on fecha,coalesce(b.beneficiary_name,b.payer) tercero,coalesce(nullif(b.description,''),b.reference) concepto,b.source_id referencia,b.total_amount importe,
-   d.documentos,coalesce(d.n,0) n_docs,coalesce(d.sin_registros,false) doc_sin_registros,coalesce(d.sin_conceptos,'[]'::json) sin_conceptos,
+   d.documentos,coalesce(d.n,0) n_docs,coalesce(d.sin_registros,false) doc_sin_registros,
    EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=b.id) lote,
    EXISTS(SELECT 1 FROM ledens.provisional_material_payments pm WHERE pm.bank_movement_id=b.id AND pm.replaced_at IS NULL) provisional
   FROM ledens.bank_movements b LEFT JOIN LATERAL(SELECT string_agg(DISTINCT coalesce(dd.numerodocumento,'Sin número'),', ') documentos,count(*)::int n,
-    bool_or(NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=dd.id AND r.source_valid AND r.status<>'excluded')) sin_registros,
-    json_agg(json_build_object('id',dd.id,'numerodocumento',dd.numerodocumento,'total',dd.total::text) ORDER BY dd.numerodocumento)
-     FILTER(WHERE NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=dd.id AND r.source_valid AND r.status<>'excluded')) sin_conceptos
+    bool_or(NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=dd.id AND r.source_valid AND r.status<>'excluded')) sin_registros
    FROM links l JOIN ledens.documents dd ON dd.id=l.document_id WHERE l.bank_movement_id=b.id) d ON true
   WHERE NOT coalesce(b.is_internal_transfer,false) AND b.total_amount<>0
   UNION ALL
-  SELECT k.id,'efectivo',k.occurred_on,k.counterparty,k.concept,'Efectivo',CASE WHEN k.kind='pago' THEN -k.amount ELSE k.amount END,NULL,0,false,'[]'::json,
+  SELECT k.id,'efectivo',k.occurred_on,k.counterparty,k.concept,'Efectivo',CASE WHEN k.kind='pago' THEN -k.amount ELSE k.amount END,NULL,0,false,
    EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=k.id),false
   FROM ledens.cash_movements k WHERE k.kind IN ('pago','cobro')),
  cls AS(SELECT m.*,coalesce(a.n,0) registros,coalesce(a.version,md5('')) version,
   ARRAY(SELECT DISTINCT e FROM unnest(array_remove(coalesce(a.clases,'{}'::text[]),'x')||CASE WHEN m.lote THEN ARRAY['trabajadores'] ELSE '{}'::text[] END) e ORDER BY e) conocidas,
-  ('x'=ANY(coalesce(a.clases,'{}'::text[])) OR m.doc_sin_registros) desconocido
+  ('x'=ANY(coalesce(a.clases,'{}'::text[])) OR (m.doc_sin_registros AND NOT m.provisional)) desconocido
   FROM movs m LEFT JOIN agg a ON a.mov=m.id),
  fin AS(SELECT c.*,CASE WHEN c.desconocido OR cardinality(c.conocidas)=0 THEN 'pendiente'
    WHEN cardinality(c.conocidas)=1 THEN CASE WHEN c.conocidas[1]='materiales' AND c.importe>0 THEN 'reembolso_proveedor' ELSE c.conocidas[1] END ELSE 'mixto' END clase,
   CASE WHEN c.importe<0 THEN 'pago' ELSE 'cobro' END sentido FROM cls c)`;
 // One row of «Concepto de movimientos» (list and single movement).
-const MOVEMENT_COLUMNS=' SELECT id,tipo,fecha::text fecha,tercero,concepto,referencia,importe::text importe,documentos,clase,conocidas,sentido,version,registros,lote,sin_conceptos,'+
- "CASE WHEN n_docs>0 THEN 'bridge' WHEN lote THEN 'trabajadores' WHEN provisional THEN 'provisional' WHEN registros>0 THEN 'registro' ELSE 'ninguno' END origen";
+const MOVEMENT_COLUMNS=' SELECT id,tipo,fecha::text fecha,tercero,concepto,referencia,importe::text importe,documentos,clase,conocidas,sentido,version,registros,lote,'+
+ "CASE WHEN provisional THEN 'provisional' WHEN n_docs>0 THEN 'bridge' WHEN lote THEN 'trabajadores' WHEN registros>0 THEN 'registro' ELSE 'ninguno' END origen";
 // «Adjuntar detalle»: the product detail of a reconciled document without
 // concepts is read with the invoice OCR (Document Intelligence, F0: 4 MB).
 export const DETAIL_MAX_BYTES=4*1024*1024;
@@ -147,6 +145,12 @@ export class FinanzasService {
   if(!Number.isInteger(page)||!Number.isInteger(pageSize))throw new FinError(400,'Paginación no válida');
   const rows=(await this.query(`${BASE} SELECT l.* FROM listed l ${where} ORDER BY l.${sorts[f.sort]||'fecha'} ${f.dir==='asc'?'ASC':'DESC'} NULLS LAST,l.id LIMIT ${pageSize} OFFSET ${(page-1)*pageSize}`,params)).rows;
   const t=(await this.query(`${BASE} SELECT count(*)::int n,coalesce(sum(importe),0)::text importe FROM listed l ${where}`,params)).rows[0];
+  // A provisional material payment waits for its invoice's concepts («Segregar conceptos»).
+  const mats=rows.filter(r=>r.type==='material').map(r=>r.id);
+  if(mats.length&&this.user.role==='admin'&&(await this.query("SELECT to_regclass('ledens.provisional_material_payments') IS NOT NULL ok")).rows[0].ok){
+   const open=new Set((await this.query('SELECT material_id FROM ledens.provisional_material_payments WHERE material_id=ANY($1::uuid[]) AND replaced_at IS NULL',[mats])).rows.map(r=>r.material_id));
+   for(const r of rows)if(r.type==='material')r.provisional=open.has(r.id);
+  }
   return {rows,total:t.n,totalImporte:t.importe,page,pageSize};
  }
  async pendingSummary(){
@@ -374,10 +378,12 @@ export class FinanzasService {
    if((await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1 OR cash_movement_id=$1',[id])).rows.length)
     throw new FinError(409,clase==='trabajadores'?'Ya está en pagos a trabajadores':'Está en Pendiente de trabajador: devuélvelo a conciliación desde esa pantalla para cambiarlo');
    if(b){
-    const bare=(await c.query(`SELECT d.id,d.numerodocumento,d.total FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id
+    const bare=(await c.query(`SELECT d.numerodocumento FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id
      WHERE a.bank_movement_id=$1 AND a.state='Confirmado' AND NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded')`,[id])).rows;
-    if(bare.length)throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; adjunta el documento con el detalle de sus productos o revisa su ingesta antes de clasificar el movimiento`,
-     {sin_conceptos:bare.map(d=>({id:d.id,numerodocumento:d.numerodocumento,total:String(d.total)}))});
+    // As Pago de materiales with nothing registered it becomes a provisional
+    // material (below): its concepts are segregated later, in Materiales
+    // pendiente de asignación, once the document has them.
+    if(bare.length&&!(clase==='materiales'&&!records.length))throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta antes de clasificar el movimiento`);
    }
    // A supplier refund is registered as a material from the movement itself. A
    // receipt that already has records (its reconciled document, a client receipt)
@@ -409,15 +415,32 @@ export class FinanzasService {
    return {id,clase,via:'material',...await this.materialPaymentOne(c,b)};
   });
  }
- async movementRow(id){
-  if(!uuid(id))throw new FinError(404,'Movimiento no encontrado');
-  const row=(await this.query(MOVEMENTS_SQL+MOVEMENT_COLUMNS+' FROM fin WHERE id=$1',[id])).rows[0];
-  if(!row)throw new FinError(404,'Movimiento no encontrado');
-  return row;
+ // «Segregar conceptos» in Materiales pendiente de asignación: a provisional
+ // material (a bank payment classified as Pago de materiales) is replaced by the
+ // concepts of the invoice the Bridge reconciled with its movement (026). When
+ // that invoice has no concepts, segregating fails with its number, and the
+ // admin can attach the document with the detail of its products (below).
+ async segregateMaterial(materialId){
+  if(this.user.role!=='admin')throw new FinError(403,'Segregar conceptos requiere administrador');
+  if(!uuid(materialId))throw new FinError(404,'Material no encontrado');
+  return this.finance.transaction(async c=>{
+   const p=(await c.query('SELECT * FROM ledens.provisional_material_payments WHERE material_id=$1 FOR UPDATE',[materialId])).rows[0];
+   if(!p||p.replaced_at)throw new FinError(409,'No es un pago de materiales provisional: no hay conceptos de factura que segregar');
+   const docs=(await c.query(`SELECT d.id,d.numerodocumento,d.total::text total,
+     EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded') conceptos
+     FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id
+     WHERE a.bank_movement_id=$1 AND a.state='Confirmado' ORDER BY d.numerodocumento,d.id`,[p.bank_movement_id])).rows;
+   if(!docs.length)throw new FinError(409,'El movimiento de este pago no tiene ninguna factura conciliada: concíliala en el Bridge para segregar sus conceptos');
+   const bare=docs.filter(d=>!d.conceptos);
+   if(bare.length)throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta o adjunta el documento con el detalle de sus productos para segregar sus conceptos`,
+    {movimiento_id:p.bank_movement_id,sin_conceptos:bare.map(({conceptos,...d})=>d)});
+   // Normally done by 026's triggers already; this covers a document whose records came first.
+   await c.query('SELECT ledens.replace_provisional_materials($1)',[p.bank_movement_id]);
+   return {material_id:materialId,segregado:true,documentos:docs.map(d=>d.numerodocumento)};
+  });
  }
- // «Adjuntar detalle» in Concepto de movimientos: a document the Bridge reconciled
- // with this bank movement has no concepts (its OCR found no lines), so the
- // movement cannot be classified. The admin attaches the document with the detail
+ // «Adjuntar detalle»: a document the Bridge reconciled with this bank movement
+ // has no concepts (its OCR found no lines). The admin attaches the document with the detail
  // of its products (albarán, ticket, invoice copy); the OCR reads its lines and
  // they become the document's concepts, through the same storeInvoiceLines as the
  // ingestion, only when they add up exactly to the document's total. Nothing is
@@ -467,7 +490,11 @@ export class FinanzasService {
    await c.query('INSERT INTO ledens.bridge_events(document_id,bank_movement_id,actor_id,action,detail) VALUES($1,$2,$3,$4,$5)',
     [documentId,id,this.user.id,'detail_attached',JSON.stringify({lineas:r.line_count,attachment_sha256:hash,type})]);
    return {document_id:documentId,lineas:r.line_count};
-  }).then(async res=>({...res,movimiento:await this.movementRow(id)}));
+  }).then(async res=>{
+   // 026's deferred trigger has replaced the provisional material by these concepts on commit.
+   const open=(await this.query('SELECT count(*)::int n FROM ledens.provisional_material_payments WHERE bank_movement_id=$1 AND replaced_at IS NULL',[id])).rows[0].n;
+   return {...res,segregado:open===0};
+  });
  }
  // A bank payment with no document classified as materials: a material expense
  // tied to the movement, signed like the import (a cost is negative there). It is

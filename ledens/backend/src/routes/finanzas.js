@@ -131,6 +131,11 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     const b = req.body || {};
     res.json(await svc(req).classifyMovement({ id: req.params.id, clase: b.clase, version: b.version, reason: b.reason }));
   }));
+  // «Segregar conceptos» (Materiales pendiente de asignación): a provisional material payment
+  // replaced by the concepts of its reconciled invoice; 409 with sin_conceptos when it has none.
+  router.post('/materiales/:materialId/segregar', traced('imputacion', 'Segregar conceptos de la factura', { entity: (req) => ({ type: 'material', id: req.params.materialId }), summary: (b) => ({ message: 'Pago provisional sustituido por los conceptos de ' + (b.documentos || []).join(', ') }) })(async (req, res) => {
+    res.json(await svc(req).segregateMaterial(req.params.materialId));
+  }));
   // «Adjuntar detalle»: the raw file (PDF, JPG or PNG) with the product detail of a
   // reconciled document that has no concepts; the OCR reads it (costs F0 quota,
   // so it has its own small limit).

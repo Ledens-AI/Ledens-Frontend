@@ -57,6 +57,8 @@ export const api = {
   // Concepto de movimientos (admins): every movement and its classification.
   movements: (f) => request('GET', '/api/finanzas/movimientos' + qs(f)),
   classifyMovement: (id, body) => request('PUT', `/api/finanzas/movimientos/${id}/clasificacion`, body),
+  // «Segregar conceptos» (Materiales pendiente de asignación): a provisional material payment.
+  segregateMaterial: (materialId) => request('POST', `/api/finanzas/materiales/${materialId}/segregar`, {}),
   // «Adjuntar detalle»: the file with the product detail of a reconciled document without concepts.
   attachDocumentDetail: (id, documentId, file) => request('POST', `/api/finanzas/movimientos/${id}/documentos/${documentId}/detalle`, file),
   reconciliation: (f) => request('GET', '/api/finanzas/conciliacion' + qs(f)),
