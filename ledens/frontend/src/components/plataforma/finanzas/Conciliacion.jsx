@@ -6,7 +6,7 @@ import { AssignCash, CashForm } from './Efectivo.jsx';
 import ProjectPicker from './ProjectPicker.jsx';
 import { Assignment } from './BridgeMovimientos.jsx';
 const MOTIVOS = {sin_documento:'Sin documento',sin_bridge:'Sin registros en el Bridge',revision:'Bridge en revisión',parcial:'Conciliación parcial o con diferencia',efectivo:'Efectivo sin asignar',efectivo_importado:'Efectivo importado del Excel',posible_duplicado:'Posible duplicado: ya hay un pago o cobro sin banco con esa fecha e importe'};
-// What FactMovimientosEfectivo said about an imported cash entry (029).
+// What FactMovimientosEfectivo said about an imported cash entry (030).
 const importDetail=(r)=>{const d=r.detalle_importado;if(!d)return '';
   return [d.categoria,d.proyecto&&('Proyecto '+d.proyecto),d.observaciones].filter(Boolean).join(' · ');};
 const TIPOS = {material:'Material',trabajador:'Trabajador',cliente:'Cliente',concepto:'Concepto de factura',movimiento:'Movimiento bancario',documento:'Documento',efectivo:'Efectivo'};

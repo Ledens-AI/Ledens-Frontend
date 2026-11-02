@@ -1,5 +1,6 @@
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import {FinanzasService} from '../src/finanzas/service.js';
 // A payment reconciled with an invoice without concepts: Concepto de movimientos
@@ -18,7 +19,7 @@ before(async()=>{
  const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
  await db.exec('ALTER TABLE users ADD COLUMN name text');
- for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','026_materiales_provisionales.sql','027_transferencias_internas.sql','028_treasury_movements.sql','029_efectivo_importado.sql'])
+ for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','026_materiales_provisionales.sql','029_provisional_todas_las_facturas.sql','027_transferencias_internas.sql','028_treasury_movements.sql','030_efectivo_importado.sql'])
   await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
  [admin,jefe]=(await db.query("INSERT INTO users(email,role,name) VALUES('admin@dd.test','admin','Admin'),('jefe@dd.test','jefe','Jefe') RETURNING id,role")).rows;
  mov=(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
@@ -43,14 +44,26 @@ test('Concepto de movimientos classifies it as Pago de materiales: a provisional
  assert.equal((await pending()).filter(x=>x.provisional).length,1,'only the provisional payment can be segregated');
 });
 
-test('a payment reconciled with several documents without concepts still asks to review their ingestion',async()=>{
- const b=(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+test('a payment reconciled with several documents without concepts is classified; the obra waits for every invoice, and the provisional is replaced only then (029)',async()=>{
+ const q=(sql,p)=>db.query(sql,p);
+ const b=(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
   VALUES('MOV-dos',-80,-80,'2026-10-11','Pago dos facturas','EUR','COMPLETED') RETURNING id`)).rows[0].id;
- for(const n of ['F-A','F-B']){const d=(await db.query(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento) VALUES(-40,'Pagar','2026-10-08',$1) RETURNING id`,[n])).rows[0].id;
-  await db.query("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state,reconciled_on) VALUES($1,$2,-40,'Confirmado','2026-10-11')",[b,d]);}
+ const docs={};
+ for(const n of ['F-A','F-B']){docs[n]=(await q(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento) VALUES(-40,'Pagar','2026-10-08',$1) RETURNING id`,[n])).rows[0].id;
+  await q("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state,reconciled_on) VALUES($1,$2,-40,'Confirmado','2026-10-11')",[b,docs[n]]);}
  const r=(await asAdmin().movements({pageSize:100})).rows.find(x=>x.id===b);
- await assert.rejects(asAdmin().classifyMovement({id:b,clase:'materiales',version:r.version}),{status:409,message:/F-A no tiene conceptos registrados; revisa su ingesta/});
- assert.equal((await db.query('SELECT count(*)::int n FROM ledens.provisional_material_payments WHERE bank_movement_id=$1',[b])).rows[0].n,0);
+ const {materialId,recordId}=await asAdmin().classifyMovement({id:b,clase:'materiales',version:r.version});
+ // The missing concepts are reported when it is assigned to an obra.
+ const obra=(await q("INSERT INTO ledens.projects(name,project_id) VALUES('Obra Dos','P-DOS') RETURNING id")).rows[0].id;
+ const rec=(await asAdmin().listRecords({type:'material',pending:true,q:'Pago dos facturas'})).rows[0];
+ await assert.rejects(asAdmin().assign({type:'material',id:materialId,projectId:obra,version:rec.version,requestId:crypto.randomUUID()}),{status:409,message:/F-A no tiene conceptos registrados.*antes de asignarlo a una obra/});
+ const addLine=async(d,gross)=>{const l=(await q("INSERT INTO ledens.invoice_lines(document_id,line_number,description) VALUES($1,1,'Material') RETURNING id",[d])).rows[0].id;
+  await q(`INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,gross_amount,currency) VALUES($1,$2,'2026-10-08','Material',$3,'EUR')`,[l,d,gross]);};
+ await addLine(docs['F-A'],40);
+ assert.equal((await q('SELECT status FROM ledens.financial_records WHERE id=$1',[recordId])).rows[0].status,'pending','one invoice is not enough: the 80 € stay represented');
+ await addLine(docs['F-B'],40);
+ assert.equal((await q('SELECT status FROM ledens.financial_records WHERE id=$1',[recordId])).rows[0].status,'excluded','both invoices: replaced');
+ assert.deepEqual((await q("SELECT category FROM ledens.financial_records WHERE document_id=ANY($1::uuid[]) AND source_valid AND status<>'excluded'",[Object.values(docs)])).rows.map(x=>x.category),['materials','materials']);
 });
 
 test('a refund reconciled with a credit note without concepts can still be a supplier refund',async()=>{
@@ -76,7 +89,8 @@ test('a receipt reconciled with a document without concepts can be a client rece
  assert.equal(res.via,'cobro-cliente');
  assert.equal((await find()).clase,'clientes');
  assert.equal((await db.query('SELECT count(*)::int n FROM ledens.customer_payments WHERE bank_movement_id=$1',[b])).rows[0].n,1);
- // Two documents, only one with concepts: still the actionable error, never a silent pending.
+ // Two documents, only one with concepts: classified by the concepts it has, never pending;
+ // the missing ones are reported when its record is assigned to an obra.
  const b2=(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
   VALUES('MOV-mixto',20,20,'2026-09-30','Cobro dos facturas','EUR','COMPLETED') RETURNING id`)).rows[0].id;
  for(const [n,lines] of [['F-CON',1],['F-SIN',0]]){
@@ -86,7 +100,12 @@ test('a receipt reconciled with a document without concepts can be a client rece
    await db.query("INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,gross_amount,currency) VALUES($1,$2,'2026-09-30','Certificación',10,'EUR')",[l,d2]);}
  }
  const r2=(await asAdmin().movements({pageSize:100})).rows.find(x=>x.id===b2);
- await assert.rejects(asAdmin().classifyMovement({id:b2,clase:'clientes',version:r2.version}),{status:409,message:/F-SIN no tiene conceptos registrados/});
+ assert.equal(r2.clase,'pendiente','its only concept is still unclassified');
+ assert.equal((await asAdmin().classifyMovement({id:b2,clase:'clientes',version:r2.version})).via,'registros');
+ assert.equal((await asAdmin().movements({pageSize:100})).rows.find(x=>x.id===b2).clase,'clientes','classified: F-SIN without concepts does not leave it pending');
+ const con=(await asAdmin().listRecords({type:'cliente',pageSize:100})).rows.find(x=>x.numerodocumento==='F-CON');
+ const obra=(await db.query("INSERT INTO ledens.projects(name,project_id) VALUES('Obra Mixta','P-MIX') RETURNING id")).rows[0].id;
+ await assert.rejects(asAdmin().assign({type:con.type,id:con.id,projectId:obra,version:con.version,requestId:crypto.randomUUID()}),{status:409,message:/F-SIN no tiene conceptos registrados/});
 });
 
 test('a payment reconciled with a document without concepts can go to Pendiente de trabajador: no error, no longer pending',async()=>{
@@ -99,6 +118,21 @@ test('a payment reconciled with a document without concepts can go to Pendiente 
  assert.equal(res.via,'pendiente-trabajador');
  assert.deepEqual([(await find()).clase,(await find()).origen],['trabajadores','bridge']);
  assert.equal((await db.query('SELECT count(*)::int n FROM ledens.worker_payment_batches WHERE bank_movement_id=$1',[b])).rows[0].n,1);
+});
+
+test('a payment with records of its own is classified by them, whatever its reconciled document without concepts lacks',async()=>{
+ const b=(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,beneficiary_name,currency,state)
+  VALUES('MOV-zorrilla',-587.50,-587.50,'2026-09-05','A MARIANO IGNACIO ZORRILLA ORTIZ','MARIANO IGNACIO ZORRILLA ORTIZ','EUR','COMPLETED') RETURNING id`)).rows[0].id;
+ // Imported as a worker payment of that movement; its invoice reached the Bridge without concepts.
+ await db.query("INSERT INTO ledens.worker_payments(bank_movement_id,occurred_on,empleado,amount) VALUES($1,'2026-09-05','Mariano Zorrilla',587.50)",[b]);
+ const d=(await db.query(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento) VALUES(-587.50,'Pagar','2026-09-05','3T2026-222') RETURNING id`)).rows[0].id;
+ await db.query("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state,reconciled_on) VALUES($1,$2,-587.50,'Confirmado','2026-09-05')",[b,d]);
+ const find=async()=>(await asAdmin().movements({pageSize:100})).rows.find(x=>x.id===b);
+ assert.equal((await find()).clase,'trabajadores','not pending: its own record classifies it');
+ await assert.rejects(asAdmin().classifyMovement({id:b,clase:'trabajadores',version:(await find()).version,reason:'Mariano Zorrilla'}),{status:409,message:/Ya está clasificado así/});
+ const res=await asAdmin().classifyMovement({id:b,clase:'materiales',version:(await find()).version,reason:'Era material'});
+ assert.deepEqual([res.via,res.changed],['registros',1]);
+ assert.equal((await find()).clase,'materiales');
 });
 
 test('«Segregar conceptos» reports the invoice without concepts, with what the dialog needs',async()=>{

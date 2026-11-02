@@ -96,7 +96,7 @@ DO $$ BEGIN
   NULL::text,
   NULL::text,
   concat_ws(' ',k.counterparty,k.concept),
-  CASE k.kind WHEN 'pago' THEN -abs(k.amount) WHEN 'cobro' THEN abs(k.amount) ELSE k.amount END,
+  CASE k.kind WHEN 'pago' THEN -round(abs(k.amount),2) WHEN 'cobro' THEN round(abs(k.amount),2) ELSE k.amount END,
   'EUR'::text,
   NULL::text,
   false,

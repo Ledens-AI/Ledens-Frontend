@@ -12,6 +12,6 @@ La prueba `legacy-cash.test.js` usa el ejecutor real de migraciones sobre el esq
 
 Despliegue: usar el flujo normal de imagen y reinicio del backend; su arranque aplica la adopción pendiente antes de 016 y después continúa con las migraciones posteriores. No hace falta vaciar tablas ni editar el historial manualmente. No hay nuevas variables de producción. La consulta de diagnóstico en producción fue de estructura e historial exclusivamente; la aplicación de la reparación requiere autorización de despliegue.
 
-## Actualización (migración 029)
+## Actualización (migración 030)
 
-Por decisión del negocio, el efectivo importado ya entra en Pendiente de conciliación y, una vez asignado, en los resultados. 029 rellena solo las columnas de aplicación (`kind`, `concept`, `counterparty`, `imported`, `imported_detail`) a partir de las importadas, sin modificarlas. Cada fila la asigna o la descarta un administrador; nada cuenta sin esa decisión. Detalle en `FINANZAS.md` → «Efectivo importado del Excel».
+Por decisión del negocio, el efectivo importado ya entra en Pendiente de conciliación y, una vez asignado, en los resultados. 030 rellena solo las columnas de aplicación (`kind`, `concept`, `counterparty`, `imported`, `imported_detail`) a partir de las importadas, sin modificarlas. Cada fila la asigna o la descarta un administrador; nada cuenta sin esa decisión. Detalle en `FINANZAS.md` → «Efectivo importado del Excel».

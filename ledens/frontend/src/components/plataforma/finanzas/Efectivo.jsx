@@ -47,7 +47,7 @@ export function CashForm({ onClose, onSaved }) {
 export function AssignCash({ row, onClose, onDone }) {
   const pago = Number(row.importe) < 0;
   const [target, setTarget] = useState(pago ? 'trabajadores' : 'clientes');
-  // Imported cash (029): the obra its «proyecto» matches is proposed.
+  // Imported cash (030): the obra its «proyecto» matches is proposed.
   const [project, setProject] = useState(row.obra_sugerida || null), [description, setDescription] = useState(row.concepto || '');
   // A cobro saved before the client was required: name it now (or take the obra's).
   const [client, setClient] = useState('');
