@@ -95,6 +95,10 @@
 /* Table */
 .fin-table-wrap { overflow-x: auto; position: relative; }
 .fin-table-wrap[aria-busy="true"] { opacity: 0.7; }
+/* Sized to the window by plataforma/fitTables.js: the table scrolls in both
+   directions inside it and the column headers stay in view. */
+.fin-table-wrap.is-fit { overflow: auto; max-height: var(--fin-fit-h, calc(100vh - 160px)); scrollbar-color: #C9C9C4 #F4F4F1; }
+.fin-table-wrap.is-fit .fin-table th { position: sticky; top: 0; z-index: 2; box-shadow: inset 0 -1px 0 #EDEDEA; }
 .fin-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .fin-table th { text-align: left; font-size: 12px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: #6B6B68; background: #FAFAF8; padding: 10px 12px; border-bottom: 1px solid #EDEDEA; white-space: nowrap; }
 .fin-table td { padding: 10px 12px; border-bottom: 1px solid #F0F0EC; vertical-align: top; }
