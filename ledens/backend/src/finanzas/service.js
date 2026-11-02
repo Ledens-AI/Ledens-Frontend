@@ -442,8 +442,10 @@ export class FinanzasService {
     // its reconciled credit note has: it never waits for the document's concepts.
     // A client receipt is treasury (advance): revenue comes from the issued
     // invoice, so a document still without concepts never blocks it (Pagos de
-    // clientes and Pendiente de conciliación report what is missing).
-    if(bare.length&&!['reembolso_proveedor','clientes'].includes(clase)&&!(clase==='materiales'&&!records.length&&docs===1))throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta antes de clasificar el movimiento`);
+    // clientes and Pendiente de conciliación report what is missing). Only with
+    // nothing registered: with some documents' concepts and others without, the
+    // receipt would not be created and the movement would stay pending.
+    if(bare.length&&clase!=='reembolso_proveedor'&&!(clase==='clientes'&&!records.length)&&!(clase==='materiales'&&!records.length&&docs===1))throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta antes de clasificar el movimiento`);
    }
    // A supplier refund is registered as a material from the movement itself. A
    // receipt that already has records (its reconciled document, a client receipt)
