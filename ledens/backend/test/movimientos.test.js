@@ -188,10 +188,21 @@ test('a provisional payment replaced by an invoice that later lost its concepts 
  assert.deepEqual((await q('SELECT status,source_valid FROM ledens.financial_records WHERE id=$1',[recordId])).rows[0],{status:'pending',source_valid:true});
  assert.equal((await q("SELECT count(*)::int n FROM ledens.finance_events WHERE record_id=$1 AND action='provisional_restored'",[recordId])).rows[0].n,1);
  assert.deepEqual((await q('SELECT project_id,allocated_amount::text amount FROM ledens.project_financial_allocations WHERE record_id=$1',[recordId])).rows,[{project_id:obra,amount:'7.44'}],'it keeps the obra it had before 026 replaced it');
- // A material excluded for any other reason is never brought back.
- const b2=(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
-  VALUES('MOV-otro',-9,-9,'2026-09-25','Pago almacén','EUR','COMPLETED') RETURNING id`)).rows[0].id;
- const m2=(await q("INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id) VALUES('ud','Importado',1,-9,-9,'2026-09-25',$1) RETURNING id",[b2])).rows[0].id;
- await q("UPDATE ledens.financial_records SET status='excluded',source_valid=false WHERE material_id=$1",[m2]);
- await assert.rejects(classify(b2,'materiales'),{status:409,message:/se sustituyó o excluyó/});
+ // A material excluded otherwise (no provisional row, for the payment's amount) is recovered as provisional too.
+ const mov=async(amount,description)=>(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES($1,$2,$2,'2026-09-25',$3,'EUR','COMPLETED') RETURNING id`,['MOV-'+description,amount,description])).rows[0].id;
+ const material=async(b,total,action)=>{const id=(await q("INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id) VALUES('ud','Importado',1,$2,$2,'2026-09-25',$1) RETURNING id",[b,total])).rows[0].id;
+  const r=(await q("UPDATE ledens.financial_records SET status='excluded',source_valid=false WHERE material_id=$1 RETURNING *",[id])).rows[0];
+  if(action)await q("INSERT INTO ledens.finance_events(record_id,action,reason,before_value,after_value) VALUES($1,$2,'prueba','{}','{}')",[r.id,action]);
+  return {id,record:r.id};};
+ const b2=await mov(-9,'Pago almacén');const m2=await material(b2,-9,'source_changed');
+ const res2=await classify(b2,'materiales');
+ assert.deepEqual([res2.materialId,res2.restored],[m2.id,true]);
+ assert.equal((await q('SELECT count(*)::int n FROM ledens.provisional_material_payments WHERE material_id=$1 AND replaced_at IS NULL',[m2.id])).rows[0].n,1);
+ assert.equal((await row(b2)).clase,'materiales');
+ // Never one excluded on purpose by a native Obramat purchase, nor one for another amount.
+ const b3=await mov(-11,'Pago anticipo');await material(b3,-11,'purchase_source_replaced');
+ await assert.rejects(classify(b3,'materiales'),{status:409,message:/purchase_source_replaced.*no se puede recuperar/});
+ const b4=await mov(-12,'Pago parcial');await material(b4,-5,null);
+ await assert.rejects(classify(b4,'materiales'),{status:409,message:/no se puede recuperar/});
 });

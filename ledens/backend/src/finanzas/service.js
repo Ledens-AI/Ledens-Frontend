@@ -715,17 +715,22 @@ export class FinanzasService {
  // class to the lines of a receipt document, which carry the sign of revenue.
  async materialPaymentOne(c,b,{provisional=true}={}){
   if(b.currency&&b.currency!=='EUR')throw new FinError(409,'Solo movimientos en euros');
-  const prev=(await c.query(`SELECT me.id material_id,r.id record_id,r.status,r.source_valid,pm.material_id provisional,pm.replaced_at,pm.carried_project_id,
+  const prev=(await c.query(`SELECT me.id material_id,me.total::text total,r.id record_id,r.status,r.source_valid,r.created_at,
+    pm.material_id provisional,pm.replaced_at,pm.carried_project_id,
     (SELECT e.action FROM ledens.finance_events e WHERE e.record_id=r.id ORDER BY e.id DESC LIMIT 1) last_action
    FROM ledens.material_expenses me LEFT JOIN ledens.financial_records r ON r.material_id=me.id
-   LEFT JOIN ledens.provisional_material_payments pm ON pm.material_id=me.id WHERE me.bank_movement_id=$1 ORDER BY me.id`,[b.id])).rows;
+   LEFT JOIN ledens.provisional_material_payments pm ON pm.material_id=me.id WHERE me.bank_movement_id=$1
+   ORDER BY (pm.material_id IS NOT NULL) DESC,r.created_at DESC NULLS LAST,me.id`,[b.id])).rows;
   if(prev.length){
-   // A provisional payment 026 replaced by its invoice, whose concepts are gone
-   // since (re-ingested, or excluded by a later registration): nothing active
-   // represents the payment any more, so it is restored as provisional (audited)
-   // and 026 replaces it again when the invoice gets its concepts back.
-   const p=prev.length===1?prev[0]:null;
-   if(provisional&&p?.provisional&&p.replaced_at&&p.record_id&&p.status==='excluded'&&p.last_action==='provisional_replaced'){
+   if(prev.some(x=>x.record_id&&x.source_valid&&x.status!=='excluded'))throw new FinError(409,'Ya está registrado como material');
+   // A material of this movement that no longer counts (026 replaced it by an
+   // invoice whose concepts are gone since, or it was excluded otherwise) while
+   // nothing active represents the payment: it is restored as a provisional
+   // payment (audited) and 026/029 replace it again once every invoice has its
+   // concepts. Never one excluded on purpose by a native Obramat purchase (its
+   // cost comes with the delivery invoice), nor one for another amount.
+   const p=provisional?prev.find(x=>x.record_id&&x.last_action!=='purchase_source_replaced'&&cents(x.total)===cents(b.total_amount)):null;
+   if(p){
     const before=(await c.query('SELECT * FROM ledens.financial_records WHERE id=$1 FOR UPDATE',[p.record_id])).rows[0];
     const after=(await c.query("UPDATE ledens.financial_records SET status='pending',source_valid=true,category='materials',version=version+1,updated_at=now() WHERE id=$1 RETURNING *",[p.record_id])).rows[0];
     // 026 took its obra away (carried_project_id) when it replaced it: give it back.
@@ -735,12 +740,13 @@ export class FinanzasService {
      await c.query(`INSERT INTO ledens.finance_events(record_id,actor_id,action,reason,before_value,after_value) VALUES($1,$2,'replace_allocations','Obra recuperada al restaurar el pago de materiales provisional',$3,$4)`,
       [p.record_id,this.user.id,JSON.stringify({allocations:[]}),JSON.stringify({allocations:[{project_id:p.carried_project_id,project_name:name,allocated_amount:String(after.gross_amount)}]})]);
     }
-    await c.query('UPDATE ledens.provisional_material_payments SET replaced_at=NULL,replaced_by_document_id=NULL,carried_project_id=NULL WHERE material_id=$1',[p.material_id]);
-    await this.finance.audit(c,before,this.user,'provisional_restored','Pago de materiales provisional restaurado: la factura que lo sustituyó ya no tiene conceptos',after);
+    if(p.provisional)await c.query('UPDATE ledens.provisional_material_payments SET replaced_at=NULL,replaced_by_document_id=NULL,carried_project_id=NULL WHERE material_id=$1',[p.material_id]);
+    else await c.query('INSERT INTO ledens.provisional_material_payments(material_id,bank_movement_id,created_by) VALUES($1,$2,$3)',[p.material_id,b.id,this.user.id]);
+    await this.finance.audit(c,before,this.user,'provisional_restored',`Pago de materiales provisional restaurado: no contaba (${p.last_action||(before.source_valid?before.status:'origen no válido')}) y nada activo representaba el pago`,after);
     return {materialId:p.material_id,recordId:p.record_id,provisional:true,restored:true};
    }
-   if(prev.some(x=>x.record_id&&x.source_valid&&x.status!=='excluded'))throw new FinError(409,'Ya está registrado como material');
-   throw new FinError(409,'Este movimiento ya tuvo un material que se sustituyó o excluyó al registrar su factura, y esa factura ya no tiene conceptos: revisa la ingesta de su documento conciliado');
+   const why=prev.map(x=>x.last_action||(x.record_id?x.status:'sin registro')).join(', ');
+   throw new FinError(409,`Este movimiento ya tuvo un material que se excluyó (${why}) y no se puede recuperar: revisa la ingesta de su documento conciliado`);
   }
   const total=decimal(cents(b.total_amount));
   const m=(await c.query(`INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id)
