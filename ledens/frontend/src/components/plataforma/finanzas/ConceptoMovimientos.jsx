@@ -9,21 +9,25 @@ export const CLASE_MOV = {
   trabajadores: { label: 'Pago a trabajadores', bg: '#DEF3F0', fg: '#2F6B63', icon: 'ri-user-settings-line' },
   clientes: { label: 'Cobro de clientes', bg: '#FDF0F4', fg: '#B84371', icon: 'ri-hand-coin-line' },
   reembolso_proveedor: { label: 'Reembolso de proveedor', bg: '#EEF4E4', fg: '#4A6B22', icon: 'ri-refund-2-line' },
+  transferencia: { label: 'Transferencia entre cuentas', bg: '#EEF0F3', fg: '#4A5160', icon: 'ri-arrow-left-right-line' },
   mixto: { label: 'Varias clases', bg: '#F2F2EF', fg: '#3A3A38', icon: 'ri-shuffle-line' },
 };
-const ORIGEN = { bridge: 'Deducido del Bridge con documentos', trabajadores: 'En Pendiente de trabajador', registro: 'Registro contable del movimiento', provisional: 'Provisional hasta conciliar su factura', compra_obramat: 'Compra de Obramat con anticipo: el coste entra con la factura de entrega', ninguno: 'Sin documento conciliado' };
+const ORIGEN = { bridge: 'Deducido del Bridge con documentos', trabajadores: 'En Pendiente de trabajador', registro: 'Registro contable del movimiento', provisional: 'Provisional hasta conciliar su factura', compra_obramat: 'Compra de Obramat con anticipo: el coste entra con la factura de entrega', transferencia: 'Entre cuentas de la sociedad: ni coste ni ingreso', ninguno: 'Sin documento conciliado' };
 // What a manual class does when the movement has nothing registered yet.
 const EFECTO = {
   materiales: 'Se registrará como pago de materiales provisional y aparecerá en «Materiales pendiente de asignación» para elegir la obra. Cuando el Bridge concilie su factura, la factura lo sustituirá con esta clasificación y esta obra.',
   trabajadores: 'Pasará a «Pendiente de trabajador» para repartirlo entre trabajadores y obras.',
   clientes: 'Se registrará como cobro de cliente en «Pagos de clientes».',
   reembolso_proveedor: 'Se registrará en «Materiales pendiente de asignación» como material en negativo: al asignarlo a una obra, descuenta su coste de materiales.',
+  transferencia: 'Movimiento entre cuentas de Sociedad Inversora Navarro Robinson: no es coste ni ingreso, no se registra nada y sale de «Pendiente de conciliación».',
 };
 // A payment is Materiales or Trabajadores; a receipt Clientes or, when it is a bank
 // receipt, Reembolso de proveedor. Obramat's movements are always materials
 // («Regla Obramat»). The backend enforces all of it too.
 const refundable = (r) => r.tipo === 'banco';
-const choices = (r) => (r.obramat
+// A movement with another account of the company can also be a transfer between accounts.
+const choices = (r) => [...baseChoices(r), ...(r.propia && r.tipo === 'banco' && r.registros === 0 ? ['transferencia'] : [])];
+const baseChoices = (r) => (r.obramat
   ? (r.sentido === 'cobro' ? (refundable(r) ? ['reembolso_proveedor'] : []) : ['materiales'])
   : r.sentido === 'cobro' ? ['clientes', ...(refundable(r) ? ['reembolso_proveedor'] : [])] : ['materiales', 'trabajadores']);
 // A registered supplier refund is a material, and an Obramat advance is materials
@@ -39,7 +43,7 @@ function Classify({ row, onClose, onDone }) {
   const [clase, setClase] = useState(options[0] || ''), [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false), [error, setError] = useState('');
   // Changing what is already classified needs a reason; a first classification does not.
-  const needsReason = row.conocidas.length > 0;
+  const needsReason = row.conocidas.length > 0 || row.clase === 'transferencia';
   const withRecords = row.registros > 0;
   const save = async () => {
     setSaving(true); setError('');

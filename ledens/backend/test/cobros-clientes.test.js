@@ -12,7 +12,7 @@ before(async()=>{
  const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
  await db.exec('ALTER TABLE users ADD COLUMN name text');
- for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','027_treasury_movements.sql'])
+ for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','027_transferencias_internas.sql','028_treasury_movements.sql'])
   await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
  [admin,jefe]=(await db.query("INSERT INTO users(email,role,name) VALUES('admin@cc.test','admin','Admin'),('jefe@cc.test','jefe','Jefe') RETURNING id,role")).rows;
  p1=(await db.query("INSERT INTO ledens.projects(name,project_id) VALUES('Marbella','OBRA-001') RETURNING id")).rows[0].id;
@@ -53,6 +53,23 @@ test('without a project it waits in Pendientes de asignación; only incoming eur
  assert.match(r.results[0].error,/cobros/);assert.match(r.results[1].error,/euros/);assert.match(r.results[2].error,/traspaso/);
  assert.equal(await inInbox(out),true,'the refused ones stay in the inbox');
  await assert.rejects(asAdmin().classifyCustomerPayments({movementIds:[await movement('10.00')],projectId:'00000000-0000-4000-8000-000000000000'}),{status:400});
+});
+
+test('Pagos de clientes always shows a client',async()=>{
+ await db.exec('ALTER TABLE ledens.projects ADD COLUMN IF NOT EXISTS customer_name_source text');
+ const proj=(await db.query("INSERT INTO ledens.projects(name,project_id,customer_name_source) VALUES('Nerja','OBRA-002','Cliente de la Obra') RETURNING id")).rows[0].id;
+ // A receipt with no ordering party takes the obra's client when it is recorded.
+ const m=await movement('210.00',{payer:''});
+ await asAdmin().classifyCustomerPayments({movementIds:[m],projectId:proj});
+ assert.equal((await db.query('SELECT cliente FROM ledens.customer_payments WHERE bank_movement_id=$1',[m])).rows[0].cliente,'Cliente de la Obra');
+ // Rows recorded before without a client are read from the movement, the obra, or flagged.
+ const legacy=async(bank,project)=>{const c=(await db.query('INSERT INTO ledens.customer_payments(occurred_on,id_pago,total,bank_movement_id) VALUES($1,$2,$3,$4) RETURNING id',['2026-10-20','X'+Math.random(),'99.00',bank])).rows[0].id;
+  const r=(await db.query('UPDATE ledens.financial_records SET counterparty=NULL WHERE customer_payment_id=$1 RETURNING id,version,gross_amount',[c])).rows[0];
+  if(project)await asAdmin().finance.replace(pool,admin,{record_id:r.id,version:r.version,allocations:[{project_id:project,amount:r.gross_amount}]},'test');return c;};
+ const fromBank=await legacy(await movement('99.00',{payer:'Ordenante Banco'})),fromProject=await legacy(null,proj),none=await legacy(null);
+ const rows=(await asAdmin().listRecords({type:'cliente',pageSize:100})).rows,by=id=>rows.find(r=>r.id===id)?.tercero;
+ assert.deepEqual([by(fromBank),by(fromProject),by(none)],['Ordenante Banco','Cliente de la Obra','Cliente sin identificar']);
+ assert.ok(rows.every(r=>r.tercero),'never empty');
 });
 
 test('HTTP: admins only and the allowed origin',async()=>{

@@ -2,6 +2,8 @@ import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {FinanzasService} from '../src/finanzas/service.js';
+import {BridgeService} from '../src/bridge/service.js';
+import {BridgeWorkspace} from '../src/bridge/workspace.js';
 // «Regla Obramat» and supplier refunds whose credit note has concepts, in
 // Concepto de movimientos, on PGlite with synthetic rows only.
 let db,pool,admin,m={};
@@ -11,7 +13,7 @@ before(async()=>{
  const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
  await db.exec('ALTER TABLE users ADD COLUMN name text');
- for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','011_transaction_alerts.sql','012_bridge_party_amount_date.sql','013_pago_trabajadores.sql','016_cash_movements.sql','027_treasury_movements.sql','014_purchase_settlements.sql','026_materiales_provisionales.sql'])
+ for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','011_transaction_alerts.sql','012_bridge_party_amount_date.sql','013_pago_trabajadores.sql','016_cash_movements.sql','014_purchase_settlements.sql','026_materiales_provisionales.sql','027_transferencias_internas.sql','028_treasury_movements.sql'])
   await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
  admin=(await db.query("INSERT INTO users(email,role,name) VALUES('admin@ob.test','admin','Admin') RETURNING id,role")).rows[0];
  const bank=async(amount,description)=>(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
@@ -87,4 +89,34 @@ test('«Regla Obramat» classifies every pending, reconciled Obramat movement as
  assert.deepEqual([ev.actor_id,/Regla Obramat/.test(ev.reason)],[null,true]);
  assert.deepEqual([(await system().applyObramatRule()).evaluados],[0],'nothing left: running it again changes nothing');
  assert.equal((await asAdmin().movementsPending()).pendientes,(await rows()).filter(r=>r.clase==='pendiente').length);
+});
+
+test('a movement with another account of the company can be a transfer between accounts: no cost or income, out of the inbox, undoable',async()=>{
+ const mov=async(amount,who,description)=>(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,beneficiary_name,currency,state)
+  VALUES($1,$2,$2,'2026-09-30',$3,$4,'EUR','COMPLETED') RETURNING id`,['MOV-'+description,amount,description,who])).rows[0].id;
+ const t=await mov(200,'SOCIEDAD INVERSORA NAVARRO-ROBINSON SL','Traspaso cuenta');
+ const otro=await mov(-50,'Fontanería López','Pago fontanero');
+ assert.deepEqual([(await row(t)).propia,(await row(t)).clase],[true,'pendiente']);
+ assert.ok((await asAdmin().reconciliation({pageSize:200})).rows.some(r=>r.id===t));
+ const bridgeIds=async()=>(await new BridgeWorkspace(pool).movements({limit:50,q:'Traspaso'})).rows.map(r=>r.id);
+ const counts=await new BridgeWorkspace(pool).counts();
+ // An invoice of the same amount and date: before marking, the transfer is a Bridge candidate.
+ const d={id:(await db.query(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento) VALUES(200,'Cobrar','2026-09-29','F-200') RETURNING id`)).rows[0].id,total:'200',document_on:'2026-09-29',tipo:'Cobrar'};
+ const candidates=async()=>(await new BridgeService(pool).candidates(pool,d)).rows.map(r=>r.id);
+ assert.ok((await candidates()).includes(t)&&(await bridgeIds()).includes(t));
+ await assert.rejects(classify(otro,'transferencia'),{status:409,message:/Sociedad Inversora Navarro Robinson/});
+ assert.equal((await classify(t,'transferencia')).via,'transferencia');
+ // Once marked, the Bridge never matches it and the sidebar counters leave it out.
+ assert.ok(!(await candidates()).includes(t)&&!(await bridgeIds()).includes(t));
+ const after=await new BridgeWorkspace(pool).counts();
+ assert.deepEqual([after.pending,after.reconciliation],[counts.pending-1,counts.reconciliation-1]);
+ assert.deepEqual([(await row(t)).clase,(await row(t)).origen],['transferencia','transferencia']);
+ assert.equal((await db.query('SELECT count(*)::int n FROM ledens.financial_records WHERE bank_movement_id=$1',[t])).rows[0].n,0,'nothing registered: neither cost nor income');
+ assert.ok(!(await asAdmin().reconciliation({pageSize:200})).rows.some(r=>r.id===t),'it leaves Pendiente de conciliación');
+ assert.equal((await asAdmin().movements({pageSize:100,clase:'transferencia'})).total,1);
+ await assert.rejects(classify(t,'transferencia'),{status:409,message:/Ya está/});
+ // Undone by classifying it otherwise, with a reason.
+ await assert.rejects(classify(t,'clientes'),{status:400,message:/motivo/});
+ assert.equal((await classify(t,'clientes','Era un cobro de cliente')).clase,'clientes');
+ assert.equal((await db.query('SELECT count(*)::int n FROM ledens.internal_transfers WHERE bank_movement_id=$1',[t])).rows[0].n,0);
 });

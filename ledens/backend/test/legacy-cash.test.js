@@ -19,13 +19,13 @@ test('real migration runner adopts imported cash, preserves history and restores
   for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql'])await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
   await db.exec(`CREATE TABLE ledens.cash_movements(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),source_id text UNIQUE,raw_id uuid UNIQUE,movimientoefectivoid text,occurred_on date,tipomovimiento text,concepto text,tercero text,project_source text,categoria text,comportamientocoste text,amount numeric,impactoresultado text,observaciones text,CHECK((source_id IS NULL)=(raw_id IS NULL)));
    INSERT INTO ledens.cash_movements(movimientoefectivoid,tipomovimiento,concepto,tercero,amount) VALUES('LEGACY-1','Pago','Original importado','Histórico',-123.45);`);
-  for(const name of ['015z_adopt_legacy_cash.sql','016_cash_movements.sql','027_treasury_movements.sql'])await fs.copyFile(new URL('../src/db/migrations/'+name,import.meta.url),path.join(dir,name));
+  for(const name of ['015z_adopt_legacy_cash.sql','016_cash_movements.sql','027_transferencias_internas.sql','028_treasury_movements.sql'])await fs.copyFile(new URL('../src/db/migrations/'+name,import.meta.url),path.join(dir,name));
   // 016 would fail CREATE TABLE on this exact legacy shape; the runner must
   // refresh the ledger after adoption and skip it, not just check its startup cache.
   await runMigrations({pool,migrationsDir:dir});
   const legacy=(await db.query("SELECT movimientoefectivoid,tipomovimiento,concepto,tercero,amount::text,kind FROM ledens.cash_movements WHERE movimientoefectivoid='LEGACY-1'")).rows[0];
   assert.deepEqual(legacy,{movimientoefectivoid:'LEGACY-1',tipomovimiento:'Pago',concepto:'Original importado',tercero:'Histórico',amount:'-123.45',kind:null});
-  assert.equal((await db.query("SELECT count(*)::int n FROM schema_migrations WHERE name IN ('015z_adopt_legacy_cash.sql','016_cash_movements.sql','027_treasury_movements.sql')")).rows[0].n,3);
+  assert.equal((await db.query("SELECT count(*)::int n FROM schema_migrations WHERE name IN ('015z_adopt_legacy_cash.sql','016_cash_movements.sql','027_transferencias_internas.sql','028_treasury_movements.sql')")).rows[0].n,4);
   // The joint treasury view shows the imported row with its origin, untouched and out of the validation screens.
   assert.deepEqual((await db.query("SELECT origin,amount::text,direction,validable FROM ledens.treasury_movements")).rows,
    [{origin:'cash_movements',amount:'-123.45',direction:null,validable:false}]);

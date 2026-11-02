@@ -17,7 +17,10 @@ export class BridgeWorkspace {
  constructor(pool){this.pool=pool;}
  async movements(filters={}){
   const f=page(filters),workers=Boolean((await this.pool.query("SELECT to_regclass('ledens.worker_payment_batches') name")).rows[0].name);
+  // Transfers between the company's accounts marked in Concepto de movimientos (027) are not pending.
+  const transfers=Boolean((await this.pool.query("SELECT to_regclass('ledens.internal_transfers') name")).rows[0].name);
   const where=`NOT coalesce(b.is_internal_transfer,false)
+   ${transfers?'AND NOT EXISTS(SELECT 1 FROM ledens.internal_transfers it WHERE it.bank_movement_id=b.id)':''}
    ${workers?'AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=b.id)':''}
    ${filters.withoutCustomerPayments?'AND NOT EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=b.id)':''}
    AND ($1::boolean=false OR x.links=0 OR x.review_links>0 OR x.confirmed<>b.total_amount)
@@ -32,7 +35,7 @@ export class BridgeWorkspace {
  }
  async counts(){
   const pending=(await this.movements({limit:1})).total;
-  // Cash has no Bridge: it is read from the joint treasury view (027) by its origin.
+  // Cash has no Bridge: it is read from the joint treasury view (028) by its origin.
   const treasury=Boolean((await this.pool.query("SELECT to_regclass('ledens.treasury_movements') name")).rows[0].name);
   const cashPending=treasury?(await this.pool.query("SELECT count(*)::int n FROM ledens.treasury_movements WHERE origin='cash_movements' AND validable AND assigned_to IS NULL")).rows[0].n:0;
   // Pendiente de conciliación leaves out receipts already recorded as client payments.

@@ -13,6 +13,10 @@
 --              imported cash row, whose meaning is never inferred).
 --   validable  whether the row enters the validation screens: bank movements
 --              other than internal transfers, cash with an explicit kind.
+--   marked_transfer  a bank movement someone marked as a transfer between the
+--              company's own accounts (027, ledens.internal_transfers). It stays
+--              validable: Concepto de movimientos lists it as «Transferencia
+--              entre cuentas»; Pendiente de conciliación leaves it out.
 --   search_text the texts a screen searches (and the Obramat rule reads).
 CREATE VIEW ledens.treasury_movements AS
  SELECT b.id,
@@ -30,6 +34,7 @@ CREATE VIEW ledens.treasury_movements AS
   b.currency,
   b.state,
   coalesce(b.is_internal_transfer,false) is_internal_transfer,
+  EXISTS(SELECT 1 FROM ledens.internal_transfers it WHERE it.bank_movement_id=b.id) marked_transfer,
   CASE WHEN b.total_amount<0 THEN 'pago' WHEN b.total_amount>0 THEN 'cobro' END direction,
   NULL::text cash_kind,
   NULL::text assigned_to,
@@ -52,6 +57,7 @@ CREATE VIEW ledens.treasury_movements AS
   CASE k.kind WHEN 'pago' THEN -k.amount WHEN 'cobro' THEN k.amount ELSE k.amount END,
   'EUR'::text,
   NULL::text,
+  false,
   false,
   k.kind,
   k.kind,
