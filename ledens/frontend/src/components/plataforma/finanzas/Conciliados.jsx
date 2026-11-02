@@ -51,6 +51,10 @@ function Reclassify({ row, onClose, onDone }) {
 
 /* Movimientos conciliados (admins): every record behind a reconciled bank
  * movement with how it is classified, and the change of class. */
+// Origin of the movement in ledens.treasury_movements (bank and cash in one).
+const ORIGEN = { bank_movements: 'Banco', cash_movements: 'Efectivo' };
+const origen = (o) => (o ? o.split(',').map((x) => ORIGEN[x] || x).join(' + ') : '—');
+
 export default function Conciliados({ toast, onChanged }) {
   const [q, setQ] = useState(''), [query, setQuery] = useState('');
   const [clase, setClase] = useState(''), [desde, setDesde] = useState(''), [hasta, setHasta] = useState('');
@@ -84,13 +88,14 @@ export default function Conciliados({ toast, onChanged }) {
         {data && !data.rows.length ? <Empty icon="ri-checkbox-multiple-line" title="Sin movimientos conciliados" text="Cuando un movimiento se concilia con su factura, sus conceptos aparecen aquí." /> : null}
         {data && data.rows.length ? <>
           <div className="fin-table-wrap"><table className="fin-table">
-            <thead><tr><th>Fecha mov.</th><th>Movimiento</th><th>Documento</th><th>Tercero</th><th>Concepto</th><th className="fin-num">Importe</th><th>Clasificación</th><th>Proyecto</th><th><span className="fin-sr">Acciones</span></th></tr></thead>
+            <thead><tr><th>Fecha mov.</th><th>Origen</th><th>Movimiento</th><th>Documento</th><th>Tercero</th><th>Concepto</th><th className="fin-num">Importe</th><th>Clasificación</th><th>Proyecto</th><th><span className="fin-sr">Acciones</span></th></tr></thead>
             <tbody>{data.rows.map((r) => {
               const c = CLASE[r.clase] || CLASE.otros;
               const can = r.type !== 'cliente' && choices(r).some((x) => x !== r.clase);
               return (
                 <tr key={r.record_id}>
                   <td className="fin-nowrap">{fecha(r.fecha_movimiento)}</td>
+                  <td className="fin-nowrap">{origen(r.origin)}</td>
                   <td className="fin-ellipsis" title={r.movimiento}>{r.movimiento || '—'}</td>
                   <td className="fin-nowrap">{r.numerodocumento || <span className="fin-muted">Sin documento</span>}{r.line_number ? <span className="fin-muted"> · línea {r.line_number}</span> : null}</td>
                   <td className="fin-ellipsis">{r.tercero || '—'}</td>

@@ -11,7 +11,7 @@ before(async()=>{
  const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
  await db.exec('ALTER TABLE users ADD COLUMN name text');
- for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql'])
+ for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','026_materiales_provisionales.sql','027_treasury_movements.sql'])
   await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
  [admin,jefe]=(await db.query("INSERT INTO users(email,role,name) VALUES('admin@ef.test','admin','Admin'),('jefe@ef.test','jefe','Jefe') RETURNING id,role")).rows;
  p1=(await db.query("INSERT INTO ledens.projects(name,project_id) VALUES('Marbella','OBRA-001') RETURNING id")).rows[0].id;
@@ -112,4 +112,26 @@ test('only an unassigned entry can be deleted; HTTP needs an admin and the allow
   const assign=await fetch(`${base}/${k2.id}/asignar`,{method:'POST',headers:{'content-type':'application/json',origin:'https://ledens.test'},body:JSON.stringify({target:'clientes',projectId:p1})});
   assert.equal(assign.status,200);assert.equal((await assign.json()).assigned,'clientes');
  }finally{server.close();}
+});
+
+test('bank and cash movements read as one treasury table with their origin, in every validation screen',async()=>{
+ const bank=(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,payer,currency,state)
+  VALUES('MOV-TESORERIA',-80,-80,'2026-10-02','Pago azulejos','Azulejos Sur','EUR','COMPLETED') RETURNING id`)).rows[0];
+ await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state,is_internal_transfer)
+  VALUES('MOV-TRASPASO',-500,-500,'2026-10-02','Traspaso','EUR','COMPLETED',true)`);
+ const k=await cash('cobro','120',{concept:'Cobro en mano',counterparty:'Cliente Tesorería'});
+ const t=Object.fromEntries((await db.query("SELECT * FROM ledens.treasury_movements WHERE id=ANY($1::uuid[])",[[bank.id,k.id]])).rows.map(r=>[r.origin,r]));
+ assert.deepEqual([t.bank_movements.id,t.bank_movements.direction,Number(t.bank_movements.amount),t.bank_movements.counterparty,t.bank_movements.validable],[bank.id,'pago',-80,'Azulejos Sur',true]);
+ assert.deepEqual([t.cash_movements.id,t.cash_movements.direction,Number(t.cash_movements.amount),t.cash_movements.counterparty,t.cash_movements.validable],[k.id,'cobro',120,'Cliente Tesorería',true]);
+ assert.equal((await db.query("SELECT validable FROM ledens.treasury_movements WHERE source_id='MOV-TRASPASO'")).rows[0].validable,false);
+ // Pendiente de conciliación and Concepto de movimientos carry the origin of each row.
+ const rows=await inbox();
+ assert.equal(rows.find(r=>r.id===bank.id).origin,'bank_movements');assert.equal(rows.find(r=>r.id===k.id).origin,'cash_movements');
+ assert.ok(!rows.some(r=>r.referencia==='MOV-TRASPASO'));
+ const mv=(await asAdmin().movements({pageSize:100})).rows;
+ assert.deepEqual([mv.find(r=>r.id===bank.id).origin,mv.find(r=>r.id===k.id).origin,mv.find(r=>r.id===k.id).tipo],['bank_movements','cash_movements','efectivo']);
+ // Once assigned, cash appears in Movimientos conciliados like a reconciled bank movement.
+ const {recordId}=await asAdmin().assignCash({id:k.id,target:'clientes',projectId:p1});
+ const rec=(await asAdmin().reconciled({pageSize:100})).rows.find(r=>r.record_id===recordId);
+ assert.deepEqual([rec.origin,rec.movimiento,rec.sentido,rec.fecha_movimiento],['cash_movements','Cobro en mano','cobro','2026-10-01']);
 });

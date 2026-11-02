@@ -11,7 +11,7 @@ before(async()=>{
  const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
  await db.exec('ALTER TABLE users ADD COLUMN name text');
- for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','011_transaction_alerts.sql','012_bridge_party_amount_date.sql','013_pago_trabajadores.sql','016_cash_movements.sql','014_purchase_settlements.sql','026_materiales_provisionales.sql'])
+ for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','011_transaction_alerts.sql','012_bridge_party_amount_date.sql','013_pago_trabajadores.sql','016_cash_movements.sql','027_treasury_movements.sql','014_purchase_settlements.sql','026_materiales_provisionales.sql'])
   await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
  admin=(await db.query("INSERT INTO users(email,role,name) VALUES('admin@ob.test','admin','Admin') RETURNING id,role")).rows[0];
  const bank=async(amount,description)=>(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)

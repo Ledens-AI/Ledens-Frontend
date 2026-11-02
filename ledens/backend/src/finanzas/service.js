@@ -8,10 +8,24 @@ export class FinError extends FinanceError {constructor(status,message,extra){su
 export const isUuid=uuid;
 export const TYPES={material:{label:'Material'},trabajador:{label:'Trabajador'},cliente:{label:'Cliente'},concepto:{label:'Concepto de factura'}};
 export const STATES=['pendiente','asignado','parcial','revision'];
-// Unassigned cash (016) shares the «movimientos» inbox: signed like a bank movement.
-const CASH_CANDIDATES=` UNION ALL SELECT k.id,'efectivo',k.occurred_on,k.counterparty,k.concept,NULL,'Efectivo',
-  CASE WHEN k.kind='pago' THEN -k.amount ELSE k.amount END,NULL::uuid,0,'0',ARRAY['efectivo'],true
-  FROM ledens.cash_movements k WHERE k.kind IN ('pago','cobro') AND k.assigned_to IS NULL AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=k.id)`;
+// «Pendiente de conciliación» → movimientos: every validable row of
+// ledens.treasury_movements (027: bank and cash in one, with its origin) still to
+// be reconciled. A bank movement leaves once it is a worker batch or a client
+// payment, or its Bridge links cover it; unassigned cash (016) has no Bridge and
+// is signed like a bank movement.
+const TREASURY_CANDIDATES=`candidates AS(SELECT x.id,CASE x.origin WHEN 'bank_movements' THEN 'movimiento' ELSE 'efectivo' END::text type,x.origin,
+  x.occurred_on fecha,x.counterparty tercero,CASE x.origin WHEN 'bank_movements' THEN x.description ELSE x.concept END concepto,a.documentos numerodocumento,
+  CASE x.origin WHEN 'bank_movements' THEN x.source_id ELSE 'Efectivo' END referencia,x.amount importe,NULL::uuid document_id,
+  coalesce(a.enlaces,0) enlaces,coalesce(a.confirmado,0)::text conciliado,
+  CASE x.origin WHEN 'cash_movements' THEN ARRAY['efectivo'] ELSE array_remove(ARRAY[CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_bridge' END,
+   CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_documento' END,CASE WHEN a.revision>0 THEN 'revision' END,
+   CASE WHEN a.enlaces>0 AND coalesce(a.confirmado,0)<>x.amount THEN 'parcial' END],NULL) END motivos,
+  (x.origin='cash_movements' OR coalesce(a.enlaces,0)=0 OR a.revision>0 OR coalesce(a.confirmado,0)<>x.amount) pendiente
+ FROM ledens.treasury_movements x LEFT JOIN bridge_bank a ON a.bank_movement_id=x.id
+ WHERE x.validable AND CASE x.origin
+  WHEN 'bank_movements' THEN NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=x.id)
+   AND NOT EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=x.id)
+  ELSE x.assigned_to IS NULL AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=x.id) END)`;
 const CASH_TARGETS={trabajadores:'pago',materiales:'pago',clientes:'cobro'};
 const SCOPE=`($1 OR (NOT EXISTS(SELECT 1 FROM ledens.project_financial_allocations ax WHERE ax.record_id=f.id AND NOT EXISTS
  (SELECT 1 FROM ledens.finance_project_permissions fp WHERE fp.user_id=$2 AND fp.project_id=ax.project_id)) AND
@@ -78,29 +92,26 @@ const movementsSql=purchases=>`WITH links AS(SELECT bank_movement_id,document_id
  recs AS(SELECT DISTINCT x.mov,r.id,r.version,r.category FROM (
   SELECT f.bank_movement_id mov,f.id FROM ledens.financial_records f WHERE f.bank_movement_id IS NOT NULL
   UNION ALL SELECT l.bank_movement_id,f.id FROM links l JOIN ledens.financial_records f ON f.document_id=l.document_id
-  UNION ALL SELECT k.id,f.id FROM ledens.cash_movements k JOIN ledens.financial_records f ON f.material_id=k.material_id OR f.customer_payment_id=k.customer_payment_id
+  UNION ALL SELECT t.id,f.id FROM ledens.treasury_movements t JOIN ledens.financial_records f ON f.material_id=t.material_id OR f.customer_payment_id=t.customer_payment_id
+   WHERE t.origin='cash_movements'
  ) x JOIN ledens.financial_records r ON r.id=x.id WHERE r.source_valid AND r.status<>'excluded'),
  agg AS(SELECT mov,count(*)::int n,array_agg(DISTINCT ${CAT_CLASE('category')}) clases,md5(string_agg(id::text||':'||version,',' ORDER BY id)) version FROM recs GROUP BY mov),
  movs AS(
-  SELECT b.id,'banco'::text tipo,b.completed_on fecha,coalesce(b.beneficiary_name,b.payer) tercero,coalesce(nullif(b.description,''),b.reference) concepto,b.source_id referencia,b.total_amount importe,
+  SELECT t.id,CASE t.origin WHEN 'bank_movements' THEN 'banco' ELSE 'efectivo' END::text tipo,t.origin,t.occurred_on fecha,t.counterparty tercero,t.concept concepto,
+   CASE t.origin WHEN 'bank_movements' THEN t.source_id ELSE 'Efectivo' END referencia,t.amount importe,
    d.documentos,coalesce(d.n,0) n_docs,coalesce(d.sin_registros,false) doc_sin_registros,
-   EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=b.id) lote,
-   EXISTS(SELECT 1 FROM ledens.provisional_material_payments pm WHERE pm.bank_movement_id=b.id AND pm.replaced_at IS NULL) provisional,
-   b.total_amount>0 AND EXISTS(SELECT 1 FROM ledens.material_expenses me WHERE me.bank_movement_id=b.id) reembolso,
-   EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=b.id) cobro_cliente,
-   (concat_ws(' ',b.beneficiary_name,b.payer,b.description,b.reference) ~* ${OBRAMAT_TEXT} OR coalesce(d.obramat_doc,false)) obramat,
+   EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE CASE t.origin WHEN 'bank_movements' THEN wb.bank_movement_id ELSE wb.cash_movement_id END=t.id) lote,
+   EXISTS(SELECT 1 FROM ledens.provisional_material_payments pm WHERE pm.bank_movement_id=t.id AND pm.replaced_at IS NULL) provisional,
+   t.amount>0 AND EXISTS(SELECT 1 FROM ledens.material_expenses me WHERE me.bank_movement_id=t.id) reembolso,
+   (t.customer_payment_id IS NOT NULL OR EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=t.id)) cobro_cliente,
+   (t.search_text ~* ${OBRAMAT_TEXT} OR coalesce(d.obramat_doc,false)) obramat,
    coalesce(d.solo_compras,false) solo_compras
-  FROM ledens.bank_movements b LEFT JOIN LATERAL(SELECT string_agg(DISTINCT coalesce(dd.numerodocumento,'Sin número'),', ') documentos,count(*)::int n,
+  FROM ledens.treasury_movements t LEFT JOIN LATERAL(SELECT string_agg(DISTINCT coalesce(dd.numerodocumento,'Sin número'),', ') documentos,count(*)::int n,
     bool_or(NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=dd.id AND r.source_valid AND r.status<>'excluded')) sin_registros,
     bool_or(${isObramatDoc('dd')}) obramat_doc,
     ${purchases?"bool_and(EXISTS(SELECT 1 FROM ledens.purchase_documents pd WHERE pd.document_id=dd.id AND pd.kind IN ('advance','advance_refund')))":'false'} solo_compras
-   FROM links l JOIN ledens.documents dd ON dd.id=l.document_id WHERE l.bank_movement_id=b.id) d ON true
-  WHERE NOT coalesce(b.is_internal_transfer,false) AND b.total_amount<>0
-  UNION ALL
-  SELECT k.id,'efectivo',k.occurred_on,k.counterparty,k.concept,'Efectivo',CASE WHEN k.kind='pago' THEN -k.amount ELSE k.amount END,NULL,0,false,
-   EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=k.id),false,false,k.customer_payment_id IS NOT NULL,
-   concat_ws(' ',k.counterparty,k.concept) ~* ${OBRAMAT_TEXT},false
-  FROM ledens.cash_movements k WHERE k.kind IN ('pago','cobro')),
+   FROM links l JOIN ledens.documents dd ON dd.id=l.document_id WHERE l.bank_movement_id=t.id) d ON true
+  WHERE t.validable AND t.amount<>0),
  cls AS(SELECT m.*,coalesce(a.n,0) registros,coalesce(a.version,md5('')) version,
   ARRAY(SELECT DISTINCT e FROM unnest(array_remove(coalesce(a.clases,'{}'::text[]),'x')||CASE WHEN m.lote THEN ARRAY['trabajadores'] ELSE '{}'::text[] END) e ORDER BY e) conocidas,
   ('x'=ANY(coalesce(a.clases,'{}'::text[])) OR (m.doc_sin_registros AND NOT m.provisional AND NOT m.reembolso AND NOT m.cobro_cliente)) desconocido
@@ -109,7 +120,7 @@ const movementsSql=purchases=>`WITH links AS(SELECT bank_movement_id,document_id
    WHEN cardinality(c.conocidas)=1 THEN CASE WHEN c.conocidas[1]='materiales' AND c.importe>0 THEN 'reembolso_proveedor' ELSE c.conocidas[1] END ELSE 'mixto' END clase,
   CASE WHEN c.importe<0 THEN 'pago' ELSE 'cobro' END sentido FROM cls c)`;
 // One row of «Concepto de movimientos» (list and single movement).
-const MOVEMENT_COLUMNS=' SELECT id,tipo,fecha::text fecha,tercero,concepto,referencia,importe::text importe,documentos,clase,conocidas,sentido,version,registros,lote,obramat,'+
+const MOVEMENT_COLUMNS=' SELECT id,tipo,origin,fecha::text fecha,tercero,concepto,referencia,importe::text importe,documentos,clase,conocidas,sentido,version,registros,lote,obramat,'+
  "CASE WHEN obramat AND solo_compras THEN 'compra_obramat' WHEN provisional THEN 'provisional' WHEN reembolso THEN 'registro' WHEN n_docs>0 THEN 'bridge' WHEN lote THEN 'trabajadores' WHEN registros>0 THEN 'registro' ELSE 'ninguno' END origen";
 // «Adjuntar detalle»: the product detail of a reconciled document without
 // concepts is read with the invoice OCR (Document Intelligence, F0: 4 MB).
@@ -281,14 +292,18 @@ export class FinanzasService {
   const params=[...this.params(),'%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',tercero,concepto,numerodocumento,movimiento) ILIKE $3"];
   if(clase){if(![...Object.keys(CLASES),'sin_clasificar','otros'].includes(clase))throw new FinError(400,'Clasificación no válida');params.push(clase);where.push('clase=$'+params.length);}
   for(const [v,op] of [[from,'>='],[to,'<=']])if(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v)))throw new FinError(400,'Fecha no válida');params.push(v);where.push('fecha_movimiento '+op+' $'+params.length+'::date');}
-  const sql=BASE+`, rec AS(SELECT l.*,${CLASE_SQL} clase,mv.fecha_movimiento,mv.movimiento,mv.pago,
+  const sql=BASE+`, rec AS(SELECT l.*,${CLASE_SQL} clase,mv.fecha_movimiento,mv.movimiento,mv.origin,mv.pago,
     CASE WHEN l.type='cliente' OR l.doc_tipo='Cobrar' THEN 'cobro' WHEN l.doc_tipo='Pagar' OR l.type IN ('material','trabajador') THEN 'pago'
      WHEN mv.pago THEN 'pago' ELSE 'cobro' END sentido
-    FROM listed l JOIN LATERAL(SELECT count(*)::int n,max(b.completed_on) fecha_movimiento,bool_or(b.total_amount<0) pago,
-     string_agg(DISTINCT coalesce(nullif(b.description,''),b.reference,b.source_id),' · ') movimiento FROM ledens.bank_movements b
-     WHERE b.id=l.bank_movement_id OR b.id IN(SELECT a.bank_movement_id FROM ledens.bank_document_allocations a WHERE a.document_id=l.document_id AND a.state='Confirmado')) mv ON mv.n>0)
+    FROM listed l JOIN LATERAL(SELECT count(*)::int n,max(t.occurred_on) fecha_movimiento,bool_or(t.amount<0) pago,
+     string_agg(DISTINCT coalesce(t.concept,t.source_id),' · ') movimiento,string_agg(DISTINCT t.origin,',') origin FROM ledens.treasury_movements t
+     WHERE CASE t.origin WHEN 'bank_movements' THEN t.id=l.bank_movement_id
+       OR t.id IN(SELECT a.bank_movement_id FROM ledens.bank_document_allocations a WHERE a.document_id=l.document_id AND a.state='Confirmado')
+      ELSE (l.type='material' AND t.material_id=l.id) OR (l.type='cliente' AND t.customer_payment_id=l.id)
+       OR (l.type='trabajador' AND EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb JOIN ledens.worker_payment_splits ws ON ws.batch_id=wb.id
+        WHERE wb.cash_movement_id=t.id AND ws.worker_payment_id=l.id)) END) mv ON mv.n>0)
    SELECT record_id,type,version,category,clase,sentido,accounting_status,fecha,importe,tercero,concepto,numerodocumento,line_number,project_label,parts,estado,
-    fecha_movimiento::text fecha_movimiento,movimiento FROM rec WHERE `+where.join(' AND ');
+    fecha_movimiento::text fecha_movimiento,movimiento,origin FROM rec WHERE `+where.join(' AND ');
   const rows=(await this.query(sql+` ORDER BY fecha_movimiento DESC NULLS LAST,numerodocumento,line_number NULLS FIRST,record_id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows;
   const total=(await this.query('SELECT count(*)::int n FROM ('+sql+') x',params)).rows[0].n;
   return {rows,total,page:p,pageSize:size};
@@ -338,10 +353,12 @@ export class FinanzasService {
      CASE WHEN a.revision>0 THEN 'revision' END,CASE WHEN a.enlaces>0 AND coalesce(a.confirmado,0)<>d.total THEN 'parcial' END],NULL) motivos,
     (l.document_id IS NULL OR coalesce(a.enlaces,0)=0 OR a.revision>0 OR coalesce(a.confirmado,0)<>d.total) pendiente
     FROM listed l LEFT JOIN ledens.documents d ON d.id=l.document_id LEFT JOIN bridge_doc a ON a.document_id=l.document_id)`;
-  else {const bank=view==='movimientos';base='WITH '+bridge+`, candidates AS(SELECT x.id,'`+(bank?'movimiento':'documento')+`'::text type,`+(bank?'x.completed_on':'x.document_on')+` fecha,`+(bank?"coalesce(x.beneficiary_name,x.payer)":"x.tercero")+` tercero,`+(bank?'x.description':"to_jsonb(x)->>'descripcion'")+` concepto,`+(bank?'a.documentos':'x.numerodocumento')+` numerodocumento,`+(bank?'x.source_id':'x.id::text')+` referencia,`+(bank?'x.total_amount':'x.total')+` importe,`+(bank?'NULL::uuid':'x.id')+` document_id,coalesce(a.enlaces,0) enlaces,coalesce(a.confirmado,0)::text conciliado,
-    array_remove(ARRAY[CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_bridge' END,`+(bank?"CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_documento' END,":"")+`CASE WHEN a.revision>0 THEN 'revision' END,CASE WHEN a.enlaces>0 AND coalesce(a.confirmado,0)<>`+(bank?'x.total_amount':'x.total')+` THEN 'parcial' END],NULL) motivos,
-    (coalesce(a.enlaces,0)=0 OR a.revision>0 OR coalesce(a.confirmado,0)<>`+(bank?'x.total_amount':'x.total')+`) pendiente
-    FROM ledens.`+(bank?'bank_movements':'documents')+` x LEFT JOIN `+(bank?'bridge_bank a ON a.bank_movement_id':'bridge_doc a ON a.document_id')+`=x.id `+(bank?'WHERE NOT coalesce(x.is_internal_transfer,false) AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=x.id) AND NOT EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=x.id)'+CASH_CANDIDATES:'WHERE '+hideCovered)+`)`;}
+  else if(view==='movimientos')base='WITH '+bridge+', '+TREASURY_CANDIDATES;
+  else base='WITH '+bridge+`, candidates AS(SELECT x.id,'documento'::text type,x.document_on fecha,x.tercero,to_jsonb(x)->>'descripcion' concepto,x.numerodocumento,x.id::text referencia,x.total importe,x.id document_id,
+    coalesce(a.enlaces,0) enlaces,coalesce(a.confirmado,0)::text conciliado,
+    array_remove(ARRAY[CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_bridge' END,CASE WHEN a.revision>0 THEN 'revision' END,CASE WHEN a.enlaces>0 AND coalesce(a.confirmado,0)<>x.total THEN 'parcial' END],NULL) motivos,
+    (coalesce(a.enlaces,0)=0 OR a.revision>0 OR coalesce(a.confirmado,0)<>x.total) pendiente
+    FROM ledens.documents x LEFT JOIN bridge_doc a ON a.document_id=x.id WHERE `+hideCovered+`)`;
   const filtered=base+' SELECT *, (importe-coalesce(conciliado::numeric,0))::text por_conciliar FROM candidates WHERE '+where.join(' AND ');
   const rows=(await this.query(filtered+' ORDER BY fecha DESC NULLS LAST,id LIMIT '+size+' OFFSET '+((p-1)*size),params)).rows;
   const total=(await this.query('SELECT count(*)::int n FROM ('+filtered+') matching',params)).rows[0].n;
@@ -448,8 +465,11 @@ export class FinanzasService {
   const why=typeof reason==='string'?reason.trim():'';
   if(why.length>500)throw new FinError(400,'Motivo no válido (máximo 500 caracteres)');
   return this.finance.transaction(async c=>{
-   const b=(await c.query('SELECT * FROM ledens.bank_movements WHERE id=$1 FOR UPDATE',[id])).rows[0];
-   const k=b?null:(await c.query('SELECT * FROM ledens.cash_movements WHERE id=$1 FOR UPDATE',[id])).rows[0];
+   // The view tells where the movement lives; the row is locked in its own table.
+   const t=(await c.query('SELECT origin,validable FROM ledens.treasury_movements WHERE id=$1',[id])).rows[0];
+   if(!t||(t.origin==='cash_movements'&&!t.validable))throw new FinError(404,'Movimiento no encontrado');
+   const b=t.origin==='bank_movements'?(await c.query('SELECT * FROM ledens.bank_movements WHERE id=$1 FOR UPDATE',[id])).rows[0]:null;
+   const k=t.origin==='cash_movements'?(await c.query('SELECT * FROM ledens.cash_movements WHERE id=$1 FOR UPDATE',[id])).rows[0]:null;
    if(!b&&!k)throw new FinError(404,'Movimiento no encontrado');
    if(b?.is_internal_transfer)throw new FinError(409,'Es un traspaso interno');
    const amount=b?cents(b.total_amount):k.kind==='pago'?-cents(k.amount):cents(k.amount);

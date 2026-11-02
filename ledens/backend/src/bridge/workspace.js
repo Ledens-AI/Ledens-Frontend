@@ -32,8 +32,9 @@ export class BridgeWorkspace {
  }
  async counts(){
   const pending=(await this.movements({limit:1})).total;
-  const cash=Boolean((await this.pool.query("SELECT to_regclass('ledens.cash_movements') name")).rows[0].name);
-  const cashPending=cash?(await this.pool.query("SELECT count(*)::int n FROM ledens.cash_movements WHERE kind IN ('pago','cobro') AND assigned_to IS NULL")).rows[0].n:0;
+  // Cash has no Bridge: it is read from the joint treasury view (027) by its origin.
+  const treasury=Boolean((await this.pool.query("SELECT to_regclass('ledens.treasury_movements') name")).rows[0].name);
+  const cashPending=treasury?(await this.pool.query("SELECT count(*)::int n FROM ledens.treasury_movements WHERE origin='cash_movements' AND validable AND assigned_to IS NULL")).rows[0].n:0;
   // Pendiente de conciliación leaves out receipts already recorded as client payments.
   const inbox=(await this.movements({limit:1,withoutCustomerPayments:true})).total;
   return {pending,reconciliation:inbox+cashPending};
