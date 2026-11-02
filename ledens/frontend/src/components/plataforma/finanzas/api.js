@@ -46,6 +46,7 @@ export const api = {
   projects: (q) => request('GET', '/api/finanzas/proyectos' + qs({ q, limit: 30 })),
   summary: () => request('GET', '/api/finanzas/resumen'),
   records: (f) => request('GET', '/api/finanzas/registros' + qs(f)),
+  workerSeries: (f) => request('GET', '/api/finanzas/pagos-trabajadores/serie' + qs(f)),
   record: (type, id) => request('GET', `/api/finanzas/registros/${type}/${id}`),
   assign: (type, id, body) => request('PUT', `/api/finanzas/registros/${type}/${id}/proyecto`, body),
   distribute: (type, id, body) => request('PUT', `/api/finanzas/registros/${type}/${id}/distribucion`, body),

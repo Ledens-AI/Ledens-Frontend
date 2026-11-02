@@ -259,3 +259,6 @@
 .fin-rent-tip div { margin-top: 2px; color: #4A4A47; }
 .fin-rent-pos { color: #2F6B63; }
 .fin-rent-neg { color: #B84371; }
+/* Pagos a trabajadores chart: the hover lists each worker's amount. */
+.fin-wk-tip { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.fin-wk-tip i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
