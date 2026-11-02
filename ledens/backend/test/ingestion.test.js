@@ -6,7 +6,7 @@ import { PDFDocument, StandardFonts } from 'pdf-lib';
 import express from 'express';
 import { createHash } from 'node:crypto';
 import { invoiceQuarter, validateInvoice } from '../src/ingestion/validation.js';
-import { extractInvoice, trustedOperation, partyNameEvidence } from '../src/ingestion/ocr.js';
+import { extractInvoice, trustedOperation, partyNameEvidence, payslipPeriodEnd, payslipNet, validSpanishTaxId } from '../src/ingestion/ocr.js';
 import { IngestionService } from '../src/ingestion/service.js';
 import { createIngestionRouter } from '../src/routes/ingestion.js';
 
@@ -86,6 +86,60 @@ test('endpoint authenticates before body parsing and rejects invalid ids',async(
 test('invoice date minimum confidence is inclusive at 50 percent',()=>{
  for(const confidence of [0.5,0.669,0.89,1])assert.equal(extractInvoice({analyzeResult:{documents:[{fields:{InvoiceDate:{valueDate:'2026-09-22',confidence}}}]}}).date,'2026-09-22');
  for(const confidence of [0.499,1.01])assert.equal(extractInvoice({analyzeResult:{documents:[{fields:{InvoiceDate:{valueDate:'2026-09-22',confidence}}}]}}).reason,'invoice_date_requires_review');
+});
+test('a payslip is dated on the last day of its periodo de liquidación, whatever date the OCR picked',()=>{
+  const slip=period=>`EMPRESA\nANTIGÜEDAD\n03/08/26\nPERIODO DE LIQUIDACIÓN\nT. DÍAS\nMALAGA\n29149952067\n${period}\n30\nDEVENGOS\nLÍQUIDO A PERCIBIR\n1.332,17`;
+  for(const [period,end] of [['1/31-10-2026','2026-10-31'],['01/30-09-2026','2026-09-30'],['01/10/2026 a 31/10/2026','2026-10-31'],
+    ['del 1 al 28 de febrero de 2026','2026-02-28'],['MENS 01 OCT 26 a 31 OCT 2026','2026-10-31']]){
+    assert.equal(payslipPeriodEnd(slip(period)),end,period);
+    const r=extractInvoice({analyzeResult:{content:slip(period),documents:[{fields:{InvoiceDate:{valueDate:'2026-08-03',confidence:.44}}}]}});
+    assert.equal(r.date,end,period);assert.equal(r.confidence,.9);assert.equal(r.corroborated.date,'payslip_period_end');
+  }
+  // Without payslip contents the label alone proves nothing; an impossible period is ignored.
+  assert.equal(payslipPeriodEnd('PERIODO DE LIQUIDACIÓN 1/31-10-2026 TOTAL 100,00'),null);
+  assert.equal(payslipPeriodEnd('PERIODO DE LIQUIDACIÓN 1/31-13-2026 DEVENGOS'),null);
+  assert.equal(extractInvoice({analyzeResult:{content:'FACTURA 01/10/2026',documents:[{fields:{InvoiceDate:{valueDate:'2026-09-22',confidence:.9}}}]}}).date,'2026-09-22');
+});
+test('a payslip of ours is a cost to pay for its líquido a percibir, only when devengos minus deducciones prove it',async()=>{
+  const {archiveIssue}=await import('../src/ingestion/completeness.js');
+  // Boxes as the OCR reads them: the líquido sits among other amounts after its label.
+  const slip=(net,nif='B19753805')=>`EMPRESA\nPERIODO DE LIQUIDACIÓN\n1/31-10-2026\nDEVENGOS\nRETENCIONES\nTOTALES\n1.424,77\n92,60\n`+
+    `LÍQUIDO A PERCIBIR\nTRABAJADOR\n1.424,77\n0,15\n2,14\n66,96\n${net}\nNIF : ${nif}\nRECIBÍ:`;
+  const doc=content=>({analyzeResult:{content,documents:[{fields:{InvoiceDate:{valueDate:'2026-08-03',confidence:.44},CustomerName:{valueString:'ANZOLA GOMEZ ANA LUISA',confidence:.31}}}]}});
+  assert.equal(payslipNet(slip('1.332,17')),133217);
+  const r=extractInvoice(doc(slip('1.332,17')));
+  assert.deepEqual([r.date,r.total,r.direction,r.currency,r.vendor],['2026-10-31',-1332.17,'Pagar','EUR','ANZOLA GOMEZ ANA LUISA']);
+  assert.equal(archiveIssue({document_on:r.date,total:r.total,tipo:r.direction,invoice_currency:r.currency,date_confidence:r.confidence,total_confidence:r.totalConfidence,direction_confidence:r.directionConfidence}),null);
+  // No amount that is devengos − deducciones, or not our payslip: no total, so it stays in review.
+  assert.equal(payslipNet(slip('1.300,00')),null);
+  for(const content of [slip('1.300,00'),slip('1.332,17','B12345674')])assert.notEqual(extractInvoice(doc(content)).direction,'Pagar');
+});
+
+test('a supplier credit note (negative total, we are the buyer) is money back: Cobrar, positive',async()=>{
+  const {archiveIssue}=await import('../src/ingestion/completeness.js');
+  const doc=(amount,customer='B19753805')=>({analyzeResult:{content:'FACTURA RECTIFICATIVA',documents:[{fields:{InvoiceDate:{valueDate:'2026-10-28',confidence:.66},
+    VendorName:{valueString:'OBRAMAT',confidence:.65},VendorTaxId:{valueString:'B-84406289',confidence:.55},CustomerTaxId:{valueString:customer,confidence:.81},
+    InvoiceTotal:{valueCurrency:{amount,currencyCode:'EUR'},confidence:.66}}}]}});
+  const r=extractInvoice(doc(-10));
+  assert.deepEqual([r.direction,r.total,r.vendor,r.taxId,r.directionConfidence],['Cobrar',10,'OBRAMAT','B-84406289',.81]);
+  assert.equal(archiveIssue({document_on:r.date,total:r.total,tipo:r.direction,invoice_currency:r.currency,date_confidence:r.confidence,total_confidence:r.totalConfidence,direction_confidence:r.directionConfidence}),null);
+  // An ordinary purchase is unchanged.
+  assert.deepEqual([extractInvoice(doc(10)).direction,extractInvoice(doc(10)).total],['Pagar',-10]);
+});
+
+test('a ticket with no customer is a purchase from the one valid Spanish tax id the OCR read in its text',async()=>{
+  const {archiveIssue}=await import('../src/ingestion/completeness.js');
+  assert.deepEqual(['44582380P','B19753805','B84406289','X1234567L'].map(validSpanishTaxId),[true,true,true,true]);
+  assert.deepEqual(['44582380Q','B19753806','A280695'].map(validSpanishTaxId),[false,false,false]);
+  const ticket=(content,fields={})=>{const at=content.indexOf('Nif: ')+5;return {analyzeResult:{content,documents:[{fields:{InvoiceDate:{valueDate:'2026-10-27',confidence:.97},
+    VendorName:{valueString:'ELECTROPINTURAS SEDEÑO',confidence:.81},InvoiceTotal:{valueCurrency:{amount:9.5,currencyCode:'EUR'},confidence:.58},...fields}}],
+    pages:[{words:[{content:content.slice(at,at+9),confidence:.957,span:{offset:at,length:9}}]}]}};};
+  const r=extractInvoice(ticket('ELECTROPINTURAS SEDEÑO\nNºTicket: A280695\nTotal Ticket 9,50\nNif: 44582380P'));
+  assert.deepEqual([r.direction,r.total,r.taxId,r.directionConfidence],['Pagar',-9.5,'44582380P',.957]);
+  assert.equal(archiveIssue({document_on:r.date,total:r.total,tipo:r.direction,invoice_currency:r.currency,date_confidence:r.confidence,total_confidence:r.totalConfidence,direction_confidence:r.directionConfidence}),null);
+  // A wrong control letter, our own id, two ids, or a customer on the document: no direction.
+  for(const t of [ticket('Nif: 44582380Q'),ticket('Nif: 44582380P\nCIF B19753805'),ticket('Nif: 44582380P\nNIF: B84406289'),
+    ticket('Nif: 44582380P',{CustomerName:{valueString:'Otro',confidence:.9}})])assert.equal(extractInvoice(t).direction,null);
 });
 
 test('supplier corroboration uses only high-confidence words inside the vendor field and a verified vendor NIF',()=>{
