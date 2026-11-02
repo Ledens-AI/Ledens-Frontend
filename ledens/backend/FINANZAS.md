@@ -20,6 +20,12 @@ La pantalla Pendiente de conciliación muestra exclusivamente movimientos bancar
 
 La antigua pantalla «Pendiente de bridge movimientos documentos» está integrada aquí: cada movimiento bancario trae `bank` (`id, description, reference, total_amount, remaining, state, currency, bank_fingerprint`) y su botón «Asignar documento» abre en la propia fila la búsqueda de documentos existentes y confirma el enlace con `POST /api/bridge/:documentId/confirm`, como antes. «Bridge Movimientos Documentos» queda como consulta de los enlaces guardados.
 
+## Documentos sin asignar
+
+Pantalla entre «Bridge Movimientos Documentos» y «Concepto de movimientos». Muestra los documentos procesados (`ledens.documents` con total distinto de cero) que no tienen ningún movimiento asignado, es decir, ningún enlace `Confirmado` en `bank_document_allocations`. Las entregas de Obramat ya pagadas con su anticipo (`v_purchase_coverage`) no aparecen. Es de consulta: el movimiento se asigna desde «Pendiente de conciliación» («Asignar documento»). Solo administrador.
+
+- `GET /api/finanzas/documentos-sin-asignar` `q, tipo (Pagar|Cobrar), estado (sin_enlace|revision), desde, hasta, pagina, tam` → `rows, total, importes {pagar, cobrar}`. Cada fila: `id, fecha, numerodocumento, tercero, niftercero, tipo, total, bridge_estado, bridge_motivo, revision` (enlaces sin confirmar), `registros` y `archivo` (solo enlaces https de SharePoint).
+
 ## Concepto de movimientos
 
 Pantalla «Concepto de movimientos» (sustituye a «Conceptos de facturas»). Lista todos los movimientos bancarios (sin traspasos internos ni importes cero) y en efectivo, una fila cada uno, con su clase: Pago de materiales, Pago a trabajadores, Cobro de clientes, Varias clases o **Pendiente de clasificación**. Solo administrador.

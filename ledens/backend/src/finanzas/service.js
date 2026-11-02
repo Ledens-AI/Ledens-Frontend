@@ -280,6 +280,32 @@ export class FinanzasService {
   }
   return {rows,total,page:p,pageSize:size};
  }
+ // ------------------------------------------------------------- documentos sin asignar
+ // Every processed document (ledens.documents, non-zero total) with no movement
+ // assigned: no confirmed Bridge link. A delivery already paid by an Obramat
+ // advance needs no movement and is left out. Admin, like the Bridge.
+ async unassignedDocuments({page=1,pageSize=25,q='',tipo='',estado='',from='',to=''}={}){
+  if(this.user.role!=='admin')throw new FinError(403,'Los documentos sin asignar requieren administrador');
+  const size=Math.min(100,Math.max(1,Number(pageSize)||25)),p=Math.max(1,Math.min(4000,Number(page)||1));
+  if(!Number.isInteger(size)||!Number.isInteger(p))throw new FinError(400,'Paginación no válida');
+  const params=['%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',d.numerodocumento,d.tercero,d.niftercero) ILIKE $1"];
+  if(tipo){if(!['Pagar','Cobrar'].includes(tipo))throw new FinError(400,'Tipo no válido');params.push(tipo);where.push('d.tipo=$'+params.length);}
+  if(estado){if(!['sin_enlace','revision'].includes(estado))throw new FinError(400,'Estado no válido');where.push(estado==='revision'?'x.revision>0':'x.revision=0');}
+  for(const [v,op] of [[from,'>='],[to,'<=']])if(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v)))throw new FinError(400,'Fecha no válida');params.push(v);where.push('d.document_on '+op+' $'+params.length+'::date');}
+  const covered=await hasPurchases(this.pool)?' AND NOT EXISTS(SELECT 1 FROM ledens.v_purchase_coverage pc WHERE pc.document_id=d.id AND pc.paid>=pc.goods_gross)':'';
+  const from_=`FROM ledens.documents d LEFT JOIN ledens.bridge_cases c ON c.document_id=d.id
+   LEFT JOIN LATERAL(SELECT count(*) FILTER(WHERE a.state IS DISTINCT FROM 'Confirmado')::int revision,count(*) FILTER(WHERE a.state='Confirmado')::int confirmados
+    FROM ledens.bank_document_allocations a WHERE a.document_id=d.id) x ON true
+   WHERE d.total<>0 AND x.confirmados=0${covered} AND `+where.join(' AND ');
+  const rows=(await this.query(`SELECT d.id,d.document_on::text fecha,d.numerodocumento,d.tercero,d.niftercero,d.tipo,d.total::text total,d.enlacearchivo,
+   coalesce(c.status,'pending') bridge_estado,c.reason bridge_motivo,x.revision,
+   (SELECT count(*)::int FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded') registros
+   ${from_} ORDER BY d.document_on DESC NULLS LAST,d.numerodocumento,d.id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows
+   .map(({enlacearchivo,...r})=>({...r,archivo:safeDocumentUrl(enlacearchivo)}));
+  const t=(await this.query(`SELECT count(*)::int n,coalesce(sum(abs(d.total)) FILTER(WHERE d.tipo='Pagar'),0)::text pagar,
+   coalesce(sum(abs(d.total)) FILTER(WHERE d.tipo='Cobrar'),0)::text cobrar ${from_}`,params)).rows[0];
+  return {rows,total:t.n,importes:{pagar:t.pagar,cobrar:t.cobrar},page:p,pageSize:size};
+ }
  // ------------------------------------------------------------- concepto de movimientos
  // Every bank movement (internal transfers aside) and cash entry, classified as
  // Pago de materiales, Pago a trabajadores or Cobro de clientes. The class is

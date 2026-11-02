@@ -116,6 +116,11 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     res.json(await svc(req).reclassify({ recordId: req.params.recordId, clase: b.clase, version: b.version, reason: b.reason }));
   }));
 
+  // Documentos sin asignar: processed documents with no confirmed movement (admins).
+  router.get('/documentos-sin-asignar', handle(async (req, res) => {
+    const q = req.query;
+    res.json(await svc(req).unassignedDocuments({ page: q.pagina, pageSize: q.tam, q: String(q.q || '').slice(0, 100), tipo: q.tipo || '', estado: q.estado || '', from: q.desde, to: q.hasta }));
+  }));
   // Concepto de movimientos: every movement and its class (admins).
   router.get('/movimientos', handle(async (req, res) => {
     res.json(await svc(req).movements({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), clase: req.query.clase || '', from: req.query.desde, to: req.query.hasta }));

@@ -50,6 +50,8 @@ export const api = {
   review: (type, id, body) => request('PUT', `/api/finanzas/registros/${type}/${id}/revision`, body),
   bulk: (body) => request('POST', '/api/finanzas/registros/lote', body),
   profitability: (projectId) => request('GET', `/api/finanzas/proyectos/${projectId}/rentabilidad`),
+  // Documentos sin asignar (admins): processed documents with no confirmed movement.
+  unassignedDocuments: (f) => request('GET', '/api/finanzas/documentos-sin-asignar' + qs(f)),
   // Concepto de movimientos (admins): every movement and its classification.
   movements: (f) => request('GET', '/api/finanzas/movimientos' + qs(f)),
   classifyMovement: (id, body) => request('PUT', `/api/finanzas/movimientos/${id}/clasificacion`, body),

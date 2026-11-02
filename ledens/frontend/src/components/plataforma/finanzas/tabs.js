@@ -8,6 +8,7 @@ export const FIN_TABS = [
   // Includes «Asignar documento» (formerly «Pendiente de bridge movimientos documentos»).
   ['conciliacion', 'Pendiente de conciliación', 'ri-bank-line'],
   ['bridge', 'Bridge Movimientos Documentos', 'ri-links-line'],
+  ['documentos-sin-asignar', 'Documentos sin asignar', 'ri-file-warning-line', true],
   ['concepto', 'Concepto de movimientos', 'ri-file-list-line', true],
   ['proyectos', 'Proyectos', 'ri-building-2-line'],
   ['rentabilidad', 'Rentabilidad por proyecto', 'ri-line-chart-line'],
