@@ -53,6 +53,19 @@ test('a payment reconciled with several documents without concepts still asks to
  assert.equal((await db.query('SELECT count(*)::int n FROM ledens.provisional_material_payments WHERE bank_movement_id=$1',[b])).rows[0].n,0);
 });
 
+test('a refund reconciled with a credit note without concepts can still be a supplier refund',async()=>{
+ const b=(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES('MOV-abono',12,12,'2026-10-12','Devolución ferretería','EUR','COMPLETED') RETURNING id`)).rows[0].id;
+ const d=(await db.query(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento) VALUES(12,'Cobrar','2026-10-12','008-0010-R281273') RETURNING id`)).rows[0].id;
+ await db.query("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state,reconciled_on) VALUES($1,$2,12,'Confirmado','2026-10-12')",[b,d]);
+ const find=async()=>(await asAdmin().movements({pageSize:100})).rows.find(x=>x.id===b);
+ await assert.rejects(asAdmin().classifyMovement({id:b,clase:'clientes',version:(await find()).version}),{status:409,message:/R281273 no tiene conceptos/},'other classes still need its concepts');
+ const res=await asAdmin().classifyMovement({id:b,clase:'reembolso_proveedor',version:(await find()).version});
+ assert.deepEqual([res.via,res.provisional],['material',false]);
+ assert.deepEqual([(await find()).clase,(await find()).origen],['reembolso_proveedor','registro']);
+ assert.equal((await db.query('SELECT r.gross_amount::text g FROM ledens.material_expenses m JOIN ledens.financial_records r ON r.material_id=m.id WHERE m.bank_movement_id=$1',[b])).rows[0].g,'-12.00');
+});
+
 test('«Segregar conceptos» reports the invoice without concepts, with what the dialog needs',async()=>{
  await assert.rejects(asAdmin().segregateMaterial(material),e=>e.status===409&&/008-0010-471790 no tiene conceptos registrados/.test(e.message)&&
   e.extra.movimiento_id===mov&&e.extra.sin_conceptos[0].id===doc&&e.extra.sin_conceptos[0].total==='-40');
