@@ -18,6 +18,9 @@ export const FINANZAS_ROLES = ['admin', 'jefe'];
 
 // `authenticate` replaces only the session lookup (tests); the role check is
 // always the real one.
+// DocumentoID / MovimientoID filters shared by the Bridge-related lists.
+const ids = (q) => ({ documentoid: String(q.documentoid || '').slice(0, 120), movimientoid: String(q.movimientoid || '').slice(0, 120) });
+
 export function createFinanzasRouter({ service, projects, workers, runLogs, authenticate, findUser, origin=process.env.CORS_ORIGIN, ocr } = {}) {
   const router = Router();
   router.use((_req, res, next) => {
@@ -125,7 +128,7 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
   // Movimientos conciliados: how each reconciled record is classified, and the
   // change of class (category only; audited with its reason).
   router.get('/conciliados', handle(async (req, res) => {
-    res.json(await svc(req).reconciled({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), clase: req.query.clase || '', from: req.query.desde, to: req.query.hasta }));
+    res.json(await svc(req).reconciled({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), clase: req.query.clase || '', from: req.query.desde, to: req.query.hasta, ...ids(req.query) }));
   }));
   router.put('/conciliados/:recordId/clasificacion', traced('imputacion', 'Cambio de clasificación', { entity: (req) => ({ type: 'registro', id: req.params.recordId }), summary: (b) => ({ message: 'Clasificado como ' + b.clase, detail: { clase: b.clase, categoria: b.category } }) })(async (req, res) => {
     const b = req.body || {};
@@ -135,7 +138,7 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
   // Documentos sin asignar: processed documents with no confirmed movement (admins).
   router.get('/documentos-sin-asignar', handle(async (req, res) => {
     const q = req.query;
-    res.json(await svc(req).unassignedDocuments({ page: q.pagina, pageSize: q.tam, q: String(q.q || '').slice(0, 100), tipo: q.tipo || '', estado: q.estado || '', from: q.desde, to: q.hasta }));
+    res.json(await svc(req).unassignedDocuments({ page: q.pagina, pageSize: q.tam, q: String(q.q || '').slice(0, 100), tipo: q.tipo || '', estado: q.estado || '', from: q.desde, to: q.hasta, ...ids(q) }));
   }));
   // Concepto de movimientos: every movement and its class (admins).
   // «Regla Obramat» on demand (it also runs after each periodic Bridge run).
@@ -175,7 +178,7 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
 
   router.get('/conciliacion', handle(async (req, res) => {
     const view = req.query.vista || 'movimientos';
-    res.json(await svc(req).reconciliation({ view, page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), reason:req.query.motivo, from:req.query.desde, to:req.query.hasta }));
+    res.json(await svc(req).reconciliation({ view, page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), reason:req.query.motivo, from:req.query.desde, to:req.query.hasta, ...ids(req.query) }));
   }));
 
   // Pago a trabajadores. { movementIds: [uuid] } → movements leave Pendiente de

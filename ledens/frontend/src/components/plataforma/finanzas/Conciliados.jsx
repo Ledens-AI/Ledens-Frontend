@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from './api.js';
 import { eur, fecha } from './format.js';
 import { Badge, Dialog, Empty, ErrorBox, Pager } from './ui.jsx';
+import { IdFields, useIdFilters } from './idFilters.jsx';
 
 export const CLASE = {
   materiales: { label: 'Materiales', bg: '#E3E7F3', fg: '#3E4D85', icon: 'ri-hammer-line' },
@@ -60,12 +61,13 @@ export default function Conciliados({ toast, onChanged }) {
   const [clase, setClase] = useState(''), [desde, setDesde] = useState(''), [hasta, setHasta] = useState('');
   const [page, setPage] = useState(1), [data, setData] = useState(null), [error, setError] = useState(''), [reload, setReload] = useState(0);
   const [editing, setEditing] = useState(null);
+  const idf = useIdFilters(() => setPage(1)), ids = idf.ids;
   useEffect(() => { const t = setTimeout(() => { setQuery(q); setPage(1); }, 300); return () => clearTimeout(t); }, [q]);
   useEffect(() => {
     let cancelled = false; setData(null); setError('');
-    api.reconciled({ q: query, clase, desde, hasta, pagina: page, tam: 25 }).then((d) => { if (!cancelled) setData(d); }, (e) => { if (!cancelled) setError(e.message); });
+    api.reconciled({ q: query, ...ids, clase, desde, hasta, pagina: page, tam: 25 }).then((d) => { if (!cancelled) setData(d); }, (e) => { if (!cancelled) setError(e.message); });
     return () => { cancelled = true; };
-  }, [query, clase, desde, hasta, page, reload]);
+  }, [query, ids, clase, desde, hasta, page, reload]);
   const filter = (setter) => (e) => { setter(e.target.value); setPage(1); };
   const done = (res) => {
     setData((d) => d && ({ ...d, rows: d.rows.map((r) => (r.record_id === res.record_id ? { ...r, clase: res.clase, category: res.category, version: res.version } : r)) }));
@@ -74,7 +76,8 @@ export default function Conciliados({ toast, onChanged }) {
   return (
     <div className="fin-stack">
       <div className="fin-card fin-filters">
-        <label className="fin-field fin-grow"><span>Buscar</span><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tercero, concepto, documento o movimiento" /></label>
+        <label className="fin-field fin-grow"><span>Buscar</span><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tercero, concepto, documento, movimiento o ID" /></label>
+        <IdFields f={idf} />
         <label className="fin-field"><span>Clasificación</span>
           <select value={clase} onChange={filter(setClase)}><option value="">Todas</option>{Object.entries(CLASE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></label>
         <label className="fin-field"><span>Desde</span><input type="date" value={desde} onChange={filter(setDesde)} /></label>
@@ -88,7 +91,7 @@ export default function Conciliados({ toast, onChanged }) {
         {data && !data.rows.length ? <Empty icon="ri-checkbox-multiple-line" title="Sin movimientos conciliados" text="Cuando un movimiento se concilia con su factura, sus conceptos aparecen aquí." /> : null}
         {data && data.rows.length ? <>
           <div className="fin-table-wrap"><table className="fin-table">
-            <thead><tr><th>Fecha mov.</th><th>Origen</th><th>Movimiento</th><th>Documento</th><th>Tercero</th><th>Concepto</th><th className="fin-num">Importe</th><th>Clasificación</th><th>Proyecto</th><th><span className="fin-sr">Acciones</span></th></tr></thead>
+            <thead><tr><th>Fecha mov.</th><th>Origen</th><th>MovimientoID</th><th>Movimiento</th><th>DocumentoID</th><th>Documento</th><th>Tercero</th><th>Concepto</th><th className="fin-num">Importe</th><th>Clasificación</th><th>Proyecto</th><th><span className="fin-sr">Acciones</span></th></tr></thead>
             <tbody>{data.rows.map((r) => {
               const c = CLASE[r.clase] || CLASE.otros;
               const can = r.type !== 'cliente' && choices(r).some((x) => x !== r.clase);
@@ -96,7 +99,9 @@ export default function Conciliados({ toast, onChanged }) {
                 <tr key={r.record_id}>
                   <td className="fin-nowrap">{fecha(r.fecha_movimiento)}</td>
                   <td className="fin-nowrap">{origen(r.origin)}</td>
+                  <td className="fin-nowrap">{r.movimientoid || '—'}</td>
                   <td className="fin-ellipsis" title={r.movimiento}>{r.movimiento || '—'}</td>
+                  <td className="fin-nowrap">{r.documentoid || '—'}</td>
                   <td className="fin-nowrap">{r.numerodocumento || <span className="fin-muted">Sin documento</span>}{r.line_number ? <span className="fin-muted"> · línea {r.line_number}</span> : null}</td>
                   <td className="fin-ellipsis">{r.tercero || '—'}</td>
                   <td className="fin-ellipsis is-wide" title={r.concepto}>{r.concepto || '—'}</td>

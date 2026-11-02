@@ -14,6 +14,10 @@ Pruebas: test/finanzas.test.js verifica que interfaz y API usan una sola asignac
 
 El despliegue normal aplica la migración 010 después de las 005/006 ya desplegadas. No se sustituye la ingesta de facturas, el Bridge, Revolut ni la autenticación. Las sugerencias no asignan automáticamente proyectos desde la interfaz.
 
+## DocumentoID y MovimientoID
+
+Bridge Movimientos Documentos (`GET /api/bridge/workspace/allocations`), Pendiente de conciliación (`GET /conciliacion`), Movimientos conciliados (`GET /conciliados`) y Documentos sin asignar (`GET /documentos-sin-asignar`) muestran dos columnas: **DocumentoID** (`ledens.documents.documentoid`) y **MovimientoID** (`ledens.bank_movements.source_id`; en efectivo importado, el id de FactMovimientosEfectivo). Si una fila tiene varios documentos o movimientos enlazados, aparecen separados por comas (en Documentos sin asignar, MovimientoID son los movimientos con enlace en revisión). Las dos se buscan en el cuadro «Buscar» y tienen filtro propio: `documentoid` y `movimientoid`, coincidencia parcial sin distinguir mayúsculas.
+
 ## Pendiente de conciliación
 
 La pantalla Pendiente de conciliación muestra exclusivamente movimientos bancarios sin enlaces Bridge, con enlaces en revisión o con diferencias entre su total firmado y las imputaciones confirmadas. Cada movimiento aparece una sola vez, con los números de documentos relacionados. Los materiales sin proyecto se gestionan en «Materiales pendiente de asignación» (solo lo que lista Materiales: nunca pagos a trabajadores ni cobros de clientes). Las vistas de registros financieros y documentos se conservan solo como consultas compatibles de API. Solo administrador puede consultar la bandeja global.

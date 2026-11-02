@@ -37,12 +37,21 @@ const TREASURY_CANDIDATES=`candidates AS(SELECT x.id,CASE x.origin WHEN 'bank_mo
    CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_documento' END,CASE WHEN a.revision>0 THEN 'revision' END,
    CASE WHEN a.enlaces>0 AND coalesce(a.confirmado,0)<>x.amount THEN 'parcial' END],NULL) END motivos,
   (x.origin='cash_movements' OR coalesce(a.enlaces,0)=0 OR a.revision>0 OR coalesce(a.confirmado,0)<>x.amount) pendiente,
-  x.imported importado,x.imported_detail detalle_importado,CASE WHEN x.imported THEN ${IMPORTED_PROJECT} END obra_sugerida
+  x.imported importado,x.imported_detail detalle_importado,CASE WHEN x.imported THEN ${IMPORTED_PROJECT} END obra_sugerida,
+  a.documentoids documentoid,coalesce(x.source_id,x.imported_detail->>'id') movimientoid
  FROM ledens.treasury_movements x LEFT JOIN bridge_bank a ON a.bank_movement_id=x.id
  WHERE x.validable AND CASE x.origin
   WHEN 'bank_movements' THEN NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=x.id)
    AND NOT EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=x.id) AND NOT x.marked_transfer
   ELSE x.assigned_to IS NULL AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=x.id) END)`;
+// DocumentoID (documents.documentoid) and MovimientoID (bank source_id, or the id of imported cash):
+// optional partial, case-insensitive filters of Bridge, Pendiente de conciliación, Conciliados and Documentos sin asignar.
+const idFilters=(params,where,{documentoid='',movimientoid=''}={},cols={documentoid:'documentoid',movimientoid:'movimientoid'})=>{
+ for(const [k,v] of [['documentoid',documentoid],['movimientoid',movimientoid]]){
+  const t=String(v??'').trim().slice(0,120);if(!t)continue;
+  params.push('%'+t+'%');where.push(cols[k]+' ILIKE $'+params.length);
+ }
+};
 const CASH_TARGETS={trabajadores:'pago',materiales:'pago',clientes:'cobro'};
 const SCOPE=`($1 OR (NOT EXISTS(SELECT 1 FROM ledens.project_financial_allocations ax WHERE ax.record_id=f.id AND NOT EXISTS
  (SELECT 1 FROM ledens.finance_project_permissions fp WHERE fp.user_id=$2 AND fp.project_id=ax.project_id)) AND
@@ -370,24 +379,27 @@ export class FinanzasService {
  // ------------------------------------------------------------- movimientos conciliados
  // Every record behind a reconciled movement (confirmed Bridge link of its
  // document, or the movement itself), with how it is classified. Admin, like the inbox.
- async reconciled({page=1,pageSize=25,q='',clase='',from='',to=''}={}){
+ async reconciled({page=1,pageSize=25,q='',clase='',from='',to='',documentoid='',movimientoid=''}={}){
   if(this.user.role!=='admin')throw new FinError(403,'Los movimientos conciliados requieren administrador');
   const size=Math.min(100,Math.max(1,Number(pageSize)||25)),p=Math.max(1,Math.min(4000,Number(page)||1));
-  const params=[...this.params(),'%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',tercero,concepto,numerodocumento,movimiento) ILIKE $3"];
+  const params=[...this.params(),'%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',tercero,concepto,numerodocumento,movimiento,documentoid,movimientoid) ILIKE $3"];
+  idFilters(params,where,{documentoid,movimientoid});
   if(clase){if(![...Object.keys(CLASES),'sin_clasificar','otros'].includes(clase))throw new FinError(400,'Clasificación no válida');params.push(clase);where.push('clase=$'+params.length);}
   for(const [v,op] of [[from,'>='],[to,'<=']])if(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v)))throw new FinError(400,'Fecha no válida');params.push(v);where.push('fecha_movimiento '+op+' $'+params.length+'::date');}
-  const sql=BASE+`, rec AS(SELECT l.*,${CLASE_SQL} clase,mv.fecha_movimiento,mv.movimiento,mv.origin,mv.pago,
+  const sql=BASE+`, rec AS(SELECT l.*,${CLASE_SQL} clase,mv.fecha_movimiento,mv.movimiento,mv.origin,mv.pago,mv.movimientoid,
+    (SELECT dd.documentoid FROM ledens.documents dd WHERE dd.id=l.document_id) documentoid,
     CASE WHEN l.type='cliente' OR l.doc_tipo='Cobrar' THEN 'cobro' WHEN l.doc_tipo='Pagar' OR l.type IN ('material','trabajador') THEN 'pago'
      WHEN mv.pago THEN 'pago' ELSE 'cobro' END sentido
     FROM listed l JOIN LATERAL(SELECT count(*)::int n,max(t.occurred_on) fecha_movimiento,bool_or(t.amount<0) pago,
-     string_agg(DISTINCT coalesce(t.concept,t.source_id),' · ') movimiento,string_agg(DISTINCT t.origin,',') origin FROM ledens.treasury_movements t
+     string_agg(DISTINCT coalesce(t.concept,t.source_id),' · ') movimiento,string_agg(DISTINCT t.origin,',') origin,
+     string_agg(DISTINCT coalesce(t.source_id,t.imported_detail->>'id'),', ') movimientoid FROM ledens.treasury_movements t
      WHERE CASE t.origin WHEN 'bank_movements' THEN t.id=l.bank_movement_id
        OR t.id IN(SELECT a.bank_movement_id FROM ledens.bank_document_allocations a WHERE a.document_id=l.document_id AND a.state='Confirmado')
       ELSE (l.type='material' AND t.material_id=l.id) OR (l.type='cliente' AND t.customer_payment_id=l.id)
        OR (l.type='trabajador' AND EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb JOIN ledens.worker_payment_splits ws ON ws.batch_id=wb.id
         WHERE wb.cash_movement_id=t.id AND ws.worker_payment_id=l.id)) END) mv ON mv.n>0)
    SELECT record_id,type,version,category,clase,sentido,accounting_status,fecha,importe,tercero,concepto,numerodocumento,line_number,project_label,parts,estado,
-    fecha_movimiento::text fecha_movimiento,movimiento,origin FROM rec WHERE `+where.join(' AND ');
+    fecha_movimiento::text fecha_movimiento,movimiento,origin,documentoid,movimientoid FROM rec WHERE `+where.join(' AND ');
   const rows=(await this.query(sql+` ORDER BY fecha_movimiento DESC NULLS LAST,numerodocumento,line_number NULLS FIRST,record_id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows;
   const total=(await this.query('SELECT count(*)::int n FROM ('+sql+') x',params)).rows[0].n;
   return {rows,total,page:p,pageSize:size};
@@ -417,31 +429,34 @@ export class FinanzasService {
    return {record_id:after.id,category:after.category,clase,version:after.version};
   });
  }
- async reconciliation({view='movimientos',page=1,pageSize=25,q='',reason='',from='',to=''}={}){
+ async reconciliation({view='movimientos',page=1,pageSize=25,q='',reason='',from='',to='',documentoid='',movimientoid=''}={}){
   if(this.user.role!=='admin')throw new FinError(403,'La conciliación global requiere administrador');
   if(!['registros','movimientos','documentos'].includes(view))throw new FinError(400,'Vista no válida');
   if(reason&&!['sin_documento','sin_bridge','revision','parcial','efectivo','efectivo_importado','posible_duplicado'].includes(reason))throw new FinError(400,'Motivo no válido');
   const size=Math.min(100,Math.max(1,Number(pageSize)||25)),p=Math.max(1,Math.min(4000,Number(page)||1));
   if(!Number.isInteger(size)||!Number.isInteger(p))throw new FinError(400,'Paginación no válida');
-  const params=[...this.params(),'%'+q+'%'];const where=['$1::boolean AND $2::uuid IS NOT NULL','pendiente',"concat_ws(' ',tercero,concepto,numerodocumento,referencia) ILIKE $3"];
+  const params=[...this.params(),'%'+q+'%'];const where=['$1::boolean AND $2::uuid IS NOT NULL','pendiente',"concat_ws(' ',tercero,concepto,numerodocumento,referencia,documentoid,movimientoid) ILIKE $3"];
+  idFilters(params,where,{documentoid,movimientoid});
   if(reason){params.push(reason);where.push('$'+params.length+'=ANY(motivos)');}
   for(const [v,op] of [[from,'>='],[to,'<=']])if(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v)))throw new FinError(400,'Fecha no válida');params.push(v);where.push('fecha '+op+' $'+params.length+'::date');}
   // Aggregate each Bridge side before joining: multiple links must never duplicate a source row.
-  const bridge=`bridge_doc AS(SELECT document_id,count(*)::int enlaces,count(*) FILTER(WHERE state<>'Confirmado' OR state IS NULL)::int revision,coalesce(sum(allocated_amount) FILTER(WHERE state='Confirmado'),0) confirmado FROM ledens.bank_document_allocations GROUP BY document_id),
-  bridge_bank AS(SELECT a.bank_movement_id,count(*)::int enlaces,count(*) FILTER(WHERE a.state<>'Confirmado' OR a.state IS NULL)::int revision,coalesce(sum(a.allocated_amount) FILTER(WHERE a.state='Confirmado'),0) confirmado,string_agg(DISTINCT coalesce(d.numerodocumento,'Sin número'),', ') documentos FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id GROUP BY a.bank_movement_id)`;
+  const bridge=`bridge_doc AS(SELECT a.document_id,count(*)::int enlaces,count(*) FILTER(WHERE a.state<>'Confirmado' OR a.state IS NULL)::int revision,coalesce(sum(a.allocated_amount) FILTER(WHERE a.state='Confirmado'),0) confirmado,string_agg(DISTINCT b.source_id,', ') movimientoids FROM ledens.bank_document_allocations a LEFT JOIN ledens.bank_movements b ON b.id=a.bank_movement_id GROUP BY a.document_id),
+  bridge_bank AS(SELECT a.bank_movement_id,count(*)::int enlaces,count(*) FILTER(WHERE a.state<>'Confirmado' OR a.state IS NULL)::int revision,coalesce(sum(a.allocated_amount) FILTER(WHERE a.state='Confirmado'),0) confirmado,string_agg(DISTINCT coalesce(d.numerodocumento,'Sin número'),', ') documentos,string_agg(DISTINCT d.documentoid,', ') documentoids FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id GROUP BY a.bank_movement_id)`;
   const hideCovered=await hasPurchases(this.pool)?"NOT EXISTS(SELECT 1 FROM ledens.v_purchase_coverage pc WHERE pc.document_id=x.id AND pc.paid>=pc.goods_gross)":'true';
   let base;
   if(view==='registros')base=BASE+', '+bridge+`, candidates AS(SELECT l.id,l.type,l.fecha,l.tercero,l.concepto,l.numerodocumento,l.id::text referencia,l.importe,l.document_id,
     coalesce(a.enlaces,0) enlaces,coalesce(a.confirmado,0)::text conciliado,
     array_remove(ARRAY[CASE WHEN l.document_id IS NULL THEN 'sin_documento' END,CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_bridge' END,
      CASE WHEN a.revision>0 THEN 'revision' END,CASE WHEN a.enlaces>0 AND coalesce(a.confirmado,0)<>d.total THEN 'parcial' END],NULL) motivos,
-    (l.document_id IS NULL OR coalesce(a.enlaces,0)=0 OR a.revision>0 OR coalesce(a.confirmado,0)<>d.total) pendiente
+    (l.document_id IS NULL OR coalesce(a.enlaces,0)=0 OR a.revision>0 OR coalesce(a.confirmado,0)<>d.total) pendiente,
+    d.documentoid,a.movimientoids movimientoid
     FROM listed l LEFT JOIN ledens.documents d ON d.id=l.document_id LEFT JOIN bridge_doc a ON a.document_id=l.document_id)`;
   else if(view==='movimientos')base='WITH '+bridge+', '+TREASURY_CANDIDATES;
   else base='WITH '+bridge+`, candidates AS(SELECT x.id,'documento'::text type,x.document_on fecha,x.tercero,to_jsonb(x)->>'descripcion' concepto,x.numerodocumento,x.id::text referencia,x.total importe,x.id document_id,
     coalesce(a.enlaces,0) enlaces,coalesce(a.confirmado,0)::text conciliado,
     array_remove(ARRAY[CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_bridge' END,CASE WHEN a.revision>0 THEN 'revision' END,CASE WHEN a.enlaces>0 AND coalesce(a.confirmado,0)<>x.total THEN 'parcial' END],NULL) motivos,
-    (coalesce(a.enlaces,0)=0 OR a.revision>0 OR coalesce(a.confirmado,0)<>x.total) pendiente
+    (coalesce(a.enlaces,0)=0 OR a.revision>0 OR coalesce(a.confirmado,0)<>x.total) pendiente,
+    x.documentoid,a.movimientoids movimientoid
     FROM ledens.documents x LEFT JOIN bridge_doc a ON a.document_id=x.id WHERE `+hideCovered+`)`;
   const filtered=base+' SELECT *, (importe-coalesce(conciliado::numeric,0))::text por_conciliar FROM candidates WHERE '+where.join(' AND ');
   const rows=(await this.query(filtered+' ORDER BY fecha DESC NULLS LAST,id LIMIT '+size+' OFFSET '+((p-1)*size),params)).rows;
@@ -460,20 +475,22 @@ export class FinanzasService {
  // Every processed document (ledens.documents, non-zero total) with no movement
  // assigned: no confirmed Bridge link. A delivery already paid by an Obramat
  // advance needs no movement and is left out. Admin, like the Bridge.
- async unassignedDocuments({page=1,pageSize=25,q='',tipo='',estado='',from='',to=''}={}){
+ async unassignedDocuments({page=1,pageSize=25,q='',tipo='',estado='',from='',to='',documentoid='',movimientoid=''}={}){
   if(this.user.role!=='admin')throw new FinError(403,'Los documentos sin asignar requieren administrador');
   const size=Math.min(100,Math.max(1,Number(pageSize)||25)),p=Math.max(1,Math.min(4000,Number(page)||1));
   if(!Number.isInteger(size)||!Number.isInteger(p))throw new FinError(400,'Paginación no válida');
-  const params=['%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',d.numerodocumento,d.tercero,d.niftercero) ILIKE $1"];
+  const params=['%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',d.numerodocumento,d.tercero,d.niftercero,d.documentoid,x.movimientoid) ILIKE $1"];
+  idFilters(params,where,{documentoid,movimientoid},{documentoid:'d.documentoid',movimientoid:'x.movimientoid'});
   if(tipo){if(!['Pagar','Cobrar'].includes(tipo))throw new FinError(400,'Tipo no válido');params.push(tipo);where.push('d.tipo=$'+params.length);}
   if(estado){if(!['sin_enlace','revision'].includes(estado))throw new FinError(400,'Estado no válido');where.push(estado==='revision'?'x.revision>0':'x.revision=0');}
   for(const [v,op] of [[from,'>='],[to,'<=']])if(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v)))throw new FinError(400,'Fecha no válida');params.push(v);where.push('d.document_on '+op+' $'+params.length+'::date');}
   const covered=await hasPurchases(this.pool)?' AND NOT EXISTS(SELECT 1 FROM ledens.v_purchase_coverage pc WHERE pc.document_id=d.id AND pc.paid>=pc.goods_gross)':'';
   const from_=`FROM ledens.documents d LEFT JOIN ledens.bridge_cases c ON c.document_id=d.id
-   LEFT JOIN LATERAL(SELECT count(*) FILTER(WHERE a.state IS DISTINCT FROM 'Confirmado')::int revision,count(*) FILTER(WHERE a.state='Confirmado')::int confirmados
-    FROM ledens.bank_document_allocations a WHERE a.document_id=d.id) x ON true
+   LEFT JOIN LATERAL(SELECT count(*) FILTER(WHERE a.state IS DISTINCT FROM 'Confirmado')::int revision,count(*) FILTER(WHERE a.state='Confirmado')::int confirmados,
+    string_agg(DISTINCT b.source_id,', ') movimientoid
+    FROM ledens.bank_document_allocations a LEFT JOIN ledens.bank_movements b ON b.id=a.bank_movement_id WHERE a.document_id=d.id) x ON true
    WHERE d.total<>0 AND x.confirmados=0${covered} AND `+where.join(' AND ');
-  const rows=(await this.query(`SELECT d.id,d.document_on::text fecha,d.numerodocumento,d.tercero,d.niftercero,d.tipo,d.total::text total,d.enlacearchivo,
+  const rows=(await this.query(`SELECT d.id,d.documentoid,x.movimientoid,d.document_on::text fecha,d.numerodocumento,d.tercero,d.niftercero,d.tipo,d.total::text total,d.enlacearchivo,
    coalesce(c.status,'pending') bridge_estado,c.reason bridge_motivo,x.revision,
    (SELECT count(*)::int FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded') registros
    ${from_} ORDER BY d.document_on DESC NULLS LAST,d.numerodocumento,d.id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows

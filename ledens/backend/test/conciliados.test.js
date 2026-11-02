@@ -44,6 +44,12 @@ test('lists every record behind a reconciled movement with its class, direction 
  const cobro=all.find(r=>r.concepto==='Certificación 1');assert.equal(cobro.sentido,'cobro');
  assert.equal((await asAdmin().reconciled({clase:'materiales'})).total,1);
  assert.equal((await asAdmin().reconciled({q:'ferretería'})).total,2);
+ await db.query("UPDATE ledens.documents SET documentoid='DOC-77' WHERE id=$1",[pay]);
+ assert.deepEqual([(await rowOf(lines[0])).documentoid,(await rowOf(lines[0])).movimientoid],['DOC-77','MOV-Pago ferretería']);
+ assert.equal((await asAdmin().reconciled({documentoid:'doc-77'})).total,2);
+ assert.equal((await asAdmin().reconciled({movimientoid:'MOV-Pago alm'})).total,1);
+ assert.equal((await asAdmin().reconciled({documentoid:'DOC-77',movimientoid:'MOV-Pago alm'})).total,0);
+ assert.equal((await asAdmin().reconciled({q:'DOC-77'})).total,2);
  await assert.rejects(asAdmin().reconciled({clase:'nada'}),{status:400});
  await assert.rejects(new FinanzasService(pool,jefe).reconciled(),{status:403});
 });

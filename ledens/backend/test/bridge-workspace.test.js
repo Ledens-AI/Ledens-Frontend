@@ -33,6 +33,11 @@ test('manual Save links an existing document, supports partial amounts, refreshe
  assert.equal((await request('/'+d+'/confirm',{method:'POST',body:final})).data.replay,true);
  assert.equal((await workspace.movements()).rows.some(r=>r.id===b),false);assert.equal((await workspace.counts()).pending,0);
  const history=await workspace.allocations({q:'MANUAL-100'});assert.equal(history.total,1);assert.equal(Number(history.rows[0].allocated_amount),-100);
+ await db.query("UPDATE ledens.documents SET documentoid='DOC-ID-777' WHERE id=$1",[d]);
+ const source='MOV-'+b;await db.query('UPDATE ledens.bank_movements SET source_id=$2 WHERE id=$1',[b,source]);
+ const byIds=await request('/workspace/allocations?documentoid=doc-id-777&movimientoid='+encodeURIComponent(source));
+ assert.equal(byIds.data.total,1);assert.equal(byIds.data.rows[0].documentoid,'DOC-ID-777');assert.equal(byIds.data.rows[0].movimientoid,source);
+ assert.equal((await workspace.allocations({q:'DOC-ID-777'})).total,1);assert.equal((await workspace.allocations({documentoid:'DOC-ID-778'})).total,0);
  assert.equal((await db.query("SELECT count(*)::int n FROM ledens.bridge_events WHERE document_id=$1 AND action='manual_confirmed'",[d])).rows[0].n,2);
 });
 test('manual confirmation rejects stale selection, excessive amounts and unauthorized users',async()=>{

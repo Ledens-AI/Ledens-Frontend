@@ -43,14 +43,18 @@ export class BridgeWorkspace {
   return {pending,reconciliation:inbox+cashPending};
  }
  async allocations(filters={}){
-  const f=page(filters),params=[f.q,f.from,f.to];
+  const f=page(filters);
+  // DocumentoID (documents.documentoid) and MovimientoID (bank_movements.source_id) filters: partial, case-insensitive.
+  const id=v=>{if(v==null||v==='')return null;if(typeof v!=='string'||v.length>120)throw new BridgeError(400,'invalid_search');return '%'+v.trim()+'%';};
+  const params=[f.q,f.from,f.to,id(filters.documentoid),id(filters.movimientoid)];
   const from=`FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id JOIN ledens.bank_movements b ON b.id=a.bank_movement_id
-   WHERE concat_ws(' ',d.numerodocumento,d.tercero,b.description,b.reference) ILIKE $1
-   AND ($2::date IS NULL OR b.completed_on>=$2) AND ($3::date IS NULL OR b.completed_on<=$3)`;
+   WHERE concat_ws(' ',d.numerodocumento,d.tercero,b.description,b.reference,d.documentoid,b.source_id) ILIKE $1
+   AND ($2::date IS NULL OR b.completed_on>=$2) AND ($3::date IS NULL OR b.completed_on<=$3)
+   AND ($4::text IS NULL OR d.documentoid ILIKE $4) AND ($5::text IS NULL OR b.source_id ILIKE $5)`;
   const total=(await this.pool.query('SELECT count(*)::int n '+from,params)).rows[0].n;
   const rows=(await this.pool.query(`SELECT a.id,a.document_id,a.bank_movement_id,a.allocated_amount,a.state,a.reconciled_on,a.observaciones,
-   d.numerodocumento,d.tercero,d.document_on,d.total document_total,b.completed_on,b.description,b.reference,b.total_amount bank_total,b.currency
-   ${from} ORDER BY a.reconciled_on DESC NULLS LAST,a.id LIMIT $4 OFFSET $5`,[...params,f.limit,f.offset])).rows;
+   d.documentoid,d.numerodocumento,d.tercero,d.document_on,d.total document_total,b.source_id movimientoid,b.completed_on,b.description,b.reference,b.total_amount bank_total,b.currency
+   ${from} ORDER BY a.reconciled_on DESC NULLS LAST,a.id LIMIT $6 OFFSET $7`,[...params,f.limit,f.offset])).rows;
   return {rows,total,limit:f.limit,offset:f.offset};
  }
  async documents(bankId,filters={}){

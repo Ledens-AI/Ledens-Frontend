@@ -92,6 +92,14 @@ test('Pendiente de conciliación carries what «Asignar documento» needs for ea
  const r=(await asAdmin().reconciliation({pageSize:100})).rows.find(x=>x.id===m.pago.id);
  const b=(await db.query('SELECT * FROM ledens.bank_movements WHERE id=$1',[m.pago.id])).rows[0];
  assert.deepEqual(r.bank,{id:b.id,description:'Pago sin factura',reference:null,total_amount:'-90',remaining:r.por_conciliar,state:'COMPLETED',currency:'EUR',bank_fingerprint:bankFingerprint(b)});
+ assert.equal(r.movimientoid,b.source_id);
+ const byMov=await asAdmin().reconciliation({movimientoid:b.source_id});assert.ok(byMov.rows.some(x=>x.id===m.pago.id));
+ // A movement in review shows the DocumentoID of its linked document; the documents view the movement's.
+ const d=(await db.query("INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento,documentoid) VALUES(-90,'Pagar','2026-10-08','F-REV-90','DOC-REV-90') RETURNING id")).rows[0].id;
+ await db.query("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state) VALUES($1,$2,-90,'Propuesto')",[m.pago.id,d]);
+ const linked=(await asAdmin().reconciliation({documentoid:'doc-rev'})).rows;assert.deepEqual(linked.map(x=>[x.id,x.documentoid]),[[m.pago.id,'DOC-REV-90']]);
+ const doc=(await asAdmin().reconciliation({view:'documentos',documentoid:'DOC-REV-90'})).rows;assert.deepEqual(doc.map(x=>[x.id,x.movimientoid]),[[d,b.source_id]]);
+ await db.query('DELETE FROM ledens.bank_document_allocations WHERE document_id=$1',[d]);
 });
 
 test('a provisional material payment is replaced by its invoice when the Bridge reconciles it: class and obra carried, never counted twice',async()=>{

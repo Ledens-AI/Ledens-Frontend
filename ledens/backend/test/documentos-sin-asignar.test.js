@@ -40,6 +40,11 @@ test('lists processed documents with no confirmed movement, with their Bridge st
  assert.equal((await asAdmin().unassignedDocuments({estado:'revision'})).total,1);
  assert.equal((await asAdmin().unassignedDocuments({q:'libre'})).total,1);
  assert.equal((await asAdmin().unassignedDocuments({from:'2026-10-05'})).total,2);
+ await db.query("UPDATE ledens.documents SET documentoid='DOC-LIBRE-1' WHERE id=$1",[docs.free]);
+ await db.query("UPDATE ledens.bank_movements b SET source_id='MOV-REV-1' FROM ledens.bank_document_allocations a WHERE a.bank_movement_id=b.id AND a.document_id=$1",[docs.review]);
+ const byDoc=await asAdmin().unassignedDocuments({documentoid:'libre-1'});assert.deepEqual([byDoc.total,byDoc.rows[0].documentoid],[1,'DOC-LIBRE-1']);
+ const byMov=await asAdmin().unassignedDocuments({movimientoid:'MOV-REV'});assert.deepEqual([byMov.total,byMov.rows[0].numerodocumento,byMov.rows[0].movimientoid],[1,'F-REVISION','MOV-REV-1']);
+ assert.equal((await asAdmin().unassignedDocuments({q:'MOV-REV-1'})).total,1);
  await assert.rejects(asAdmin().unassignedDocuments({tipo:'Otro'}),{status:400});
  await assert.rejects(new FinanzasService(pool,jefe).unassignedDocuments(),{status:403});
 });

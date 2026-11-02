@@ -8,7 +8,7 @@ CREATE TABLE ledens.budget_approvals(id uuid PRIMARY KEY DEFAULT gen_random_uuid
 CREATE TABLE ledens.budget_lines(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),budget_id uuid REFERENCES ledens.budgets(id),version_id uuid REFERENCES ledens.budget_versions(id),quantity numeric,unit_price numeric,total numeric);
 CREATE TABLE ledens.documents(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),total numeric,tipo text,document_on date,
  numerodocumento text,tercero text,niftercero text,base_amount numeric,vat_amount numeric,review_state text,
- registered_on date,trimestre text,enlacearchivo text,observaciones text,estadopagocobro text);
+ registered_on date,trimestre text,enlacearchivo text,observaciones text,estadopagocobro text,documentoid text);
 CREATE TABLE ledens.bank_movements(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),source_id text,amount numeric,total_amount numeric,
  completed_on date,type text,state text,description text,reference text,payer text,beneficiary_name text,currency text,
  bank_fee numeric,bill_amount numeric,bill_currency text,is_internal_transfer boolean);
