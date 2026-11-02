@@ -20,8 +20,8 @@ before(async()=>{
  const link=(b,d,amount)=>db.query("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state,reconciled_on) VALUES($1,$2,$3,'Confirmado','2026-10-10')",[b,d,amount]);
  const line=async(d,n,gross,description)=>{const l=(await db.query('INSERT INTO ledens.invoice_lines(document_id,line_number,description) VALUES($1,$2,$3) RETURNING id',[d,n,description])).rows[0].id;
   return (await db.query(`INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,gross_amount,currency) VALUES($1,$2,'2026-10-08',$3,$4,'EUR') RETURNING id`,[l,d,description,gross])).rows[0].id;};
- // An Obramat-like invoice (lines unclassified) reconciled with its payment: pending.
- m.obramat=await bank(-200,'Pago Obramat');const inv=await doc(-200,'Pagar','F-OBRAMAT');await link(m.obramat.id,inv,-200);
+ // A supplier invoice (lines unclassified) reconciled with its payment: pending.
+ m.factura=await bank(-200,'Pago almacén azulejos');const inv=await doc(-200,'Pagar','F-AZULEJOS');await link(m.factura.id,inv,-200);
  lines=[await line(inv,1,'120','Azulejos'),await line(inv,2,'80','Cemento cola')];
  // An imported material with its document reconciled: concluded as materiales through the Bridge.
  m.material=await bank(-50,'Pago almacén');const matDoc=await doc(-50,'Pagar','F-MAT');await link(m.material.id,matDoc,-50);
@@ -41,29 +41,31 @@ const classify=async(id,clase,reason)=>asAdmin().classifyMovement({id,clase,vers
 test('every movement appears once with the class concluded from the Bridge, or pending',async()=>{
  const all=await list();
  assert.equal(all.total,7,'internal transfers are left out');
- assert.deepEqual([(await row(m.obramat.id)).clase,(await row(m.obramat.id)).origen,(await row(m.obramat.id)).documentos],['pendiente','bridge','F-OBRAMAT']);
+ assert.deepEqual([(await row(m.factura.id)).clase,(await row(m.factura.id)).origen,(await row(m.factura.id)).documentos],['pendiente','bridge','F-AZULEJOS']);
  assert.deepEqual([(await row(m.material.id)).clase,(await row(m.material.id)).origen],['materiales','bridge']);
  for(const id of [m.pago.id,m.cobro.id,m.nomina.id,m.bare.id,m.cash.id])assert.equal((await row(id)).clase,'pendiente');
  assert.deepEqual(all.resumen,{pendiente:6,materiales:1,trabajadores:0,clientes:0,reembolso_proveedor:0,mixto:0});
  assert.equal((await list({clase:'pendiente'})).total,6);
- assert.equal((await list({q:'Obramat'})).total,1);
+ assert.deepEqual(await asAdmin().movementsPending(),{pendientes:6},'the sidebar badge counts the same pending movements');
+ await assert.rejects(new FinanzasService(pool,jefe).movementsPending(),{status:403});
+ assert.equal((await list({q:'azulejos'})).total,1);
  await assert.rejects(list({clase:'nada'}),{status:400});
  await assert.rejects(new FinanzasService(pool,jefe).movements(),{status:403});
 });
 
 test('classifying a reconciled movement classifies its whole document at once, audited',async()=>{
- const res=await classify(m.obramat.id,'materiales');
+ const res=await classify(m.factura.id,'materiales');
  assert.deepEqual([res.via,res.changed],['registros',2]);
- assert.equal((await row(m.obramat.id)).clase,'materiales');
+ assert.equal((await row(m.factura.id)).clase,'materiales');
  const pending=(await asAdmin().listRecords({type:'material',pending:true,pageSize:100})).rows.map(r=>r.concepto).sort();
  assert.deepEqual(pending,['Azulejos','Cemento','Cemento cola']);
  const ev=(await db.query("SELECT reason FROM ledens.finance_events WHERE record_id=ANY($1::uuid[]) AND action='reclassified'",[lines])).rows;
  assert.equal(ev.length,2);
- await assert.rejects(classify(m.obramat.id,'trabajadores'),{status:400,message:/motivo/});
- await assert.rejects(classify(m.obramat.id,'materiales'),{status:409,message:/Ya está/});
- const stale=(await row(m.obramat.id)).version;
- assert.equal((await classify(m.obramat.id,'trabajadores','Era la factura del alicatador')).clase,'trabajadores');
- await assert.rejects(asAdmin().classifyMovement({id:m.obramat.id,clase:'materiales',version:stale,reason:'Otra vez'}),{status:409,message:/ha cambiado/});
+ await assert.rejects(classify(m.factura.id,'trabajadores'),{status:400,message:/motivo/});
+ await assert.rejects(classify(m.factura.id,'materiales'),{status:409,message:/Ya está/});
+ const stale=(await row(m.factura.id)).version;
+ assert.equal((await classify(m.factura.id,'trabajadores','Era la factura del alicatador')).clase,'trabajadores');
+ await assert.rejects(asAdmin().classifyMovement({id:m.factura.id,clase:'materiales',version:stale,reason:'Otra vez'}),{status:409,message:/ha cambiado/});
 });
 
 test('a movement without documents enters through the usual flow for its class',async()=>{

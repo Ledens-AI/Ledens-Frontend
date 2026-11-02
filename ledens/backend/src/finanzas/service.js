@@ -66,7 +66,15 @@ export const MOVEMENT_CLASSES=['pendiente','materiales','trabajadores','clientes
 // It is a material with the sign of a receipt, so it lowers the material cost of
 // the obra it is assigned to instead of counting as a client receipt.
 const MOVEMENT_CLASES={...CLASES,reembolso_proveedor:'materials'};
-const MOVEMENTS_SQL=`WITH links AS(SELECT bank_movement_id,document_id FROM ledens.bank_document_allocations WHERE state='Confirmado'),
+// Obramat («Adeo Obramat», formerly Bricoman): every payment or receipt is a Pago
+// de materiales. A movement is Obramat's by its bank text or by a reconciled
+// document of that supplier (name or tax id).
+export const OBRAMAT_TAX_ID='B84406289';
+const OBRAMAT_TEXT="'(obramat|bricoman)'";
+const isObramatDoc=d=>`(${d}.tercero ~* ${OBRAMAT_TEXT} OR regexp_replace(upper(coalesce(${d}.niftercero,'')),'[^A-Z0-9]','','g')='${OBRAMAT_TAX_ID}')`;
+// A native Obramat advance or advance refund (014) never has records of its own:
+// the cost enters with the delivery invoice, so such a movement is materials as is.
+const movementsSql=purchases=>`WITH links AS(SELECT bank_movement_id,document_id FROM ledens.bank_document_allocations WHERE state='Confirmado'),
  recs AS(SELECT DISTINCT x.mov,r.id,r.version,r.category FROM (
   SELECT f.bank_movement_id mov,f.id FROM ledens.financial_records f WHERE f.bank_movement_id IS NOT NULL
   UNION ALL SELECT l.bank_movement_id,f.id FROM links l JOIN ledens.financial_records f ON f.document_id=l.document_id
@@ -78,25 +86,30 @@ const MOVEMENTS_SQL=`WITH links AS(SELECT bank_movement_id,document_id FROM lede
    d.documentos,coalesce(d.n,0) n_docs,coalesce(d.sin_registros,false) doc_sin_registros,
    EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=b.id) lote,
    EXISTS(SELECT 1 FROM ledens.provisional_material_payments pm WHERE pm.bank_movement_id=b.id AND pm.replaced_at IS NULL) provisional,
-   b.total_amount>0 AND EXISTS(SELECT 1 FROM ledens.material_expenses me WHERE me.bank_movement_id=b.id) reembolso
+   b.total_amount>0 AND EXISTS(SELECT 1 FROM ledens.material_expenses me WHERE me.bank_movement_id=b.id) reembolso,
+   (concat_ws(' ',b.beneficiary_name,b.payer,b.description,b.reference) ~* ${OBRAMAT_TEXT} OR coalesce(d.obramat_doc,false)) obramat,
+   coalesce(d.solo_compras,false) solo_compras
   FROM ledens.bank_movements b LEFT JOIN LATERAL(SELECT string_agg(DISTINCT coalesce(dd.numerodocumento,'Sin número'),', ') documentos,count(*)::int n,
-    bool_or(NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=dd.id AND r.source_valid AND r.status<>'excluded')) sin_registros
+    bool_or(NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=dd.id AND r.source_valid AND r.status<>'excluded')) sin_registros,
+    bool_or(${isObramatDoc('dd')}) obramat_doc,
+    ${purchases?"bool_and(EXISTS(SELECT 1 FROM ledens.purchase_documents pd WHERE pd.document_id=dd.id AND pd.kind IN ('advance','advance_refund')))":'false'} solo_compras
    FROM links l JOIN ledens.documents dd ON dd.id=l.document_id WHERE l.bank_movement_id=b.id) d ON true
   WHERE NOT coalesce(b.is_internal_transfer,false) AND b.total_amount<>0
   UNION ALL
   SELECT k.id,'efectivo',k.occurred_on,k.counterparty,k.concept,'Efectivo',CASE WHEN k.kind='pago' THEN -k.amount ELSE k.amount END,NULL,0,false,
-   EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=k.id),false,false
+   EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=k.id),false,false,
+   concat_ws(' ',k.counterparty,k.concept) ~* ${OBRAMAT_TEXT},false
   FROM ledens.cash_movements k WHERE k.kind IN ('pago','cobro')),
  cls AS(SELECT m.*,coalesce(a.n,0) registros,coalesce(a.version,md5('')) version,
   ARRAY(SELECT DISTINCT e FROM unnest(array_remove(coalesce(a.clases,'{}'::text[]),'x')||CASE WHEN m.lote THEN ARRAY['trabajadores'] ELSE '{}'::text[] END) e ORDER BY e) conocidas,
   ('x'=ANY(coalesce(a.clases,'{}'::text[])) OR (m.doc_sin_registros AND NOT m.provisional AND NOT m.reembolso)) desconocido
   FROM movs m LEFT JOIN agg a ON a.mov=m.id),
- fin AS(SELECT c.*,CASE WHEN c.desconocido OR cardinality(c.conocidas)=0 THEN 'pendiente'
+ fin AS(SELECT c.*,CASE WHEN c.obramat AND c.solo_compras THEN 'materiales' WHEN c.desconocido OR cardinality(c.conocidas)=0 THEN 'pendiente'
    WHEN cardinality(c.conocidas)=1 THEN CASE WHEN c.conocidas[1]='materiales' AND c.importe>0 THEN 'reembolso_proveedor' ELSE c.conocidas[1] END ELSE 'mixto' END clase,
   CASE WHEN c.importe<0 THEN 'pago' ELSE 'cobro' END sentido FROM cls c)`;
 // One row of «Concepto de movimientos» (list and single movement).
-const MOVEMENT_COLUMNS=' SELECT id,tipo,fecha::text fecha,tercero,concepto,referencia,importe::text importe,documentos,clase,conocidas,sentido,version,registros,lote,'+
- "CASE WHEN provisional THEN 'provisional' WHEN reembolso THEN 'registro' WHEN n_docs>0 THEN 'bridge' WHEN lote THEN 'trabajadores' WHEN registros>0 THEN 'registro' ELSE 'ninguno' END origen";
+const MOVEMENT_COLUMNS=' SELECT id,tipo,fecha::text fecha,tercero,concepto,referencia,importe::text importe,documentos,clase,conocidas,sentido,version,registros,lote,obramat,'+
+ "CASE WHEN obramat AND solo_compras THEN 'compra_obramat' WHEN provisional THEN 'provisional' WHEN reembolso THEN 'registro' WHEN n_docs>0 THEN 'bridge' WHEN lote THEN 'trabajadores' WHEN registros>0 THEN 'registro' ELSE 'ninguno' END origen";
 // «Adjuntar detalle»: the product detail of a reconciled document without
 // concepts is read with the invoice OCR (Document Intelligence, F0: 4 MB).
 export const DETAIL_MAX_BYTES=4*1024*1024;
@@ -341,6 +354,7 @@ export class FinanzasService {
   if(!Number.isInteger(size)||!Number.isInteger(p))throw new FinError(400,'Paginación no válida');
   const params=['%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',tercero,concepto,referencia,documentos) ILIKE $1"];
   for(const [v,op] of [[from,'>='],[to,'<=']])if(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v)))throw new FinError(400,'Fecha no válida');params.push(v);where.push('fecha '+op+' $'+params.length+'::date');}
+  const MOVEMENTS_SQL=await this.movementsSql();
   const counts=(await this.query(MOVEMENTS_SQL+' SELECT clase,count(*)::int n FROM fin WHERE '+where.join(' AND ')+' GROUP BY clase',params)).rows;
   const resumen=Object.fromEntries(MOVEMENT_CLASSES.map(k=>[k,0]));for(const r of counts)resumen[r.clase]=r.n;
   if(clase){if(!MOVEMENT_CLASSES.includes(clase))throw new FinError(400,'Clasificación no válida');params.push(clase);where.push('clase=$'+params.length);}
@@ -348,6 +362,39 @@ export class FinanzasService {
   const rows=(await this.query(sql+` ORDER BY fecha DESC NULLS LAST,id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows;
   const total=(await this.query('SELECT count(*)::int n FROM ('+sql+') x',params)).rows[0].n;
   return {rows,total,resumen,page:p,pageSize:size};
+ }
+ async movementsSql(c=this.pool){return movementsSql(await hasPurchases(c));}
+ // What the Obramat rule needs to know about one movement (bank or cash).
+ async obramatInfo(c,id,b,k){
+  const text=(b?[b.beneficiary_name,b.payer,b.description,b.reference]:[k.counterparty,k.concept]).filter(Boolean).join(' ');
+  const purchases=await hasPurchases(c);
+  const docs=b?(await c.query(`SELECT ${isObramatDoc('d')} obramat,${purchases?"EXISTS(SELECT 1 FROM ledens.purchase_documents pd WHERE pd.document_id=d.id AND pd.kind IN ('advance','advance_refund'))":'false'} compra
+   FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id WHERE a.bank_movement_id=$1 AND a.state='Confirmado'`,[id])).rows:[];
+  const obramat=/obramat|bricoman/i.test(text)||docs.some(d=>d.obramat);
+  return {obramat,soloCompras:obramat&&docs.length>0&&docs.every(d=>d.compra)};
+ }
+ // «Regla Obramat»: every pending Obramat movement is classified as Pago de
+ // materiales (a receipt, as Reembolso de proveedor), through classifyMovement,
+ // so each one follows the usual paths and checks. Only movements the Bridge has
+ // already reconciled with a document: before that, it could not tell a native
+ // advance (no record must be created) from an ordinary purchase. Runs after each periodic
+ // Bridge run and from Concepto de movimientos; what cannot be classified stays
+ // pending with its reason.
+ async applyObramatRule({limit=200}={}){
+  if(this.user.role!=='admin')throw new FinError(403,'Clasificar movimientos requiere administrador');
+  const rows=(await this.query(await this.movementsSql()+" SELECT id,version,importe FROM fin WHERE obramat AND clase='pendiente' AND n_docs>0 ORDER BY fecha,id LIMIT $1",[Math.min(500,Math.max(1,Number(limit)||200))])).rows;
+  const results=[];
+  for(const r of rows){
+   const clase=Number(r.importe)>0?'reembolso_proveedor':'materiales';
+   try{results.push({id:r.id,ok:true,...await this.classifyMovement({id:r.id,clase,version:r.version,reason:'Regla Obramat: sus pagos y cobros son siempre pagos de materiales'})});}
+   catch(e){if(!(e instanceof FinanceError))throw e;results.push({id:r.id,ok:false,clase,error:e.message});}
+  }
+  return {evaluados:rows.length,clasificados:results.filter(r=>r.ok).length,errores:results.filter(r=>!r.ok).length,results};
+ }
+ // Sidebar badge of «Concepto de movimientos»: movements still pending of classification.
+ async movementsPending(){
+  if(this.user.role!=='admin')throw new FinError(403,'Clasificar movimientos requiere administrador');
+  return {pendientes:(await this.query(await this.movementsSql()+" SELECT count(*)::int n FROM fin WHERE clase='pendiente'")).rows[0].n};
  }
  // Manual class of one movement. With records (its documents' or its own) their
  // category changes, audited per record; with nothing registered the movement
@@ -370,6 +417,9 @@ export class FinanzasService {
    if(amount<0n&&clase==='clientes')throw new FinError(409,'Un pago no puede clasificarse como cobro de clientes');
    if(amount<0n&&clase==='reembolso_proveedor')throw new FinError(409,'Un pago no puede ser un reembolso de proveedor');
    if(amount>0n&&!['clientes','reembolso_proveedor'].includes(clase))throw new FinError(409,'Un cobro solo puede ser cobro de clientes o reembolso de proveedor');
+   const ob=await this.obramatInfo(c,id,b,k);
+   if(ob.obramat&&!['materiales','reembolso_proveedor'].includes(clase))throw new FinError(409,'Los movimientos de Obramat siempre son pagos de materiales');
+   if(ob.soloCompras)throw new FinError(409,'Es una compra de Obramat con anticipo: ya cuenta como pago de materiales y su coste entra con la factura de entrega');
    const ids=(await c.query(`SELECT DISTINCT r.id FROM ledens.financial_records r WHERE r.source_valid AND r.status<>'excluded' AND (
      r.bank_movement_id=$1 OR r.document_id IN(SELECT document_id FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado')
      OR r.material_id=$2 OR r.customer_payment_id=$3)`,[id,k?.material_id||null,k?.customer_payment_id||null])).rows.map(r=>r.id);
@@ -397,7 +447,23 @@ export class FinanzasService {
    // materials would add cost instead of lowering it.
    if(clase==='reembolso_proveedor'){
     if(!b)throw new FinError(409,'Un reembolso de proveedor en efectivo todavía no se puede registrar');
-    if(records.length)throw new FinError(409,'Este cobro ya tiene registros contables (su documento conciliado o un cobro de cliente): solo un cobro sin registros contables puede registrarse como reembolso de proveedor');
+    // A credit note reconciled with the refund, with its concepts unclassified:
+    // its lines carry the sign of revenue, so they are excluded (never deleted,
+    // audited) and the refund is registered once, from the movement, as a
+    // material that lowers the cost.
+    if(records.length){
+     const docs=(await c.query("SELECT a.document_id,d.tipo FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id WHERE a.bank_movement_id=$1 AND a.state='Confirmado'",[id])).rows;
+     const notes=new Map(docs.map(d=>[d.document_id,d.tipo]));
+     const allocated=(await c.query('SELECT DISTINCT record_id FROM ledens.project_financial_allocations WHERE record_id=ANY($1::uuid[])',[records.map(r=>r.id)])).rows.length;
+     if(allocated||records.some(r=>!r.invoice_line_id||notes.get(r.document_id)!=='Cobrar'||r.status!=='pending'||r.category!=='unclassified'))
+      throw new FinError(409,'Este cobro tiene registros ya clasificados, aprobados o con obra (o un cobro de cliente): revísalos antes de registrarlo como reembolso de proveedor');
+     const sum=records.reduce((t,r)=>t+cents(r.gross_amount),0n);
+     if(sum!==amount)throw new FinError(409,`Los conceptos del abono conciliado suman ${decimal(sum)} € y el cobro ${decimal(amount)} €: revisa el abono antes de registrarlo como reembolso de proveedor`);
+     for(const r of records){
+      const after=(await c.query("UPDATE ledens.financial_records SET status='excluded',source_valid=false,version=version+1,updated_at=now() WHERE id=$1 RETURNING *",[r.id])).rows[0];
+      await this.finance.audit(c,r,this.user,'refund_replaced','Concepto del abono sustituido por el reembolso de proveedor registrado desde el movimiento',after);
+     }
+    }
     return {id,clase,via:'material',...await this.materialPaymentOne(c,b,{provisional:false})};
    }
    if(amount>0n&&records.some(r=>r.material_id))throw new FinError(409,'Es un reembolso de proveedor registrado en Materiales; no se puede cambiar desde aquí');
