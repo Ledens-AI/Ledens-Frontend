@@ -13,7 +13,7 @@ before(async()=>{
  else {const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};}
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
  await db.exec('ALTER TABLE users ADD COLUMN name text');
- for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','027_transferencias_internas.sql','028_treasury_movements.sql'])await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
+ for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','027_transferencias_internas.sql','028_treasury_movements.sql','030_efectivo_importado.sql'])await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
  const users=(await db.query("INSERT INTO users(email,role) VALUES('admin@ui.test','admin'),('jefe@ui.test','jefe') RETURNING id,role")).rows;[admin,jefe]=users;
  [p1,p2]=(await db.query("INSERT INTO ledens.projects(name,project_id) VALUES('Marbella','OBRA-001'),('Velez','OBRA-002') RETURNING id")).rows.map(x=>x.id);
  svc=new FinanzasService(pool,admin);
@@ -36,6 +36,7 @@ test('distribution uses canonical caps, clears legacy project, rejects stale wri
 test('pagination, filters and pending totals use canonical gross cents',async()=>{
  const r=await source();const listed=await svc.listRecords({type:'material',pending:true,q:'Cemento',pageSize:1});assert.equal(listed.rows.length,1);assert.ok(listed.total>0);
  const summary=await svc.pendingSummary();assert.ok(summary.pendientes>0);assert.ok(Number(summary.importePendiente)>=1200);
+ assert.equal(summary.clientes.pendientes,(await svc.listRecords({type:'cliente',pending:true})).total);
  await svc.distribute({type:r.type,id:r.id,version:r.version,requestId:randomUUID(),parts:[{projectId:p1,amount:'700'}]});
  assert.ok((await svc.listRecords({estado:'parcial'})).rows.some(x=>x.id===r.id));
 });

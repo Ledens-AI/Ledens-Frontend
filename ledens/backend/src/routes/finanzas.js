@@ -195,6 +195,9 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     const b = req.body || {};
     res.json(await svc(req).assignCash({ id: req.params.id, target: b.target, projectId: b.projectId || null, description: b.description, counterparty: b.counterparty }));
   }));
+  router.post('/conciliacion/efectivo/:id/descartar', traced('efectivo', 'Descarte de efectivo importado', { entity: (req) => ({ type: 'efectivo', id: req.params.id }), summary: () => ({ message: 'Efectivo importado descartado' }) })(async (req, res) => {
+    res.json(await svc(req).discardCash({ id: req.params.id, reason: (req.body || {}).reason }));
+  }));
   router.delete('/conciliacion/efectivo/:id', traced('efectivo', 'Eliminación de efectivo', { entity: (req) => ({ type: 'efectivo', id: req.params.id }), summary: () => ({ message: 'Efectivo eliminado' }) })(async (req, res) => {
     res.json(await svc(req).deleteCash(req.params.id));
   }));
