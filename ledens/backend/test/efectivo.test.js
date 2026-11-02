@@ -89,6 +89,10 @@ test('a cash payment to workers goes through Pendiente de trabajador and can go 
  const recs=(await db.query(`SELECT r.id,r.version,r.bank_movement_id FROM ledens.financial_records r JOIN ledens.worker_payment_splits s ON s.worker_payment_id=r.worker_payment_id
   WHERE s.batch_id=$1`,[b2.id])).rows;
  assert.ok(recs.every(r=>r.bank_movement_id===null));
+ // The read-only diagnosis of the cash movement shows them, found through its batch.
+ const dg=await asAdmin().movementDiagnosis(back.id);
+ assert.deepEqual(dg.registros.filter(r=>r.tipo==='trabajador').map(r=>r.id).sort(),recs.map(r=>r.id).sort());
+ assert.ok(dg.registros.filter(r=>r.tipo==='trabajador').every(r=>r.obras?.[0]?.project_id===p1));
  const before=await asAdmin().finance.summary(admin,p1);
  for(const r of recs)await approve(asAdmin().finance,r,'labor','60');
  const s=await asAdmin().finance.summary(admin,p1);

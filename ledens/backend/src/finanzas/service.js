@@ -511,6 +511,42 @@ export class FinanzasService {
   }
   return {evaluados:rows.length,clasificados:results.filter(r=>r.ok).length,errores:results.filter(r=>!r.ok).length,results};
  }
+ // Read-only diagnosis of one movement (admins): everything Concepto de
+ // movimientos decides from, including excluded records and their last events,
+ // so a movement that cannot be classified can be explained without database
+ // access. Reads only; never changes anything.
+ async movementDiagnosis(id){
+  if(this.user.role!=='admin')throw new FinError(403,'El diagnóstico de movimientos requiere administrador');
+  if(!uuid(id))throw new FinError(404,'Movimiento no encontrado');
+  const one=async(sql,p=[id])=>(await this.query(sql,p)).rows;
+  const bank=(await one(`SELECT id,source_id,completed_on::text fecha,type,state,description,reference,payer,beneficiary_name,total_amount::text total_amount,currency,is_internal_transfer
+   FROM ledens.bank_movements WHERE id=$1`))[0]||null;
+  const cash=bank?null:(await one(`SELECT id,kind,amount::text amount,occurred_on::text fecha,concept,counterparty,assigned_to,material_id,customer_payment_id FROM ledens.cash_movements WHERE id=$1`))[0]||null;
+  if(!bank&&!cash)throw new FinError(404,'Movimiento no encontrado');
+  const fila=(await one((await this.movementsSql())+MOVEMENT_COLUMNS+' FROM fin WHERE id=$1'))[0]||null;
+  const purchases=await hasPurchases(this.pool);
+  const documentos=bank?await one(`SELECT a.document_id,d.numerodocumento,d.tipo,d.total::text total,d.tercero,a.state,a.allocated_amount::text asignado,
+    (SELECT count(*)::int FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded') conceptos_activos,
+    (SELECT count(*)::int FROM ledens.financial_records r WHERE r.document_id=d.id AND NOT (r.source_valid AND r.status<>'excluded')) conceptos_excluidos,
+    ${purchases?'(SELECT pd.kind FROM ledens.purchase_documents pd WHERE pd.document_id=d.id)':'NULL'} compra_nativa
+   FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id WHERE a.bank_movement_id=$1 ORDER BY d.numerodocumento`):[];
+  const registros=await one(`SELECT r.id,CASE WHEN r.material_id IS NOT NULL THEN 'material' WHEN r.worker_payment_id IS NOT NULL THEN 'trabajador' WHEN r.customer_payment_id IS NOT NULL THEN 'cliente' ELSE 'concepto' END tipo,
+    r.material_id,r.worker_payment_id,r.customer_payment_id,r.document_id,r.bank_movement_id,r.category,r.status,r.source_valid,r.gross_amount::text importe,r.created_at,
+    (SELECT json_agg(e ORDER BY e.id DESC) FROM (SELECT e.id,e.action,e.reason,e.created_at FROM ledens.finance_events e WHERE e.record_id=r.id ORDER BY e.id DESC LIMIT 5) e) eventos,
+    (SELECT json_agg(json_build_object('project_id',pa.project_id,'importe',pa.allocated_amount)) FROM ledens.project_financial_allocations pa WHERE pa.record_id=r.id) obras
+   FROM ledens.financial_records r WHERE r.bank_movement_id=$1
+    OR r.document_id IN(SELECT document_id FROM ledens.bank_document_allocations WHERE bank_movement_id=$1)
+    OR r.material_id IN(SELECT id FROM ledens.material_expenses WHERE bank_movement_id=$1)
+    OR r.material_id=$2 OR r.customer_payment_id=$3
+    -- Worker payments saved from its batch (a cash batch's have no bank movement).
+    OR r.worker_payment_id IN(SELECT s.worker_payment_id FROM ledens.worker_payment_splits s JOIN ledens.worker_payment_batches wb ON wb.id=s.batch_id
+     WHERE (wb.bank_movement_id=$1 OR wb.cash_movement_id=$1) AND s.worker_payment_id IS NOT NULL)
+   ORDER BY r.created_at,r.id`,[id,cash?.material_id||null,cash?.customer_payment_id||null]);
+  const provisionales=bank?await one(`SELECT material_id,created_at,replaced_at,replaced_by_document_id,carried_project_id FROM ledens.provisional_material_payments WHERE bank_movement_id=$1`):[];
+  const lote=(await one('SELECT id,role,total_amount::text total FROM ledens.worker_payment_batches WHERE bank_movement_id=$1 OR cash_movement_id=$1'))[0]||null;
+  const transferencia=bank&&await hasTransfers(this.pool)?(await one('SELECT marked_at,reason FROM ledens.internal_transfers WHERE bank_movement_id=$1'))[0]||null:null;
+  return {movimiento:bank||cash,origen:bank?'banco':'efectivo',fila,documentos,registros,provisionales,lote,transferencia};
+ }
  // Sidebar badge of «Concepto de movimientos»: movements still pending of classification.
  async movementsPending(){
   if(this.user.role!=='admin')throw new FinError(403,'Clasificar movimientos requiere administrador');
@@ -715,17 +751,22 @@ export class FinanzasService {
  // class to the lines of a receipt document, which carry the sign of revenue.
  async materialPaymentOne(c,b,{provisional=true}={}){
   if(b.currency&&b.currency!=='EUR')throw new FinError(409,'Solo movimientos en euros');
-  const prev=(await c.query(`SELECT me.id material_id,r.id record_id,r.status,r.source_valid,pm.material_id provisional,pm.replaced_at,pm.carried_project_id,
+  const prev=(await c.query(`SELECT me.id material_id,me.total::text total,r.id record_id,r.status,r.source_valid,r.created_at,
+    pm.material_id provisional,pm.replaced_at,pm.carried_project_id,
     (SELECT e.action FROM ledens.finance_events e WHERE e.record_id=r.id ORDER BY e.id DESC LIMIT 1) last_action
    FROM ledens.material_expenses me LEFT JOIN ledens.financial_records r ON r.material_id=me.id
-   LEFT JOIN ledens.provisional_material_payments pm ON pm.material_id=me.id WHERE me.bank_movement_id=$1 ORDER BY me.id`,[b.id])).rows;
+   LEFT JOIN ledens.provisional_material_payments pm ON pm.material_id=me.id WHERE me.bank_movement_id=$1
+   ORDER BY (pm.material_id IS NOT NULL) DESC,r.created_at DESC NULLS LAST,me.id`,[b.id])).rows;
   if(prev.length){
-   // A provisional payment 026 replaced by its invoice, whose concepts are gone
-   // since (re-ingested, or excluded by a later registration): nothing active
-   // represents the payment any more, so it is restored as provisional (audited)
-   // and 026 replaces it again when the invoice gets its concepts back.
-   const p=prev.length===1?prev[0]:null;
-   if(provisional&&p?.provisional&&p.replaced_at&&p.record_id&&p.status==='excluded'&&p.last_action==='provisional_replaced'){
+   if(prev.some(x=>x.record_id&&x.source_valid&&x.status!=='excluded'))throw new FinError(409,'Ya está registrado como material');
+   // A material of this movement that no longer counts (026 replaced it by an
+   // invoice whose concepts are gone since, or it was excluded otherwise) while
+   // nothing active represents the payment: it is restored as a provisional
+   // payment (audited) and 026/029 replace it again once every invoice has its
+   // concepts. Never one excluded on purpose by a native Obramat purchase (its
+   // cost comes with the delivery invoice), nor one for another amount.
+   const p=provisional?prev.find(x=>x.record_id&&x.last_action!=='purchase_source_replaced'&&cents(x.total)===cents(b.total_amount)):null;
+   if(p){
     const before=(await c.query('SELECT * FROM ledens.financial_records WHERE id=$1 FOR UPDATE',[p.record_id])).rows[0];
     const after=(await c.query("UPDATE ledens.financial_records SET status='pending',source_valid=true,category='materials',version=version+1,updated_at=now() WHERE id=$1 RETURNING *",[p.record_id])).rows[0];
     // 026 took its obra away (carried_project_id) when it replaced it: give it back.
@@ -735,12 +776,13 @@ export class FinanzasService {
      await c.query(`INSERT INTO ledens.finance_events(record_id,actor_id,action,reason,before_value,after_value) VALUES($1,$2,'replace_allocations','Obra recuperada al restaurar el pago de materiales provisional',$3,$4)`,
       [p.record_id,this.user.id,JSON.stringify({allocations:[]}),JSON.stringify({allocations:[{project_id:p.carried_project_id,project_name:name,allocated_amount:String(after.gross_amount)}]})]);
     }
-    await c.query('UPDATE ledens.provisional_material_payments SET replaced_at=NULL,replaced_by_document_id=NULL,carried_project_id=NULL WHERE material_id=$1',[p.material_id]);
-    await this.finance.audit(c,before,this.user,'provisional_restored','Pago de materiales provisional restaurado: la factura que lo sustituyó ya no tiene conceptos',after);
+    if(p.provisional)await c.query('UPDATE ledens.provisional_material_payments SET replaced_at=NULL,replaced_by_document_id=NULL,carried_project_id=NULL WHERE material_id=$1',[p.material_id]);
+    else await c.query('INSERT INTO ledens.provisional_material_payments(material_id,bank_movement_id,created_by) VALUES($1,$2,$3)',[p.material_id,b.id,this.user.id]);
+    await this.finance.audit(c,before,this.user,'provisional_restored',`Pago de materiales provisional restaurado: no contaba (${p.last_action||(before.source_valid?before.status:'origen no válido')}) y nada activo representaba el pago`,after);
     return {materialId:p.material_id,recordId:p.record_id,provisional:true,restored:true};
    }
-   if(prev.some(x=>x.record_id&&x.source_valid&&x.status!=='excluded'))throw new FinError(409,'Ya está registrado como material');
-   throw new FinError(409,'Este movimiento ya tuvo un material que se sustituyó o excluyó al registrar su factura, y esa factura ya no tiene conceptos: revisa la ingesta de su documento conciliado');
+   const why=prev.map(x=>x.last_action||(x.record_id?x.status:'sin registro')).join(', ');
+   throw new FinError(409,`Este movimiento ya tuvo un material que se excluyó (${why}) y no se puede recuperar: revisa la ingesta de su documento conciliado`);
   }
   const total=decimal(cents(b.total_amount));
   const m=(await c.query(`INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id)
