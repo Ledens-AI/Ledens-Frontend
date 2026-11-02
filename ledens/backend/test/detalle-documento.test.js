@@ -76,6 +76,17 @@ test('a receipt reconciled with a document without concepts can be a client rece
  assert.equal(res.via,'cobro-cliente');
  assert.equal((await find()).clase,'clientes');
  assert.equal((await db.query('SELECT count(*)::int n FROM ledens.customer_payments WHERE bank_movement_id=$1',[b])).rows[0].n,1);
+ // Two documents, only one with concepts: still the actionable error, never a silent pending.
+ const b2=(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES('MOV-mixto',20,20,'2026-09-30','Cobro dos facturas','EUR','COMPLETED') RETURNING id`)).rows[0].id;
+ for(const [n,lines] of [['F-CON',1],['F-SIN',0]]){
+  const d2=(await db.query(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento) VALUES(10,'Cobrar','2026-09-30',$1) RETURNING id`,[n])).rows[0].id;
+  await db.query("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state,reconciled_on) VALUES($1,$2,10,'Confirmado','2026-09-30')",[b2,d2]);
+  if(lines){const l=(await db.query("INSERT INTO ledens.invoice_lines(document_id,line_number,description) VALUES($1,1,'Certificación') RETURNING id",[d2])).rows[0].id;
+   await db.query("INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,gross_amount,currency) VALUES($1,$2,'2026-09-30','Certificación',10,'EUR')",[l,d2]);}
+ }
+ const r2=(await asAdmin().movements({pageSize:100})).rows.find(x=>x.id===b2);
+ await assert.rejects(asAdmin().classifyMovement({id:b2,clase:'clientes',version:r2.version}),{status:409,message:/F-SIN no tiene conceptos registrados/});
 });
 
 test('«Segregar conceptos» reports the invoice without concepts, with what the dialog needs',async()=>{
