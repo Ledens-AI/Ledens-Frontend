@@ -197,6 +197,8 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     res.json(await svc(req).deleteCash(req.params.id));
   }));
 
+  router.get('/pendiente-trabajador/resumen', handle(async (req, res) => { res.json(await svc(req).workerQueueSummary()); }));
+
   router.get('/pendiente-trabajador', handle(async (req, res) => {
     res.json(await svc(req).workerQueue({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100) }));
   }));

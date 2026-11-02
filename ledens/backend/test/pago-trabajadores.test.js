@@ -43,6 +43,7 @@ test('classifying a payment moves it from Pendiente de conciliación to Pendient
  assert.deepEqual([res.ok,res.failed,res.results[0].role,res.results[0].lines],[1,0,'oficial',11]);
  assert.equal(await inInbox(m),false,'it leaves the reconciliation inbox');
  const q=await asAdmin().workerQueue();
+ const sum=await asAdmin().workerQueueSummary();assert.ok(sum.lineas>=11);assert.ok(Number(sum.importe)>=1100);
  const b=q.rows.find(r=>r.bank_movement_id===m);
  assert.equal(b.lines.length,11);assert.ok(b.lines.every(l=>Number(l.amount)===100&&l.role==='oficial'));
  assert.equal(b.source_id,'3T2026-901');assert.equal(String(b.total_amount),'1100.00');
@@ -89,7 +90,7 @@ test('the legacy role comes from the employee position when the payment was not 
 });
 
 test('jefes need the global queue grant to see the lines and write permission on the project to save them',async()=>{
- await assert.rejects(asJefe().workerQueue(),{status:403});
+ await assert.rejects(asJefe().workerQueue(),{status:403});await assert.rejects(asJefe().workerQueueSummary(),{status:403});
  const m=await movement('-120.00');await asAdmin().classifyWorkerPayments({movementIds:[m]});
  await db.query('INSERT INTO ledens.finance_project_permissions(user_id,project_id,can_write,can_review_unassigned) VALUES($1,NULL,true,true),($1,$2,true,false)',[jefe.id,p1]);
  const b=(await asJefe().workerQueue()).rows.find(r=>r.bank_movement_id===m);
