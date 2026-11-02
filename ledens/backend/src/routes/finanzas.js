@@ -143,6 +143,13 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     res.json(await svc(req).applyObramatRule());
   }));
   router.get('/movimientos/pendientes', handle(async (req, res) => { res.json(await svc(req).movementsPending()); }));
+  // Materiales sin registro contable (admins): GET reports the plan; POST applies it ({ ids? }).
+  router.get('/materiales/sin-registro', handle(async (req, res) => { res.json(await svc(req).registerOrphans(undefined, { limit: req.query.tam })); }));
+  router.post('/materiales/sin-registro/registrar', traced('imputacion', 'Registrar materiales sin registro', { summary: (b) => ({ message: `${b.resumen.registrar} registrados · ${b.resumen.omitir} omitidos`, detail: b.resumen }) })(async (req, res) => {
+    res.json(await svc(req).registerOrphans(undefined, { ids: req.body?.ids || null, apply: true }));
+  }));
+  // Read-only diagnosis of one movement (admins): GET /api/finanzas/movimientos/:id/diagnostico.
+  router.get('/movimientos/:id/diagnostico', handle(async (req, res) => { res.json(await svc(req).movementDiagnosis(req.params.id)); }));
   router.get('/movimientos', handle(async (req, res) => {
     res.json(await svc(req).movements({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), clase: req.query.clase || '', from: req.query.desde, to: req.query.hasta }));
   }));
@@ -192,6 +199,9 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
   router.post('/conciliacion/efectivo/:id/asignar', traced('efectivo', 'Asignación de efectivo', { entity: (req) => ({ type: 'efectivo', id: req.params.id }), summary: b=>({ message: b.assigned==='materiales'?'Asignado a Pagos de materiales':'Asignado a Pagos de clientes', detail: { destino: b.assigned } }) })(async (req, res) => {
     const b = req.body || {};
     res.json(await svc(req).assignCash({ id: req.params.id, target: b.target, projectId: b.projectId || null, description: b.description, counterparty: b.counterparty }));
+  }));
+  router.post('/conciliacion/efectivo/:id/descartar', traced('efectivo', 'Descarte de efectivo importado', { entity: (req) => ({ type: 'efectivo', id: req.params.id }), summary: () => ({ message: 'Efectivo importado descartado' }) })(async (req, res) => {
+    res.json(await svc(req).discardCash({ id: req.params.id, reason: (req.body || {}).reason }));
   }));
   router.delete('/conciliacion/efectivo/:id', traced('efectivo', 'Eliminación de efectivo', { entity: (req) => ({ type: 'efectivo', id: req.params.id }), summary: () => ({ message: 'Efectivo eliminado' }) })(async (req, res) => {
     res.json(await svc(req).deleteCash(req.params.id));

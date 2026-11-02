@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import MaterialesSinRegistro from './MaterialesSinRegistro.jsx';
 import { api } from './api.js';
 import { eur, fecha, num } from './format.js';
 import { Badge, Dialog, Empty, ErrorBox, Kpi, Pager } from './ui.jsx';
@@ -91,6 +92,7 @@ export default function ConceptoMovimientos({ toast, onChanged }) {
   const [page, setPage] = useState(1), [data, setData] = useState(null), [error, setError] = useState(''), [reload, setReload] = useState(0);
   const [editing, setEditing] = useState(null), [rule, setRule] = useState(false);
   // «Regla Obramat» on demand (it also runs after each periodic Bridge run).
+  const [orphans, setOrphans] = useState(false);
   const applyRule = async () => {
     setRule(true);
     try {
@@ -133,8 +135,10 @@ export default function ConceptoMovimientos({ toast, onChanged }) {
         <label className="fin-field"><span>Hasta</span><input type="date" value={hasta} onChange={filter(setHasta)} /></label>
         <button className="fin-btn" type="button" onClick={() => setReload((n) => n + 1)}>Actualizar</button>
         <button className="fin-btn" type="button" disabled={rule} onClick={applyRule} title="Clasifica como pago de materiales los movimientos de Obramat pendientes">{rule ? 'Aplicando…' : 'Aplicar regla Obramat'}</button>
+        <button className="fin-btn" type="button" onClick={() => setOrphans(true)} title="Materiales importados sin registro contable">Materiales sin registro</button>
       </div>
       {editing ? <Classify row={editing} onClose={() => setEditing(null)} onDone={done} /> : null}
+      {orphans ? <MaterialesSinRegistro onClose={() => setOrphans(false)} onDone={() => { setReload((n) => n + 1); onChanged?.(); }} /> : null}
       <div className="fin-card is-flush">
         {error ? <ErrorBox message={error} onRetry={() => setReload((n) => n + 1)} /> : null}
         {!error && !data ? <div className="fin-loading">Cargando…</div> : null}

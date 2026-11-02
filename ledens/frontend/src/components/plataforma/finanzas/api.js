@@ -61,6 +61,9 @@ export const api = {
   movements: (f) => request('GET', '/api/finanzas/movimientos' + qs(f)),
   movementsPending: () => request('GET', '/api/finanzas/movimientos/pendientes'),
   applyObramatRule: () => request('POST', '/api/finanzas/movimientos/regla-obramat', {}),
+  // Materiales sin registro contable: the plan, and registering what is safe.
+  orphanMaterials: () => request('GET', '/api/finanzas/materiales/sin-registro'),
+  registerOrphanMaterials: () => request('POST', '/api/finanzas/materiales/sin-registro/registrar', {}),
   classifyMovement: (id, body) => request('PUT', `/api/finanzas/movimientos/${id}/clasificacion`, body),
   // «Segregar conceptos» (Materiales pendiente de asignación): a provisional material payment.
   segregateMaterial: (materialId) => request('POST', `/api/finanzas/materiales/${materialId}/segregar`, {}),
@@ -78,6 +81,7 @@ export const api = {
   createCash: (body) => request('POST', '/api/finanzas/conciliacion/efectivo', body),
   assignCash: (id, body) => request('POST', `/api/finanzas/conciliacion/efectivo/${id}/asignar`, body),
   deleteCash: (id) => request('DELETE', `/api/finanzas/conciliacion/efectivo/${id}`),
+  discardCash: (id, reason) => request('POST', `/api/finanzas/conciliacion/efectivo/${id}/descartar`, { reason }),
   workerQueueSummary: () => request('GET', '/api/finanzas/pendiente-trabajador/resumen'),
   workerQueue: (f) => request('GET', '/api/finanzas/pendiente-trabajador' + qs(f)),
   employees: () => request('GET', '/api/finanzas/trabajadores'),

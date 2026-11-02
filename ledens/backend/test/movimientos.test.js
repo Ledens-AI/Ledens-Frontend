@@ -11,7 +11,7 @@ before(async()=>{
  const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
  await db.exec('ALTER TABLE users ADD COLUMN name text');
- for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','026_materiales_provisionales.sql','027_transferencias_internas.sql','028_treasury_movements.sql'])
+ for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','026_materiales_provisionales.sql','029_provisional_todas_las_facturas.sql','027_transferencias_internas.sql','028_treasury_movements.sql','030_efectivo_importado.sql'])
   await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
  [admin,jefe]=(await db.query("INSERT INTO users(email,role,name) VALUES('admin@mv.test','admin','Admin'),('jefe@mv.test','jefe','Jefe') RETURNING id,role")).rows;
  const bank=async(amount,description,extra='')=>(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state${extra?',is_internal_transfer':''})
@@ -188,10 +188,88 @@ test('a provisional payment replaced by an invoice that later lost its concepts 
  assert.deepEqual((await q('SELECT status,source_valid FROM ledens.financial_records WHERE id=$1',[recordId])).rows[0],{status:'pending',source_valid:true});
  assert.equal((await q("SELECT count(*)::int n FROM ledens.finance_events WHERE record_id=$1 AND action='provisional_restored'",[recordId])).rows[0].n,1);
  assert.deepEqual((await q('SELECT project_id,allocated_amount::text amount FROM ledens.project_financial_allocations WHERE record_id=$1',[recordId])).rows,[{project_id:obra,amount:'7.44'}],'it keeps the obra it had before 026 replaced it');
- // A material excluded for any other reason is never brought back.
- const b2=(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
-  VALUES('MOV-otro',-9,-9,'2026-09-25','Pago almacén','EUR','COMPLETED') RETURNING id`)).rows[0].id;
- const m2=(await q("INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id) VALUES('ud','Importado',1,-9,-9,'2026-09-25',$1) RETURNING id",[b2])).rows[0].id;
- await q("UPDATE ledens.financial_records SET status='excluded',source_valid=false WHERE material_id=$1",[m2]);
- await assert.rejects(classify(b2,'materiales'),{status:409,message:/se sustituyó o excluyó/});
+ // A material excluded otherwise (no provisional row, for the payment's amount) is recovered as provisional too.
+ const mov=async(amount,description)=>(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES($1,$2,$2,'2026-09-25',$3,'EUR','COMPLETED') RETURNING id`,['MOV-'+description,amount,description])).rows[0].id;
+ const material=async(b,total,action)=>{const id=(await q("INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id) VALUES('ud','Importado',1,$2,$2,'2026-09-25',$1) RETURNING id",[b,total])).rows[0].id;
+  const r=(await q("UPDATE ledens.financial_records SET status='excluded',source_valid=false WHERE material_id=$1 RETURNING *",[id])).rows[0];
+  if(action)await q("INSERT INTO ledens.finance_events(record_id,action,reason,before_value,after_value) VALUES($1,$2,'prueba','{}','{}')",[r.id,action]);
+  return {id,record:r.id};};
+ const b2=await mov(-9,'Pago almacén');const m2=await material(b2,-9,'source_changed');
+ const res2=await classify(b2,'materiales');
+ assert.deepEqual([res2.materialId,res2.restored],[m2.id,true]);
+ assert.equal((await q('SELECT count(*)::int n FROM ledens.provisional_material_payments WHERE material_id=$1 AND replaced_at IS NULL',[m2.id])).rows[0].n,1);
+ assert.equal((await row(b2)).clase,'materiales');
+ // Never one excluded on purpose by a native Obramat purchase, nor one for another amount.
+ const b3=await mov(-11,'Pago anticipo');await material(b3,-11,'purchase_source_replaced');
+ await assert.rejects(classify(b3,'materiales'),{status:409,message:/purchase_source_replaced.*no se puede recuperar/});
+ // A material with no financial record at all (an old import that bypassed the trigger): registered and made provisional.
+ const b5=await mov(-7.44,'Omb Malaga');
+ await q("SELECT set_config('ledens.finance_sync','on',false)");
+ const orphan=(await q("INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id) VALUES('ud','Importado',1,-7.44,-7.44,'2026-09-24',$1) RETURNING id",[b5])).rows[0].id;
+ await q("SELECT set_config('ledens.finance_sync','off',false)");
+ assert.equal((await q('SELECT count(*)::int n FROM ledens.financial_records WHERE material_id=$1',[orphan])).rows[0].n,0,'no record: it counts nowhere');
+ assert.equal((await row(b5)).clase,'pendiente');
+ const res5=await classify(b5,'materiales');
+ assert.deepEqual([res5.materialId,res5.restored],[orphan,true]);
+ assert.deepEqual([(await row(b5)).clase,(await row(b5)).origen],['materiales','provisional']);
+ assert.deepEqual((await q('SELECT category,status,gross_amount::text g FROM ledens.financial_records WHERE material_id=$1',[orphan])).rows,[{category:'materials',status:'pending',g:'7.44'}]);
+ const b4=await mov(-12,'Pago parcial');await material(b4,-5,null);
+ await assert.rejects(classify(b4,'materiales'),{status:409,message:/no se puede recuperar/});
+});
+
+test('the read-only diagnosis of a movement shows its documents, records with their last events and provisional payment',async()=>{
+ const b=(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES('MOV-diag',-15,-15,'2026-09-26','Pago diagnóstico','EUR','COMPLETED') RETURNING id`)).rows[0].id;
+ const {materialId,recordId}=await classify(b,'materiales');
+ const dg=await asAdmin().movementDiagnosis(b);
+ assert.equal(dg.origen,'banco');assert.equal(dg.movimiento.id,b);
+ assert.deepEqual([dg.fila.clase,dg.fila.origen],['materiales','provisional']);
+ assert.deepEqual(dg.registros.map(r=>[r.id,r.tipo,r.status]),[[recordId,'material','pending']]);
+ assert.equal(dg.provisionales[0].material_id,materialId);
+ assert.ok(Array.isArray(dg.documentos)&&dg.lote===null);
+ await assert.rejects(new FinanzasService(pool,jefe).movementDiagnosis(b),{status:403});
+ await assert.rejects(asAdmin().movementDiagnosis('nada'),{status:404});
+});
+
+test('materials with no financial record are found and registered only when they cannot count twice',async()=>{
+ const q=(sql,p)=>db.query(sql,p);
+ const mov=async(amount,description)=>(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES($1,$2,$2,'2026-09-27',$3,'EUR','COMPLETED') RETURNING id`,['MOV-'+description,amount,description])).rows[0].id;
+ // The trigger leaves no record for a total with more than two decimals, zero or NULL.
+ const mat=async(total,{bank=null,doc=null,project=null}={})=>(await q(`INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id,document_id,project_id)
+  VALUES('ud','Línea importada',1,$1,$1,'2026-09-27',$2,$3,$4) RETURNING id`,[total,bank,doc,project])).rows[0].id;
+ const lineas=await mov(-10,'Pago dos líneas');const l1=await mat(-3.3333,{bank:lineas}),l2=await mat(-6.6667,{bank:lineas});
+ const sinImporte=await mat(null);
+ const docConceptos=(await q(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento) VALUES(-5,'Pagar','2026-09-27','F-CONCEPTOS') RETURNING id`)).rows[0].id;
+ const il=(await q("INSERT INTO ledens.invoice_lines(document_id,line_number,description) VALUES($1,1,'Línea') RETURNING id",[docConceptos])).rows[0].id;
+ await q(`INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,gross_amount,currency) VALUES($1,$2,'2026-09-27','Línea',5,'EUR')`,[il,docConceptos]);
+ const dup=await mat(-5.004,{doc:docConceptos});
+ const conRegistros=await mov(-8,'Pago ya registrado');await q("INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id) VALUES('ud','Registrado',1,-8,-8,'2026-09-27',$1)",[conRegistros]);
+ const dupMov=await mat(-8.001,{bank:conRegistros});
+ const descuadre=await mov(-20,'Pago descuadrado');const d1=await mat(-4.555,{bank:descuadre});
+ const suelto=await mat(-2.345);
+ const plan=await asAdmin().registerOrphans();
+ const accion=id=>plan.filas.find(f=>f.id===id);
+ assert.deepEqual([l1,l2,suelto].map(id=>accion(id).accion),['registrar','registrar','registrar']);
+ assert.deepEqual([accion(l1).provisional,accion(l1).gross,accion(l2).gross],[true,'3.33','6.67']);
+ assert.match(accion(sinImporte).motivo_accion,/no tiene importe/);
+ assert.match(accion(dup).motivo_accion,/su documento ya tiene conceptos/);
+ assert.match(accion(dupMov).motivo_accion,/su movimiento ya tiene registros/);
+ assert.match(accion(d1).motivo_accion,/suman 4\.56 € y el pago 20\.00 €/);
+ assert.equal((await q('SELECT count(*)::int n FROM ledens.financial_records WHERE material_id=ANY($1::uuid[])',[[l1,l2,suelto]])).rows[0].n,0,'the plan changes nothing');
+ assert.equal((await row(lineas)).clase,'pendiente');
+ await assert.rejects(new FinanzasService(pool,jefe).registerOrphans(),{status:403});
+ // Applied: records rounded to cents, provisional for the payment, audited; the source rows are untouched.
+ const res=await asAdmin().registerOrphans(undefined,{ids:[l1,l2,suelto,dup],apply:true});
+ assert.deepEqual([res.resumen.registrar,res.resumen.omitir],[3,1]);
+ assert.deepEqual((await q('SELECT gross_amount::text g,category FROM ledens.financial_records WHERE material_id=ANY($1::uuid[]) ORDER BY gross_amount',[[l1,l2,suelto]])).rows,
+  [{g:'2.35',category:'materials'},{g:'3.33',category:'materials'},{g:'6.67',category:'materials'}]);
+ assert.equal((await q('SELECT total::text t FROM ledens.material_expenses WHERE id=$1',[l1])).rows[0].t,'-3.3333');
+ assert.equal((await q('SELECT count(*)::int n FROM ledens.provisional_material_payments WHERE material_id=ANY($1::uuid[])',[[l1,l2]])).rows[0].n,2);
+ assert.deepEqual([(await row(lineas)).clase,(await row(lineas)).origen],['materiales','provisional']);
+ assert.equal((await q("SELECT count(*)::int n FROM ledens.finance_events e JOIN ledens.financial_records r ON r.id=e.record_id WHERE r.material_id=ANY($1::uuid[]) AND e.action='source_registered'",[[l1,l2,suelto]])).rows[0].n,3);
+ assert.equal((await asAdmin().registerOrphans(undefined,{ids:[l1,l2,suelto]})).filas.length,0,'nothing left to register');
+ // The diagnosis lists the movement's materials and whether they have a record.
+ assert.deepEqual((await asAdmin().movementDiagnosis(descuadre)).materiales.map(m=>m.con_registro),[false]);
 });

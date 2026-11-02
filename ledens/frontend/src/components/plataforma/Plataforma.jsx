@@ -19,6 +19,7 @@ import { VerComoSelector, VerComoBanner } from './VerComo.jsx';
 import { useI18n, LangOverride } from '../../i18n/I18nContext.jsx';
 import LangSwitch from '../../i18n/LangSwitch.jsx';
 import EnlaceContrasena from './EnlaceContrasena.jsx';
+import { fitTables } from './fitTables.js';
 import { PLAT_TXT } from './i18n.js';
 const GestionFinanciera = React.lazy(() => import('./finanzas/GestionFinanciera.jsx'));
 const Obras = React.lazy(() => import('./obras/Obras.jsx'));
@@ -38,14 +39,15 @@ class PlataformaView extends React.Component {
   // anything else is ignored. The backend enforces the same split for data.
   // Gestión financiera is w_fin / a_fin (jefe de obra and admin), never c_.
   go=(screen,x)=>{if(!screen.startsWith(PREFIX[this.state.role]))return;this.setState(Object.assign({screen,notifOpen:false},x||{}));window.scrollTo(0,0);};
-  componentDidMount(){if(this.state.role==='admin'){this.loadUsers();this.loadAudit();this.getJSON('/api/bridge/workspace/counts').then(d=>this.setState({finBridgePending:d.pending,finConciliationPending:d.reconciliation??d.pending}),()=>{});this.getJSON('/api/finanzas/movimientos/pendientes').then(d=>this.setState({finConceptPending:d.pendientes}),()=>{});}if(this.state.role!=='client'){this.getJSON('/api/finanzas/pendiente-trabajador/resumen').then(d=>this.setState({finWorkerPending:Number(d.importe)||0}),()=>{});}if(this.state.role!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.materiales?.pendientes??d.pendientes,finClientPending:d.clientes?.pendientes??0}),()=>{});this.loadPresu();}
+  mainRef=React.createRef();
+  componentDidMount(){if(this.mainRef.current)this._unfit=fitTables(this.mainRef.current);if(this.state.role==='admin'){this.loadUsers();this.loadAudit();this.getJSON('/api/bridge/workspace/counts').then(d=>this.setState({finBridgePending:d.pending,finConciliationPending:d.reconciliation??d.pending}),()=>{});this.getJSON('/api/finanzas/movimientos/pendientes').then(d=>this.setState({finConceptPending:d.pendientes}),()=>{});}if(this.state.role!=='client'){this.getJSON('/api/finanzas/pendiente-trabajador/resumen').then(d=>this.setState({finWorkerPending:Number(d.importe)||0}),()=>{});}if(this.state.role!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.materiales?.pendientes??d.pendientes,finClientPending:d.clientes?.pendientes??0}),()=>{});this.loadPresu();}
   // Badge and notification counts: presupuestos waiting for this user.
   loadPresu=()=>{this.getJSON('/api/presupuestos').then(d=>{const n=k=>d.presupuestos.filter(p=>p.phase===k&&(k!=='pendiente'||p.decides!==false)).length;this.setState({presu:{pendiente:n('pendiente'),cambios:n('cambios')}});},()=>this.setState({presu:null}));
     if(this.props.user.role==='admin'&&this.state.role==='admin')this.getJSON('/api/presupuestos/propuestas').then(d=>this.setState({propuestas:d.propuestas.length}),()=>{});}
   getJSON=async(url)=>{const r=await fetch(url,{headers:viewAsHeaders()});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'No se pudieron cargar los datos.');return d;};
   loadUsers=()=>this.getJSON('/api/admin/users').then(d=>this.setState({adminUsers:d.users}),e=>{this.setState({adminUsers:[]});this.flash(e.message);});
   loadAudit=()=>this.getJSON('/api/admin/audit').then(d=>this.setState({adminAudit:d.entries}),e=>this.flash(e.message));
-  componentWillUnmount(){clearTimeout(this._t);setViewAs(null);}
+  componentWillUnmount(){clearTimeout(this._t);this._unfit?.();setViewAs(null);}
   // «Ver como» (admins only): open another panel, optionally as one user sees it.
   // Viewing as a user is recorded first (POST /api/admin/view-as); from then on
   // finance requests carry X-Ledens-View-As and the backend answers read-only.
@@ -150,7 +152,7 @@ class PlataformaView extends React.Component {
       <LangOverride lang={v.isClient ? null : 'es'}>
       <div className="plat">
     <div style={{ display: "grid", gridTemplateColumns: "248px minmax(0,1fr)", minHeight: "100vh" }}>
-      <aside style={{ background: "#fff", borderRight: "1px solid #EDEDEA", display: "flex", flexDirection: "column", gap: "24px", padding: "22px 16px", position: "sticky", top: "0", height: "100vh" }}>
+      <aside style={{ background: "#fff", borderRight: "1px solid #EDEDEA", display: "flex", flexDirection: "column", gap: "24px", padding: "22px 16px", position: "sticky", top: "0", height: "100vh", overflowY: "auto" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "0 8px" }}>
           <img src={logo} alt="" style={{ width: "34px", height: "34px" }} />
           <span style={{ fontWeight: "700", fontSize: "27px", letterSpacing: "-0.07em", color: "#5567AE", lineHeight: "1" }}>
@@ -160,7 +162,7 @@ class PlataformaView extends React.Component {
         <div style={{ padding: "0 8px", fontSize: "12px", fontWeight: "700", letterSpacing: "0.04em", color: "#6B6B68", textTransform: "uppercase" }}>
           {v.areaLabel}
         </div>
-        <nav style={{ display: "flex", flexDirection: "column", gap: "2px", marginTop: "-12px" }}>
+        <nav className="plat-nav" style={{ display: "flex", flexDirection: "column", gap: "2px", marginTop: "-12px", flex: "1 1 auto", minHeight: "0", overflowY: "auto", overscrollBehavior: "contain" }}>
           {(v.nav || []).map((n, n_i) => n.header ? (
             <div key={n_i} className="plat-nav-group">{n.header}</div>
           ) : (
@@ -181,7 +183,6 @@ class PlataformaView extends React.Component {
             </React.Fragment>
           ))}
         </nav>
-        <div className="plat-spacer" style={{ flex: "1" }}></div>
         {v.isClient ? (
           <>
             <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "16px", borderRadius: "12px", background: "#F2F4FA" }}>
@@ -287,7 +288,7 @@ class PlataformaView extends React.Component {
             ) : null}
           </div>
         </header>
-        <main style={{ padding: "32px", maxWidth: "1240px", width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: "28px" }}>
+        <main ref={this.mainRef} style={{ padding: "32px", maxWidth: "1240px", width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: "28px" }}>
           {v.isRealAdmin ? <VerComoBanner panel={v.panel} viewAs={v.viewAs} onExit={v.exitView} /> : null}
           {v.isFin ? (
             <React.Suspense fallback={<div style={{ padding: "32px", color: "#6B6B68" }}>{"Cargando Gestión financiera…"}</div>}>
