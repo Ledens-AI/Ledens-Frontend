@@ -83,7 +83,6 @@ test('a movement without documents enters through the usual flow for its class',
 });
 
 test('direction, documents without records and roles guard the classification',async()=>{
- await assert.rejects(classify(m.bare.id,'trabajadores'),{status:409,message:/F-VACIA/},'only Pago de materiales waits as a provisional material');
  await assert.rejects(classify(m.bare.id,'clientes'),{status:409,message:/Un pago/});
  await assert.rejects(classify(m.cobro.id,'materiales'),{status:409,message:/Un cobro/});
  await assert.rejects(new FinanzasService(pool,jefe).classifyMovement({id:m.bare.id,clase:'materiales',version:(await row(m.bare.id)).version}),{status:403});

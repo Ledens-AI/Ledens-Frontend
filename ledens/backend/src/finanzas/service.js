@@ -108,7 +108,7 @@ const movementsSql=(purchases,transfers=false)=>`WITH links AS(SELECT bank_movem
   FROM ledens.cash_movements k WHERE k.kind IN ('pago','cobro')),
  cls AS(SELECT m.*,coalesce(a.n,0) registros,coalesce(a.version,md5('')) version,
   ARRAY(SELECT DISTINCT e FROM unnest(array_remove(coalesce(a.clases,'{}'::text[]),'x')||CASE WHEN m.lote THEN ARRAY['trabajadores'] ELSE '{}'::text[] END) e ORDER BY e) conocidas,
-  ('x'=ANY(coalesce(a.clases,'{}'::text[])) OR (m.doc_sin_registros AND NOT m.provisional AND NOT m.reembolso AND NOT m.cobro_cliente)) desconocido
+  ('x'=ANY(coalesce(a.clases,'{}'::text[])) OR (m.doc_sin_registros AND NOT m.provisional AND NOT m.reembolso AND NOT m.cobro_cliente AND NOT m.lote)) desconocido
   FROM movs m LEFT JOIN agg a ON a.mov=m.id),
  fin AS(SELECT c.*,CASE WHEN c.transferencia THEN 'transferencia' WHEN c.obramat AND c.solo_compras THEN 'materiales' WHEN c.desconocido OR cardinality(c.conocidas)=0 THEN 'pendiente'
    WHEN cardinality(c.conocidas)=1 THEN CASE WHEN c.conocidas[1]='materiales' AND c.importe>0 THEN 'reembolso_proveedor' ELSE c.conocidas[1] END ELSE 'mixto' END clase,
@@ -509,7 +509,9 @@ export class FinanzasService {
     // clientes and Pendiente de conciliación report what is missing). Only with
     // nothing registered: with some documents' concepts and others without, the
     // receipt would not be created and the movement would stay pending.
-    if(bare.length&&clase!=='reembolso_proveedor'&&!(clase==='clientes'&&!records.length)&&!(clase==='materiales'&&!records.length&&docs===1))throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta antes de clasificar el movimiento`);
+    // Pago a trabajadores likewise: the batch goes to Pendiente de trabajador on
+    // the bank movement alone (payroll is recognized without a document).
+    if(bare.length&&clase!=='reembolso_proveedor'&&!(['clientes','trabajadores'].includes(clase)&&!records.length)&&!(clase==='materiales'&&!records.length&&docs===1))throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta antes de clasificar el movimiento`);
    }
    // A supplier refund is registered as a material from the movement itself. A
    // receipt that already has records (its reconciled document, a client receipt)
@@ -555,7 +557,7 @@ export class FinanzasService {
     }
     return {id,clase,via:'registros',changed:changing.length};
    }
-   if(clase==='trabajadores')return {id,clase,via:'pendiente-trabajador',...(b?await this.classifyOne(c,id):await this.classifyCash(c,id))};
+   if(clase==='trabajadores')return {id,clase,via:'pendiente-trabajador',...(b?await this.classifyOne(c,id,{allowReconciled:true}):await this.classifyCash(c,id))};
    if(!b){const kk=await this.cashForUpdate(c,id);return {id,clase,via:'efectivo',...await this.assignCashIn(c,kk,clase,null,'')};}
    if(clase==='clientes')return {id,clase,via:'cobro-cliente',...await this.customerPaymentOne(c,id,null,{allowReconciled:true})};
    return {id,clase,via:'material',...await this.materialPaymentOne(c,b)};
@@ -680,7 +682,9 @@ export class FinanzasService {
    return {results,ok:results.filter(r=>r.ok).length,failed:results.filter(r=>!r.ok).length};
   });
  }
- async classifyOne(c,id){
+ // From Concepto de movimientos a reconciled payment may also go to Pendiente de
+ // trabajador (allowReconciled); the conciliation inbox only sends unreconciled ones.
+ async classifyOne(c,id,{allowReconciled=false}={}){
   const m=(await c.query('SELECT id,source_id,total_amount,currency,completed_on,is_internal_transfer FROM ledens.bank_movements WHERE id=$1 FOR UPDATE',[id])).rows[0];
   if(!m)return this.classifyCash(c,id);
   if(m.is_internal_transfer)throw new FinError(409,'Es un traspaso interno');
@@ -689,7 +693,7 @@ export class FinanzasService {
   if(total===null||total>=0n)throw new FinError(409,'Solo se segregan pagos salientes (importe negativo, con céntimos exactos)');
   if((await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1',[id])).rows.length)throw new FinError(409,'Ya está en Pendiente de trabajador');
   if((await c.query('SELECT 1 FROM ledens.worker_payments WHERE bank_movement_id=$1 LIMIT 1',[id])).rows.length)throw new FinError(409,'Ya tiene pagos a trabajadores registrados');
-  if((await c.query("SELECT 1 FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado' LIMIT 1",[id])).rows.length)throw new FinError(409,'Ya está conciliado con un documento');
+  if(!allowReconciled&&(await c.query("SELECT 1 FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado' LIMIT 1",[id])).rows.length)throw new FinError(409,'Ya está conciliado con un documento');
   const plan=splitWorkerPayment(-total);
   const b=(await c.query(`INSERT INTO ledens.worker_payment_batches(bank_movement_id,role,unit_amount,total_amount,occurred_on,created_by)
    VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,[id,plan.role,decimal(plan.unit),decimal(-total),m.completed_on,this.user.id])).rows[0];
