@@ -20,31 +20,28 @@ La pantalla Pendiente de conciliación muestra exclusivamente movimientos bancar
 
 La antigua pantalla «Pendiente de bridge movimientos documentos» está integrada aquí: cada movimiento bancario trae `bank` (`id, description, reference, total_amount, remaining, state, currency, bank_fingerprint`) y su botón «Asignar documento» abre en la propia fila la búsqueda de documentos existentes y confirma el enlace con `POST /api/bridge/:documentId/confirm`, como antes. «Bridge Movimientos Documentos» queda como consulta de los enlaces guardados.
 
-## Conceptos de facturas (facturas completas)
+## Documentos sin asignar
 
-Una fila por factura cuyas líneas son conceptos de factura (`financial_records.invoice_line_id`; nunca materiales, pagos a trabajadores o cobros importados), con sus líneas, total y clasificación (`sin_clasificar`, `materiales`, `trabajadores`, `clientes`, `mixta`, `otros`). Solo administrador.
+Pantalla entre «Bridge Movimientos Documentos» y «Concepto de movimientos». Muestra los documentos procesados (`ledens.documents` con total distinto de cero) que no tienen ningún movimiento asignado, es decir, ningún enlace `Confirmado` en `bank_document_allocations`. Las entregas de Obramat ya pagadas con su anticipo (`v_purchase_coverage`) no aparecen. Es de consulta: el movimiento se asigna desde «Pendiente de conciliación» («Asignar documento»). Solo administrador.
 
-- `GET /api/finanzas/facturas` `clase, q, desde, hasta, pagina, tam`. `clase=sin_clasificar` (la vista por defecto) lista las facturas con alguna línea sin clasificar. `version` es un md5 de `id:version` de sus registros.
-- `PUT /api/finanzas/facturas/:documentId/clasificacion` `{ clase: materiales|trabajadores|clientes, version, reason? }`: cambia `financial_records.category` de todas sus líneas (`materials`/`labor`/`revenue`) en una transacción, con un `finance_events` `reclassified` por registro. Una factura de pago no puede ser de clientes y una de cobro solo de clientes; cambiar una clasificación previa exige motivo (≥ 5 caracteres). Las líneas pasan a la pestaña de su clase (Materiales, Pagos a trabajadores, Pagos de clientes) como en «Movimientos conciliados».
+- `GET /api/finanzas/documentos-sin-asignar` `q, tipo (Pagar|Cobrar), estado (sin_enlace|revision), desde, hasta, pagina, tam` → `rows, total, importes {pagar, cobrar}`. Cada fila: `id, fecha, numerodocumento, tercero, niftercero, tipo, total, bridge_estado, bridge_motivo, revision` (enlaces sin confirmar), `registros` y `archivo` (solo enlaces https de SharePoint).
 
-GET /api/finanzas/conciliacion: vista=registros|movimientos|documentos (por defecto movimientos), motivo=sin_documento|sin_bridge|revision|parcial, q, desde, hasta, pagina, tam (máximo 100). Respuesta: rows, total, page, pageSize. Cada fila incluye id,type,fecha,tercero,concepto,numerodocumento,referencia,importe,document_id,enlaces,conciliado,por_conciliar,motivos. Los importes mantienen el signo original; conciliado es el total confirmado del documento o movimiento, no un coste adicional. Los registros financieros comparten el estado de su documento. Las transferencias internas se excluyen de la vista bancaria. No se modifica el esquema ni el Bridge.
+## Concepto de movimientos
 
-**Pago de clientes.** Si el Bridge no reconoce un cobro recibido, el administrador lo selecciona en la bandeja y lo registra como pago de cliente. La selección debe contener solo cobros: los pagos van a «Pago a trabajadores» y una selección mixta deshabilita los dos botones.
+Pantalla «Concepto de movimientos» (sustituye a «Conceptos de facturas»). Lista todos los movimientos bancarios (sin traspasos internos ni importes cero) y en efectivo, una fila cada uno, con su clase: Pago de materiales, Pago a trabajadores, Cobro de clientes, Varias clases o **Pendiente de clasificación**. Solo administrador.
 
-- `POST /api/finanzas/conciliacion/pago-clientes` `{ movementIds, projectId? }`, solo admin, de 1 a 50 movimientos.
-- Por cada movimiento crea una fila en `ledens.customer_payments` con:
-  - `bank_movement_id` del movimiento;
-  - `id_pago` = `source_id` del movimiento;
-  - `cliente` = el ordenante;
-  - `total` y `occurred_on` del movimiento.
-- El trigger de 006 la registra como cobro de cliente (`advance`). Si se indica obra, se imputa entera con FinanceService; si no, queda en Pendientes de asignación.
-- **Se rechaza**, con el motivo por movimiento, si:
-  - no es positivo o no está en EUR;
-  - es un traspaso interno;
-  - ya está conciliado con un documento;
-  - está en Pendiente de trabajador;
-  - ya tiene un pago de cliente.
-- Los movimientos con `customer_payments` salen de la bandeja y del contador del menú (`counts().reconciliation`). Siguen en el Bridge, así que una factura emitida que llegue después se puede conciliar con ese cobro. La rentabilidad ya no cuenta el anticipo en tesorería en cuanto el banco tiene un enlace confirmado. Queda en Logs de transacciones, proceso «Cobros de clientes».
+La clase se deduce de lo registrado para el movimiento, nunca se inventa:
+- las categorías de los `financial_records` de los documentos que el Bridge le ha conciliado (enlace `Confirmado`) y de sus propios registros (`bank_movement_id`; en efectivo, su `material_id`/`customer_payment_id`): `materials`/`overhead` → materiales, `labor` → trabajadores, `revenue`/`advance` → clientes;
+- un lote en Pendiente de trabajador → trabajadores.
+
+Queda pendiente si algún registro sigue `unclassified` (u otra categoría), si un documento conciliado no tiene registros o si no hay nada. La rentabilidad solo suma registros clasificados e imputados, así que no está completa mientras quede alguno pendiente (aviso en Rentabilidad por proyecto).
+
+- `GET /api/finanzas/movimientos` `clase, q, desde, hasta, pagina, tam` → `rows, total, resumen` (recuento por clase con los mismos filtros, sin `clase`). Cada fila: `id, tipo (banco|efectivo), fecha, tercero, concepto, referencia, importe, documentos, clase, conocidas, sentido, origen (bridge|trabajadores|registro|ninguno), version, registros, lote`. `version` es un md5 de `id:version` de sus registros.
+- `PUT /api/finanzas/movimientos/:id/clasificacion` `{ clase: materiales|trabajadores|clientes, version, reason? }`. Un pago solo puede ser materiales o trabajadores; un cobro, solo clientes.
+  - Con registros: cambia la categoría de todos (el documento entero de una vez), con un `finance_events` `reclassified` por registro. Cambiar algo ya clasificado exige motivo.
+  - Sin nada registrado entra por el flujo habitual: trabajadores → Pendiente de trabajador (lote); clientes → `customer_payments` ligado al movimiento; materiales → `material_expenses` ligado al movimiento (`bank_movement_id`, total negativo como la importación), que aparece en «Materiales pendiente de asignación». En efectivo, lo mismo que «Asignar» en conciliación.
+  - **Pago de materiales provisional** (migración 026, `ledens.provisional_material_payments`): el `material_expenses` creado para un pago sin factura es provisional. Cuando el Bridge confirma una factura para ese movimiento (automático, manual o importado) y la factura tiene sus registros, un trigger diferido excluye el registro provisional (`provisional_replaced` en `finance_events`, nunca se borra) y los registros de la factura heredan la clase (los `unclassified` pasan a `materials`) y la obra (si el provisional estaba imputado entero a una obra, los registros sin obra se imputan a ella). Las líneas de la factura que lleguen después también heredan. Así el gasto nunca cuenta dos veces. En la lista, su origen es «Provisional hasta conciliar su factura».
+  - Un movimiento en Pendiente de trabajador no cambia de clase aquí (se devuelve a conciliación desde esa pantalla), y uno con un documento conciliado sin registros pide revisar la ingesta.
 
 ## Efectivo
 

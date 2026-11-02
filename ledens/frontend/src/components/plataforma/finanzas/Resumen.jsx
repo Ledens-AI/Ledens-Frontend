@@ -17,7 +17,7 @@ export default function Resumen({ summary, error, onRetry, go }) {
       </div>
 
       <div className="fin-grid-3">
-        {Object.entries(TIPO).map(([t, d]) => {
+        {Object.entries(TIPO).filter(([t]) => t !== 'concepto').map(([t, d]) => {
           const x = s?.porTipo[t];
           const pct = x && x.total ? Math.round(((x.total - x.pendientes) / x.total) * 100) : 0;
           return (

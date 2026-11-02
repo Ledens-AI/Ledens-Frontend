@@ -116,14 +116,19 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     res.json(await svc(req).reclassify({ recordId: req.params.recordId, clase: b.clase, version: b.version, reason: b.reason }));
   }));
 
-  // Conceptos de facturas: whole invoices and their classification (admins).
-  router.get('/facturas', handle(async (req, res) => {
-    res.json(await svc(req).invoices({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), clase: req.query.clase || '', from: req.query.desde, to: req.query.hasta }));
+  // Documentos sin asignar: processed documents with no confirmed movement (admins).
+  router.get('/documentos-sin-asignar', handle(async (req, res) => {
+    const q = req.query;
+    res.json(await svc(req).unassignedDocuments({ page: q.pagina, pageSize: q.tam, q: String(q.q || '').slice(0, 100), tipo: q.tipo || '', estado: q.estado || '', from: q.desde, to: q.hasta }));
+  }));
+  // Concepto de movimientos: every movement and its class (admins).
+  router.get('/movimientos', handle(async (req, res) => {
+    res.json(await svc(req).movements({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), clase: req.query.clase || '', from: req.query.desde, to: req.query.hasta }));
   }));
   // { clase: 'materiales' | 'trabajadores' | 'clientes', version, reason? }
-  router.put('/facturas/:documentId/clasificacion', traced('imputacion', 'Clasificación de factura', { entity: (req) => ({ type: 'documento', id: req.params.documentId }), summary: (b) => ({ message: `Factura clasificada como ${b.clase} (${b.changed} de ${b.lineas} líneas)`, detail: { clase: b.clase, categoria: b.category } }) })(async (req, res) => {
+  router.put('/movimientos/:id/clasificacion', traced('imputacion', 'Clasificación de movimiento', { entity: (req) => ({ type: 'movimiento', id: req.params.id }), summary: (b) => ({ message: 'Movimiento clasificado como ' + b.clase, detail: { clase: b.clase, via: b.via } }) })(async (req, res) => {
     const b = req.body || {};
-    res.json(await svc(req).classifyInvoice({ documentId: req.params.documentId, clase: b.clase, version: b.version, reason: b.reason }));
+    res.json(await svc(req).classifyMovement({ id: req.params.id, clase: b.clase, version: b.version, reason: b.reason }));
   }));
 
   router.get('/conciliacion', handle(async (req, res) => {

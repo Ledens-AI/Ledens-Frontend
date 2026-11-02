@@ -10,8 +10,16 @@ const C = { coste: '#5567AE', material: '#5567AE', trabajador: '#68C0B5', cobro:
  * imputations only (splits counted by their parts). KPIs link to the records
  * that make them up. Figures without a reliable source are listed as
  * "no disponible" with the reason instead of being estimated. */
-export default function Rentabilidad({ project, onProject, drill, version }) {
+export default function Rentabilidad({ project, onProject, drill, version, go }) {
   const [data, setData] = useState(null);
+  // Profitability only counts classified movements: warn while any is pending
+  // (admins; the list is admin-only, so for others this stays silent).
+  const [pendientes, setPendientes] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    api.movements({ clase: 'pendiente', tam: 1 }).then((d) => { if (!cancelled) setPendientes(d.total); }, () => {});
+    return () => { cancelled = true; };
+  }, [version]);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
 
@@ -30,6 +38,7 @@ export default function Rentabilidad({ project, onProject, drill, version }) {
         <div className="fin-field fin-grow"><span>Proyecto</span>
           <ProjectPicker value={project} onChange={onProject} placeholder="Busca un proyecto por nombre, código o dirección" /></div>
       </div>
+      {pendientes ? <div className="fin-warn"><i className="ri-alert-line"></i><span>{pendientes === 1 ? 'Hay 1 movimiento pendiente de clasificación' : `Hay ${num(pendientes)} movimientos pendientes de clasificación`}: la rentabilidad no incluye sus importes hasta clasificarlos.</span>{go ? <button type="button" className="fin-btn" onClick={() => go('concepto')}>Clasificar movimientos</button> : null}</div> : null}
       {!project ? <div className="fin-card"><Empty icon="ri-line-chart-line" title="Elige un proyecto" text="Verás costes e ingresos reconocidos y, por separado, cobros y pagos." /></div> : null}
       {project && error ? <ErrorBox message={error} onRetry={() => setReload((n) => n + 1)} /> : null}
       {project && !error && !data ? <div className="fin-loading">Calculando…</div> : null}
