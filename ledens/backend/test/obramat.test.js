@@ -2,6 +2,8 @@ import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {FinanzasService} from '../src/finanzas/service.js';
+import {BridgeService} from '../src/bridge/service.js';
+import {BridgeWorkspace} from '../src/bridge/workspace.js';
 // «Regla Obramat» and supplier refunds whose credit note has concepts, in
 // Concepto de movimientos, on PGlite with synthetic rows only.
 let db,pool,admin,m={};
@@ -96,8 +98,18 @@ test('a movement with another account of the company can be a transfer between a
  const otro=await mov(-50,'Fontanería López','Pago fontanero');
  assert.deepEqual([(await row(t)).propia,(await row(t)).clase],[true,'pendiente']);
  assert.ok((await asAdmin().reconciliation({pageSize:200})).rows.some(r=>r.id===t));
+ const bridgeIds=async()=>(await new BridgeWorkspace(pool).movements({limit:50,q:'Traspaso'})).rows.map(r=>r.id);
+ const counts=await new BridgeWorkspace(pool).counts();
+ // An invoice of the same amount and date: before marking, the transfer is a Bridge candidate.
+ const d={id:(await db.query(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento) VALUES(200,'Cobrar','2026-09-29','F-200') RETURNING id`)).rows[0].id,total:'200',document_on:'2026-09-29',tipo:'Cobrar'};
+ const candidates=async()=>(await new BridgeService(pool).candidates(pool,d)).rows.map(r=>r.id);
+ assert.ok((await candidates()).includes(t)&&(await bridgeIds()).includes(t));
  await assert.rejects(classify(otro,'transferencia'),{status:409,message:/Sociedad Inversora Navarro Robinson/});
  assert.equal((await classify(t,'transferencia')).via,'transferencia');
+ // Once marked, the Bridge never matches it and the sidebar counters leave it out.
+ assert.ok(!(await candidates()).includes(t)&&!(await bridgeIds()).includes(t));
+ const after=await new BridgeWorkspace(pool).counts();
+ assert.deepEqual([after.pending,after.reconciliation],[counts.pending-1,counts.reconciliation-1]);
  assert.deepEqual([(await row(t)).clase,(await row(t)).origen],['transferencia','transferencia']);
  assert.equal((await db.query('SELECT count(*)::int n FROM ledens.financial_records WHERE bank_movement_id=$1',[t])).rows[0].n,0,'nothing registered: neither cost nor income');
  assert.ok(!(await asAdmin().reconciliation({pageSize:200})).rows.some(r=>r.id===t),'it leaves Pendiente de conciliación');

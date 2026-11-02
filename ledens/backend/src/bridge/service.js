@@ -16,6 +16,11 @@ const BANK=`SELECT b.*,
   (SELECT count(*)::int FROM ledens.bank_document_allocations a WHERE a.bank_movement_id=b.id) links
   FROM ledens.bank_movements b`;
 const amount=n=>cents(String(n));
+// A movement marked as a transfer between the company's own accounts (027,
+// «Concepto de movimientos») is never matched with a document, like an imported
+// internal transfer.
+const hasTransfers=async c=>Boolean((await c.query("SELECT to_regclass('ledens.internal_transfers') name")).rows[0].name);
+const markedTransfer=async(c,id)=>await hasTransfers(c)&&(await c.query('SELECT 1 FROM ledens.internal_transfers WHERE bank_movement_id=$1',[id])).rows.length>0;
 export class BridgeService{
   constructor(pool){this.pool=pool;}
   async tx(fn){const c=await this.pool.connect();try{await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock($1)',[LOCK_ID]);const value=await fn(c);await c.query('COMMIT');return value;}catch(e){await c.query('ROLLBACK').catch(()=>{});throw e;}finally{c.release();}}
@@ -43,12 +48,14 @@ export class BridgeService{
   async candidates(c,d){
     if(amount(d.total)===null||day(d.document_on)===null)return {rows:[],overflow:false};
     const workers=Boolean((await c.query("SELECT to_regclass('ledens.worker_payment_batches') name")).rows[0].name);
+    const transfers=await hasTransfers(c);
     const allocations=await this.allocations(c,d.id),remaining=this.remaining(d,allocations);
     if(remaining===null||remaining<=0n)return {rows:[],overflow:false};
     const {rows}=await c.query(BANK+` WHERE sign(b.total_amount)=sign($1::numeric)
       AND b.completed_on BETWEEN $2::date-7 AND $2::date+90
       AND abs(b.total_amount)>=$3::numeric
       ${workers?'AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wp WHERE wp.bank_movement_id=b.id)':''}
+      ${transfers?'AND NOT EXISTS(SELECT 1 FROM ledens.internal_transfers it WHERE it.bank_movement_id=b.id)':''}
       ORDER BY abs(abs(b.total_amount)-$3::numeric),b.completed_on,b.id LIMIT 101`,[d.total,d.document_on,decimal(remaining)]);
     return {rows:rows.slice(0,100),overflow:rows.length>100};
   }
@@ -101,7 +108,7 @@ export class BridgeService{
         return this.updateCase(c,id,'pending','competing_document',snapshot);
       }
       const fresh=(await c.query(BANK+' WHERE b.id=$1',[bank.id])).rows[0];
-      if(fresh.links!==0||!eligibleBank(d,fresh))return this.updateCase(c,id,'pending','bank_balance_changed',snapshot);
+      if(fresh.links!==0||!eligibleBank(d,fresh)||await markedTransfer(c,bank.id))return this.updateCase(c,id,'pending','bank_balance_changed',snapshot);
       const allocation=(await c.query(`INSERT INTO ledens.bank_document_allocations
         (document_id,bank_movement_id,allocated_amount,reconciled_on,state,observaciones)
         VALUES($1,$2,$3,CURRENT_DATE,'Confirmado',$4) RETURNING id`,[id,bank.id,d.total,'AUTO_BRIDGE:'+RULE_VERSION])).rows[0];
@@ -183,7 +190,7 @@ export class BridgeService{
       if(Boolean((await c.query("SELECT to_regclass('ledens.worker_payment_batches') name")).rows[0].name)&&(await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1',[body.bank_movement_id])).rows.length)throw new BridgeError(409,'bank_is_worker_payment');
       if(!b||bankFingerprint(b)!==body.bank_fingerprint)throw new BridgeError(409,'bank_changed');
       if(amount(b.total_amount)===null||amount(b.confirmed)===null)throw new BridgeError(409,'invalid_bank_amount');
-      if(b.state!=='COMPLETED'||b.currency!=='EUR'||b.is_internal_transfer===true)throw new BridgeError(409,'ineligible_bank_movement');
+      if(b.state!=='COMPLETED'||b.currency!=='EUR'||b.is_internal_transfer===true||await markedTransfer(c,b.id))throw new BridgeError(409,'ineligible_bank_movement');
       if(d.invoice_currency&&d.invoice_currency!=='EUR')throw new BridgeError(409,'currency_mismatch');
       const total=amount(d.total),rows=await this.allocations(c,id);
       if(total===null||total===0n)throw new BridgeError(409,'incomplete_document');
