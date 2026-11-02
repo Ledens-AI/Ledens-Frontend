@@ -36,6 +36,7 @@ test('distribution uses canonical caps, clears legacy project, rejects stale wri
 test('pagination, filters and pending totals use canonical gross cents',async()=>{
  const r=await source();const listed=await svc.listRecords({type:'material',pending:true,q:'Cemento',pageSize:1});assert.equal(listed.rows.length,1);assert.ok(listed.total>0);
  const summary=await svc.pendingSummary();assert.ok(summary.pendientes>0);assert.ok(Number(summary.importePendiente)>=1200);
+ assert.equal(summary.clientes.pendientes,(await svc.listRecords({type:'cliente',pending:true})).total);
  await svc.distribute({type:r.type,id:r.id,version:r.version,requestId:randomUUID(),parts:[{projectId:p1,amount:'700'}]});
  assert.ok((await svc.listRecords({estado:'parcial'})).rows.some(x=>x.id===r.id));
 });

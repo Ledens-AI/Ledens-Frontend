@@ -52,7 +52,7 @@ export default function GestionFinanciera({ tab, go, toast, onPending, onBridgeP
   const conceptRef=useRef(onConceptPending);conceptRef.current=onConceptPending;
   const loadConcept=useCallback(()=>api.movementsPending().then(d=>conceptRef.current?.(d.pendientes),()=>{}),[]);
   const loadSummary = useCallback(() => api.summary().then(
-    (s) => { setSummary(s); setSummaryError(''); pendingRef.current?.(s.materiales?.pendientes ?? s.pendientes); },
+    (s) => { setSummary(s); setSummaryError(''); pendingRef.current?.(s.materiales?.pendientes ?? s.pendientes, s.clientes?.pendientes ?? 0); },
     (e) => setSummaryError(e.message),
   ), []);
   useEffect(() => { loadSummary(); }, [loadSummary]);
