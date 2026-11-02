@@ -349,6 +349,11 @@ export class FinanzasService {
   const total=(await this.query('SELECT count(*)::int n FROM ('+sql+') x',params)).rows[0].n;
   return {rows,total,resumen,page:p,pageSize:size};
  }
+ // Sidebar badge of «Concepto de movimientos»: movements still pending of classification.
+ async movementsPending(){
+  if(this.user.role!=='admin')throw new FinError(403,'Clasificar movimientos requiere administrador');
+  return {pendientes:(await this.query(MOVEMENTS_SQL+" SELECT count(*)::int n FROM fin WHERE clase='pendiente'")).rows[0].n};
+ }
  // Manual class of one movement. With records (its documents' or its own) their
  // category changes, audited per record; with nothing registered the movement
  // enters through the usual flow: Pendiente de trabajador, a client payment or a

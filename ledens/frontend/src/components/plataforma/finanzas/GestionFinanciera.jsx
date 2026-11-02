@@ -35,7 +35,7 @@ const INTRO = {
 
 /* Gestión financiera (/plataforma, admins and jefes de obra). Data comes from
  * /api/finanzas, which enforces the same roles server-side. */
-export default function GestionFinanciera({ tab, go, toast, onPending, onBridgePending }) {
+export default function GestionFinanciera({ tab, go, toast, onPending, onBridgePending, onConceptPending }) {
   const [summary, setSummary] = useState(null);
   const [summaryError, setSummaryError] = useState('');
   const [version, setVersion] = useState(0);
@@ -48,13 +48,16 @@ export default function GestionFinanciera({ tab, go, toast, onPending, onBridgeP
   pendingRef.current = onPending;
   const bridgeRef=useRef(onBridgePending);bridgeRef.current=onBridgePending;
   const loadBridge=useCallback(()=>api.bridgeCounts().then(d=>bridgeRef.current?.(d.pending,d.reconciliation??d.pending),()=>{}),[]);
+  // «Concepto de movimientos» badge (admins; anyone else gets 403 and keeps no badge).
+  const conceptRef=useRef(onConceptPending);conceptRef.current=onConceptPending;
+  const loadConcept=useCallback(()=>api.movementsPending().then(d=>conceptRef.current?.(d.pendientes),()=>{}),[]);
   const loadSummary = useCallback(() => api.summary().then(
     (s) => { setSummary(s); setSummaryError(''); pendingRef.current?.(s.materiales?.pendientes ?? s.pendientes); },
     (e) => setSummaryError(e.message),
   ), []);
   useEffect(() => { loadSummary(); }, [loadSummary]);
-  useEffect(()=>{loadBridge();},[loadBridge,tab]);
-  const changed = useCallback(() => { setVersion((v) => v + 1); loadSummary(); loadBridge(); }, [loadSummary,loadBridge]);
+  useEffect(()=>{loadBridge();loadConcept();},[loadBridge,loadConcept,tab]);
+  const changed = useCallback(() => { setVersion((v) => v + 1); loadSummary(); loadBridge(); loadConcept(); }, [loadSummary,loadBridge,loadConcept]);
   // A drill-down filter only applies to the screen it was opened for.
   useEffect(() => { setDrill((d) => (d && d.tab !== tab ? null : d)); }, [tab]);
 
