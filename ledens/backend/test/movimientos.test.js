@@ -203,6 +203,17 @@ test('a provisional payment replaced by an invoice that later lost its concepts 
  // Never one excluded on purpose by a native Obramat purchase, nor one for another amount.
  const b3=await mov(-11,'Pago anticipo');await material(b3,-11,'purchase_source_replaced');
  await assert.rejects(classify(b3,'materiales'),{status:409,message:/purchase_source_replaced.*no se puede recuperar/});
+ // A material with no financial record at all (an old import that bypassed the trigger): registered and made provisional.
+ const b5=await mov(-7.44,'Omb Malaga');
+ await q("SELECT set_config('ledens.finance_sync','on',false)");
+ const orphan=(await q("INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id) VALUES('ud','Importado',1,-7.44,-7.44,'2026-09-24',$1) RETURNING id",[b5])).rows[0].id;
+ await q("SELECT set_config('ledens.finance_sync','off',false)");
+ assert.equal((await q('SELECT count(*)::int n FROM ledens.financial_records WHERE material_id=$1',[orphan])).rows[0].n,0,'no record: it counts nowhere');
+ assert.equal((await row(b5)).clase,'pendiente');
+ const res5=await classify(b5,'materiales');
+ assert.deepEqual([res5.materialId,res5.restored],[orphan,true]);
+ assert.deepEqual([(await row(b5)).clase,(await row(b5)).origen],['materiales','provisional']);
+ assert.deepEqual((await q('SELECT category,status,gross_amount::text g FROM ledens.financial_records WHERE material_id=$1',[orphan])).rows,[{category:'materials',status:'pending',g:'7.44'}]);
  const b4=await mov(-12,'Pago parcial');await material(b4,-5,null);
  await assert.rejects(classify(b4,'materiales'),{status:409,message:/no se puede recuperar/});
 });

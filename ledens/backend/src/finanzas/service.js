@@ -765,6 +765,20 @@ export class FinanzasService {
    // payment (audited) and 026/029 replace it again once every invoice has its
    // concepts. Never one excluded on purpose by a native Obramat purchase (its
    // cost comes with the delivery invoice), nor one for another amount.
+   // A material of the movement with no financial record at all (loaded by an old
+   // import that bypassed 006's trigger): it counts nowhere and blocks a new one.
+   // Its record is created the usual way (006's sync trigger, by touching the row)
+   // and it becomes the provisional payment, so 026/029 replace it with the
+   // invoice's concepts instead of counting the cost twice.
+   const orphan=provisional?prev.find(x=>!x.record_id&&cents(x.total)===cents(b.total_amount)):null;
+   if(orphan){
+    await c.query('UPDATE ledens.material_expenses SET total=total WHERE id=$1',[orphan.material_id]);
+    const rec=(await c.query('SELECT * FROM ledens.financial_records WHERE material_id=$1',[orphan.material_id])).rows[0];
+    if(!rec)throw new FinError(503,'No se pudo registrar el material del movimiento en la contabilidad');
+    await c.query('INSERT INTO ledens.provisional_material_payments(material_id,bank_movement_id,created_by) VALUES($1,$2,$3) ON CONFLICT(material_id) DO UPDATE SET replaced_at=NULL,replaced_by_document_id=NULL',[orphan.material_id,b.id,this.user.id]);
+    await this.finance.audit(c,rec,this.user,'provisional_restored','Material del movimiento sin registro contable: registrado y convertido en pago de materiales provisional',rec);
+    return {materialId:orphan.material_id,recordId:rec.id,provisional:true,restored:true};
+   }
    const p=provisional?prev.find(x=>x.record_id&&x.last_action!=='purchase_source_replaced'&&cents(x.total)===cents(b.total_amount)):null;
    if(p){
     const before=(await c.query('SELECT * FROM ledens.financial_records WHERE id=$1 FOR UPDATE',[p.record_id])).rows[0];
@@ -781,7 +795,7 @@ export class FinanzasService {
     await this.finance.audit(c,before,this.user,'provisional_restored',`Pago de materiales provisional restaurado: no contaba (${p.last_action||(before.source_valid?before.status:'origen no válido')}) y nada activo representaba el pago`,after);
     return {materialId:p.material_id,recordId:p.record_id,provisional:true,restored:true};
    }
-   const why=prev.map(x=>x.last_action||(x.record_id?x.status:'sin registro')).join(', ');
+   const why=prev.map(x=>(x.last_action||(x.record_id?x.status:'sin registro'))+(cents(x.total)!==cents(b.total_amount)?`, material de ${x.total} € y pago de ${decimal(cents(b.total_amount))} €`:'')).join('; ');
    throw new FinError(409,`Este movimiento ya tuvo un material que se excluyó (${why}) y no se puede recuperar: revisa la ingesta de su documento conciliado`);
   }
   const total=decimal(cents(b.total_amount));
