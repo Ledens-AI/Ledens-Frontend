@@ -89,6 +89,18 @@ test('a receipt reconciled with a document without concepts can be a client rece
  await assert.rejects(asAdmin().classifyMovement({id:b2,clase:'clientes',version:r2.version}),{status:409,message:/F-SIN no tiene conceptos registrados/});
 });
 
+test('a payment reconciled with a document without concepts can go to Pendiente de trabajador: no error, no longer pending',async()=>{
+ const b=(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,beneficiary_name,currency,state)
+  VALUES('MOV-celestino',-190,-190,'2026-09-10','A Celestino Gomez Rodriguez','Celestino Gomez Rodriguez','EUR','COMPLETED') RETURNING id`)).rows[0].id;
+ const d=(await db.query(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento) VALUES(-190,'Pagar','2026-09-10','258/2026') RETURNING id`)).rows[0].id;
+ await db.query("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state,reconciled_on) VALUES($1,$2,-190,'Confirmado','2026-09-10')",[b,d]);
+ const find=async()=>(await asAdmin().movements({pageSize:100})).rows.find(x=>x.id===b);
+ const res=await asAdmin().classifyMovement({id:b,clase:'trabajadores',version:(await find()).version});
+ assert.equal(res.via,'pendiente-trabajador');
+ assert.deepEqual([(await find()).clase,(await find()).origen],['trabajadores','bridge']);
+ assert.equal((await db.query('SELECT count(*)::int n FROM ledens.worker_payment_batches WHERE bank_movement_id=$1',[b])).rows[0].n,1);
+});
+
 test('«Segregar conceptos» reports the invoice without concepts, with what the dialog needs',async()=>{
  await assert.rejects(asAdmin().segregateMaterial(material),e=>e.status===409&&/008-0010-471790 no tiene conceptos registrados/.test(e.message)&&
   e.extra.movimiento_id===mov&&e.extra.sin_conceptos[0].id===doc&&e.extra.sin_conceptos[0].total==='-40');
