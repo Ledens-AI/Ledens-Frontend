@@ -30,6 +30,7 @@ test('a cash entry is validated, appears in Pendiente de conciliación signed li
  await assert.rejects(asAdmin().createCash({kind:'pago',amount:'10',date:'2026-13-45',concept:'x'}),{status:400});
  await assert.rejects(asAdmin().createCash({kind:'pago',amount:'10',date:'2026-10-01',concept:'  '}),{status:400});
  await assert.rejects(asJefe().createCash({kind:'pago',amount:'10',date:'2026-10-01',concept:'x'}),{status:403});
+ await assert.rejects(asAdmin().createCash({kind:'cobro',amount:'10',date:'2026-10-01',concept:'x',counterparty:'  '}),{status:400},'a cobro names its client');
  const k=await cash('pago','35.50',{concept:'Tornillería ferretería',counterparty:'Ferretería Sol'});
  const row=(await inbox()).find(r=>r.id===k.id);
  assert.equal(row.type,'efectivo');assert.equal(Number(row.importe),-35.5);assert.deepEqual(row.motivos,['efectivo']);
@@ -78,7 +79,7 @@ test('a cash payment to workers goes through Pendiente de trabajador and can go 
  await assert.rejects(asAdmin().deleteCash(back.id),{status:409},'not while it is in the worker queue');
  await asAdmin().returnWorkerBatch({batchId:batch.id});
  assert.ok((await inbox()).some(r=>r.id===back.id),'back in the inbox, assignable again');
- const cobro=await cash('cobro','60.00');
+ const cobro=await cash('cobro','60.00',{counterparty:'Cliente Dos'});
  assert.match((await asAdmin().classifyWorkerPayments({movementIds:[cobro.id]})).results[0].error,/pagos salientes/);
  // Saved: a worker payment with no bank movement, allocated, approvable without a document.
  await asAdmin().classifyWorkerPayments({movementIds:[back.id]});
@@ -105,7 +106,7 @@ test('only an unassigned entry can be deleted; HTTP needs an admin and the allow
  const base=`http://127.0.0.1:${server.address().port}/api/finanzas/conciliacion/efectivo`;
  try{
   const post=(body,headers={})=>fetch(base,{method:'POST',headers:{'content-type':'application/json',origin:'https://ledens.test',...headers},body:JSON.stringify(body)});
-  const body={kind:'cobro',amount:'80',date:'2026-10-02',concept:'Señal'};
+  const body={kind:'cobro',amount:'80',date:'2026-10-02',concept:'Señal',counterparty:'Cliente Tres'};
   assert.equal((await post(body,{origin:'https://evil.test'})).status,403);
   assert.equal((await post(body,{'x-role':'client'})).status,403);
   const ok=await post(body);assert.equal(ok.status,201);const k2=await ok.json();

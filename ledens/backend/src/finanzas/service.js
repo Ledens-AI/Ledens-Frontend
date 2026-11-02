@@ -21,7 +21,10 @@ const BASE=`WITH base AS (
  SELECT f.id record_id,coalesce(f.material_id,f.worker_payment_id,f.customer_payment_id,f.invoice_line_id) id,
  CASE WHEN f.material_id IS NOT NULL THEN 'material' WHEN f.worker_payment_id IS NOT NULL THEN 'trabajador' WHEN f.customer_payment_id IS NOT NULL THEN 'cliente' ELSE 'concepto' END type,
  f.version,f.status accounting_status,f.category,f.occurred_on fecha,f.gross_amount importe,f.document_id,f.bank_movement_id,
- coalesce(f.counterparty,d.tercero,to_jsonb(w)->>'empleado',to_jsonb(c)->>'cliente') tercero,
+ coalesce(nullif(btrim(f.counterparty),''),nullif(btrim(d.tercero),''),nullif(btrim(to_jsonb(w)->>'empleado'),''),nullif(btrim(to_jsonb(c)->>'cliente'),''),
+  nullif(btrim(bd.tercero),''),CASE WHEN f.gross_amount>0 THEN coalesce(nullif(btrim(bm.payer),''),nullif(btrim(bm.beneficiary_name),''))
+  ELSE coalesce(nullif(btrim(bm.beneficiary_name),''),nullif(btrim(bm.payer),'')) END,nullif(btrim(km.counterparty),''),nullif(btrim(a.cliente),''),
+  CASE WHEN f.customer_payment_id IS NOT NULL OR f.category IN ('revenue','advance') THEN 'Cliente sin identificar' END) tercero,
  coalesce(f.description,to_jsonb(m)->>'description',to_jsonb(w)->>'categoria',d.numerodocumento) concepto,
  coalesce(to_jsonb(m)->>'quantity',il.quantity::text) quantity,to_jsonb(m)->>'und' unidad,coalesce(to_jsonb(m)->>'unit_price',il.evidence->>'unit_price') unit_price,
  il.line_number,il.evidence->>'product_code' product_code,
@@ -37,9 +40,14 @@ const BASE=`WITH base AS (
  LEFT JOIN ledens.employees em ON em.id=(to_jsonb(w)->>'employee_id')::uuid LEFT JOIN ledens.positions po ON po.id=em.primary_position_id
  LEFT JOIN ledens.customer_payments c ON c.id=f.customer_payment_id
  LEFT JOIN ledens.invoice_lines il ON il.id=f.invoice_line_id
+ LEFT JOIN ledens.bank_movements bm ON bm.id=coalesce(f.bank_movement_id,c.bank_movement_id)
+ LEFT JOIN LATERAL(SELECT bdd.tercero FROM ledens.bank_document_allocations ba JOIN ledens.documents bdd ON bdd.id=ba.document_id
+  WHERE ba.bank_movement_id=bm.id AND nullif(btrim(bdd.tercero),'') IS NOT NULL ORDER BY ba.state='Confirmado' DESC,bdd.document_on DESC NULLS LAST,bdd.id LIMIT 1) bd ON true
+ LEFT JOIN ledens.cash_movements km ON km.customer_payment_id=f.customer_payment_id AND f.customer_payment_id IS NOT NULL
  LEFT JOIN ledens.finance_review_flags rv ON rv.record_id=f.id
  LEFT JOIN LATERAL(SELECT sum(pa.allocated_amount) allocated,sum(abs(pa.allocated_amount)) used,count(*)::int n,
-  (array_agg(pa.project_id))[1] project_id,(array_agg(pr.name))[1] project_label FROM ledens.project_financial_allocations pa
+  (array_agg(pa.project_id))[1] project_id,(array_agg(pr.name))[1] project_label,
+  (array_agg(to_jsonb(pr)->>'customer_name_source' ORDER BY abs(pa.allocated_amount) DESC) FILTER (WHERE nullif(btrim(to_jsonb(pr)->>'customer_name_source'),'') IS NOT NULL))[1] cliente FROM ledens.project_financial_allocations pa
   JOIN ledens.projects pr ON pr.id=pa.project_id WHERE pa.record_id=f.id) a ON true WHERE ${SCOPE} AND f.source_valid AND f.status<>'excluded'
 ), listed AS(SELECT b.*,CASE WHEN needs_review THEN 'revision' WHEN NOT sin_proyecto THEN 'asignado' WHEN allocation_count>0 THEN 'parcial' ELSE 'pendiente' END estado FROM base b)`;
 // «Movimientos conciliados»: the three business classes map onto canonical
@@ -729,12 +737,19 @@ export class FinanzasService {
   if((await c.query('SELECT 1 FROM ledens.customer_payments WHERE bank_movement_id=$1 LIMIT 1',[id])).rows.length)throw new FinError(409,'Ya está registrado como pago de cliente');
   if((await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1',[id])).rows.length)throw new FinError(409,'Está en Pendiente de trabajador');
   if(!allowReconciled&&(await c.query("SELECT 1 FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado' LIMIT 1",[id])).rows.length)throw new FinError(409,'Ya está conciliado con un documento');
+  // The client is the ordering party; failing that, a reconciled document's or the obra's.
+  const cliente=m.payer?.trim()||m.beneficiary_name?.trim()||(await c.query(`SELECT d.tercero FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id
+   WHERE a.bank_movement_id=$1 AND nullif(btrim(d.tercero),'') IS NOT NULL ORDER BY a.state='Confirmado' DESC,d.document_on DESC NULLS LAST LIMIT 1`,[id])).rows[0]?.tercero||
+   (projectId&&await this.projectCustomer(c,projectId))||null;
   const p=(await c.query(`INSERT INTO ledens.customer_payments(occurred_on,id_pago,cliente,total,bank_movement_id)
-   VALUES($1,$2,$3,$4,$5) RETURNING id`,[m.completed_on,m.source_id,m.payer||m.beneficiary_name||null,decimal(total),id])).rows[0];
+   VALUES($1,$2,$3,$4,$5) RETURNING id`,[m.completed_on,m.source_id,cliente,decimal(total),id])).rows[0];
   const r=(await c.query('SELECT id,version,gross_amount FROM ledens.financial_records WHERE customer_payment_id=$1',[p.id])).rows[0];
   if(!r)throw new FinError(503,'No se pudo registrar el cobro en la contabilidad');
   if(projectId)await this.finance.replace(c,this.user,{record_id:r.id,version:r.version,allocations:[{project_id:projectId,amount:r.gross_amount}]},`Cobro de cliente del movimiento ${m.source_id}`);
   return {customerPaymentId:p.id,recordId:r.id};
+ }
+ async projectCustomer(c,projectId){
+  return (await c.query(`SELECT nullif(btrim(to_jsonb(p)->>'customer_name_source'),'') cliente FROM ledens.projects p WHERE id=$1`,[projectId])).rows[0]?.cliente||null;
  }
  async splitBatch(c,batchId,plan){
   for(const [i,amount] of plan.lines.entries())await c.query('INSERT INTO ledens.worker_payment_splits(batch_id,line_number,amount,role) VALUES($1,$2,$3,$4)',[batchId,i+1,decimal(amount),plan.role]);
@@ -769,6 +784,8 @@ export class FinanzasService {
   if(!/^\d{4}-\d{2}-\d{2}$/.test(body.date||'')||!Number.isFinite(Date.parse(body.date)))throw new FinError(400,'Fecha no válida');
   if(!concept||concept.length>300)throw new FinError(400,'El concepto es obligatorio (máximo 300 caracteres)');
   if(counterparty&&counterparty.length>200)throw new FinError(400,'El tercero admite 200 caracteres como máximo');
+  // A client receipt always names its client (it is the «Cliente» of Pagos de clientes).
+  if(kind==='cobro'&&!counterparty)throw new FinError(400,'Indica el cliente que hace el cobro');
   return (await this.pool.query(`INSERT INTO ledens.cash_movements(kind,amount,occurred_on,concept,counterparty,created_by)
    VALUES($1,$2,$3,$4,$5,$6) RETURNING id,kind,amount::text,occurred_on::text fecha,concept,counterparty`,[kind,decimal(amount),body.date,concept,counterparty,this.user.id])).rows[0];
  }
@@ -784,15 +801,17 @@ export class FinanzasService {
  // Pago → «Pagos de materiales» or cobro → «Pagos de clientes». The source row is
  // signed like the accounting import (a material cost is negative there); 006's
  // trigger registers it, and a project, if given, is allocated through the engine.
- async assignCash({id,target,projectId,description}={}){
+ async assignCash({id,target,projectId,description,counterparty}={}){
   this.cashAdmin();
   if(!['materiales','clientes'].includes(target))throw new FinError(400,'Destino no válido');
   if(projectId&&!uuid(projectId))throw new FinError(400,'Obra no válida');
   const text=String(description??'').trim();
   if(text.length>300)throw new FinError(400,'La descripción admite 300 caracteres como máximo');
-  return this.finance.transaction(async c=>this.assignCashIn(c,await this.cashForUpdate(c,id),target,projectId,text));
+  const client=String(counterparty??'').trim();
+  if(client.length>200)throw new FinError(400,'El cliente admite 200 caracteres como máximo');
+  return this.finance.transaction(async c=>this.assignCashIn(c,await this.cashForUpdate(c,id),target,projectId,text,client));
  }
- async assignCashIn(c,k,target,projectId,text){
+ async assignCashIn(c,k,target,projectId,text,client=''){
   const id=k.id;
   if(CASH_TARGETS[target]!==k.kind)throw new FinError(409,target==='clientes'?'Solo un cobro puede ir a Pagos de clientes':'Solo un pago puede ir a Pagos de materiales');
   if(projectId&&!(await c.query('SELECT 1 FROM ledens.projects WHERE id=$1',[projectId])).rows.length)throw new FinError(400,'Obra no encontrada');
@@ -803,8 +822,12 @@ export class FinanzasService {
    await c.query("UPDATE ledens.cash_movements SET assigned_to='materiales',material_id=$2,assigned_by=$3,assigned_at=now() WHERE id=$1",[id,m.id,this.user.id]);
    source=(await c.query('SELECT id,version,gross_amount FROM ledens.financial_records WHERE material_id=$1',[m.id])).rows[0];
   }else{
+   // Older cobros could be saved without a client: the one typed now, else the obra's.
+   const cliente=k.counterparty?.trim()||client||(projectId&&await this.projectCustomer(c,projectId));
+   if(!cliente)throw new FinError(400,'Indica el cliente que hace el cobro');
+   if(!k.counterparty?.trim())await c.query('UPDATE ledens.cash_movements SET counterparty=$2 WHERE id=$1',[id,cliente]);
    const p=(await c.query(`INSERT INTO ledens.customer_payments(occurred_on,id_pago,cliente,total)
-    VALUES($1,'Efectivo',$2,$3) RETURNING id`,[k.occurred_on,k.counterparty,k.amount])).rows[0];
+    VALUES($1,'Efectivo',$2,$3) RETURNING id`,[k.occurred_on,cliente,k.amount])).rows[0];
    await c.query("UPDATE ledens.cash_movements SET assigned_to='clientes',customer_payment_id=$2,assigned_by=$3,assigned_at=now() WHERE id=$1",[id,p.id,this.user.id]);
    source=(await c.query('SELECT id,version,gross_amount FROM ledens.financial_records WHERE customer_payment_id=$1',[p.id])).rows[0];
   }
