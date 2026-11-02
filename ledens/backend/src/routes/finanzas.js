@@ -143,6 +143,11 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     res.json(await svc(req).applyObramatRule());
   }));
   router.get('/movimientos/pendientes', handle(async (req, res) => { res.json(await svc(req).movementsPending()); }));
+  // Materiales sin registro contable (admins): GET reports the plan; POST applies it ({ ids? }).
+  router.get('/materiales/sin-registro', handle(async (req, res) => { res.json(await svc(req).registerOrphans(undefined, { limit: req.query.tam })); }));
+  router.post('/materiales/sin-registro/registrar', traced('imputacion', 'Registrar materiales sin registro', { summary: (b) => ({ message: `${b.resumen.registrar} registrados · ${b.resumen.omitir} omitidos`, detail: b.resumen }) })(async (req, res) => {
+    res.json(await svc(req).registerOrphans(undefined, { ids: req.body?.ids || null, apply: true }));
+  }));
   // Read-only diagnosis of one movement (admins): GET /api/finanzas/movimientos/:id/diagnostico.
   router.get('/movimientos/:id/diagnostico', handle(async (req, res) => { res.json(await svc(req).movementDiagnosis(req.params.id)); }));
   router.get('/movimientos', handle(async (req, res) => {
