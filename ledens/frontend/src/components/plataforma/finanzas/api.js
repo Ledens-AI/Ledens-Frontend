@@ -82,6 +82,7 @@ export const api = {
   assignCash: (id, body) => request('POST', `/api/finanzas/conciliacion/efectivo/${id}/asignar`, body),
   deleteCash: (id) => request('DELETE', `/api/finanzas/conciliacion/efectivo/${id}`),
   discardCash: (id, reason) => request('POST', `/api/finanzas/conciliacion/efectivo/${id}/descartar`, { reason }),
+  workerQueueSummary: () => request('GET', '/api/finanzas/pendiente-trabajador/resumen'),
   workerQueue: (f) => request('GET', '/api/finanzas/pendiente-trabajador' + qs(f)),
   employees: () => request('GET', '/api/finanzas/trabajadores'),
   // Proyectos (backend: finanzas/projects.js). Writes are admin-only server-side.

@@ -35,7 +35,7 @@ const INTRO = {
 
 /* Gestión financiera (/plataforma, admins and jefes de obra). Data comes from
  * /api/finanzas, which enforces the same roles server-side. */
-export default function GestionFinanciera({ tab, go, toast, onPending, onBridgePending, onConceptPending }) {
+export default function GestionFinanciera({ tab, go, toast, onPending, onBridgePending, onConceptPending, onWorkerPending }) {
   const [summary, setSummary] = useState(null);
   const [summaryError, setSummaryError] = useState('');
   const [version, setVersion] = useState(0);
@@ -51,13 +51,16 @@ export default function GestionFinanciera({ tab, go, toast, onPending, onBridgeP
   // «Concepto de movimientos» badge (admins; anyone else gets 403 and keeps no badge).
   const conceptRef=useRef(onConceptPending);conceptRef.current=onConceptPending;
   const loadConcept=useCallback(()=>api.movementsPending().then(d=>conceptRef.current?.(d.pendientes),()=>{}),[]);
+  // «Pendiente de trabajador» badge: amount still to assign (403 without the queue grant → no badge).
+  const workerRef=useRef(onWorkerPending);workerRef.current=onWorkerPending;
+  const loadWorker=useCallback(()=>api.workerQueueSummary().then(d=>workerRef.current?.(Number(d.importe)||0),()=>{}),[]);
   const loadSummary = useCallback(() => api.summary().then(
     (s) => { setSummary(s); setSummaryError(''); pendingRef.current?.(s.materiales?.pendientes ?? s.pendientes, s.clientes?.pendientes ?? 0); },
     (e) => setSummaryError(e.message),
   ), []);
   useEffect(() => { loadSummary(); }, [loadSummary]);
-  useEffect(()=>{loadBridge();loadConcept();},[loadBridge,loadConcept,tab]);
-  const changed = useCallback(() => { setVersion((v) => v + 1); loadSummary(); loadBridge(); loadConcept(); }, [loadSummary,loadBridge,loadConcept]);
+  useEffect(()=>{loadBridge();loadConcept();loadWorker();},[loadBridge,loadConcept,loadWorker,tab]);
+  const changed = useCallback(() => { setVersion((v) => v + 1); loadSummary(); loadBridge(); loadConcept(); loadWorker(); }, [loadSummary,loadBridge,loadConcept,loadWorker]);
   // A drill-down filter only applies to the screen it was opened for.
   useEffect(() => { setDrill((d) => (d && d.tab !== tab ? null : d)); }, [tab]);
 

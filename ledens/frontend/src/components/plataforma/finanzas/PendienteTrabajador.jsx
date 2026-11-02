@@ -63,6 +63,7 @@ export default function PendienteTrabajador({ toast, onChanged }) {
     try {
       await api.returnWorkerBatch(b.id);
       setData((d) => d && ({ ...d, rows: d.rows.filter((x) => x.id !== b.id), total: d.total - 1, lines: d.lines - b.lines.length }));
+      onChanged?.();
       toast?.('Movimiento devuelto a Pendiente de conciliación.');
     } catch (e) { toast?.(e.message); }
   };

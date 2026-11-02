@@ -1103,6 +1103,14 @@ export class FinanzasService {
    FROM ledens.worker_payment_batches b LEFT JOIN ledens.bank_movements m ON m.id=b.bank_movement_id LEFT JOIN ledens.cash_movements k ON k.id=b.cash_movement_id WHERE ${where}`,['%'+q+'%'])).rows[0];
   return {rows,total:t.batches,lines:t.lines,page:p,pageSize:size};
  }
+ // Sidebar badge of «Pendiente de trabajador»: money still waiting for a worker
+ // and a project (every unsaved line, whatever the search or page).
+ async workerQueueSummary(){
+  await this.workerQueueAccess();
+  const r=(await this.query(`SELECT count(*)::int lineas,count(DISTINCT s.batch_id)::int movimientos,coalesce(sum(s.amount),0)::text importe
+   FROM ledens.worker_payment_splits s WHERE s.worker_payment_id IS NULL`)).rows[0];
+  return r;
+ }
  async employees(){
   this.params();
   return (await this.query(`SELECT e.id,e.name,po.name position FROM ledens.employees e LEFT JOIN ledens.positions po ON po.id=e.primary_position_id
