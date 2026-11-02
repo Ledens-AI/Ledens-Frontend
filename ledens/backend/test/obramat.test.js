@@ -1,5 +1,6 @@
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import {FinanzasService} from '../src/finanzas/service.js';
 import {BridgeService} from '../src/bridge/service.js';
@@ -13,7 +14,7 @@ before(async()=>{
  const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
  await db.exec('ALTER TABLE users ADD COLUMN name text');
- for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','011_transaction_alerts.sql','012_bridge_party_amount_date.sql','013_pago_trabajadores.sql','016_cash_movements.sql','014_purchase_settlements.sql','026_materiales_provisionales.sql','027_transferencias_internas.sql','028_treasury_movements.sql'])
+ for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','011_transaction_alerts.sql','012_bridge_party_amount_date.sql','013_pago_trabajadores.sql','016_cash_movements.sql','014_purchase_settlements.sql','026_materiales_provisionales.sql','029_provisional_todas_las_facturas.sql','027_transferencias_internas.sql','028_treasury_movements.sql'])
   await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
  admin=(await db.query("INSERT INTO users(email,role,name) VALUES('admin@ob.test','admin','Admin') RETURNING id,role")).rows[0];
  const bank=async(amount,description)=>(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
@@ -64,6 +65,10 @@ test('a refund whose credit note has concepts is registered once, from the movem
  const live=(await db.query("SELECT gross_amount::text g,material_id IS NOT NULL mat FROM ledens.financial_records WHERE (document_id=$1 OR bank_movement_id=$2) AND source_valid AND status<>'excluded'",[m.otroDoc,m.otro])).rows;
  assert.deepEqual(live,[{g:'-15.00',mat:true}],'only the refund counts, lowering the cost');
  assert.equal((await db.query("SELECT count(*)::int n FROM ledens.finance_events e JOIN ledens.financial_records r ON r.id=e.record_id WHERE r.document_id=$1 AND e.action='refund_replaced'",[m.otroDoc])).rows[0].n,1);
+ // Its credit note's concepts were excluded on purpose: the refund can still go to an obra.
+ const obraRef=(await db.query("INSERT INTO ledens.projects(name,project_id) VALUES('Obra Reembolso','P-REF') RETURNING id")).rows[0].id;
+ const ref=(await asAdmin().listRecords({type:'material',pageSize:100})).rows.find(x=>x.bank_movement_id===m.otro);
+ assert.deepEqual(await asAdmin().assign({type:'material',id:ref.id,projectId:obraRef,version:ref.version,requestId:crypto.randomUUID()}),{changed:true});
  // Lines stored negative match the refund by their size; mixed signs are refused.
  assert.equal((await classify(m.negativo,'reembolso_proveedor')).via,'material');
  assert.equal((await row(m.negativo)).clase,'reembolso_proveedor');
