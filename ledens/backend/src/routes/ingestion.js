@@ -6,6 +6,7 @@ import { InvoiceOcr } from '../ingestion/ocr.js';
 import { IngestionService } from '../ingestion/service.js';
 import {AlertService} from '../notifications/service.js';
 import {BridgeService} from '../bridge/service.js';
+import {FinanzasService} from '../finanzas/service.js';
 import {traced,startRun,finishRun} from '../logs/runs.js';
 
 // Logs de transacciones: what each automation call did, without file names or contents.
@@ -41,9 +42,13 @@ export function createIngestionRouter({service,config,tokenHash}={}) {
   }));
   router.post('/bridge/run',traced('bridge','Conciliación periódica',{
     summary:b=>({message:`${b.evaluated} evaluados · ${b.matched} conciliados · ${b.pending} pendientes · ${b.errors} con error`,
-      detail:{evaluados:b.evaluated,conciliados:b.matched,pendientes:b.pending,errores:b.errors,vacio:!b.evaluated}})})(async(req,res)=>{
+      detail:{evaluados:b.evaluated,conciliados:b.matched,pendientes:b.pending,errores:b.errors,obramat:b.obramat,vacio:!b.evaluated}})})(async(req,res)=>{
     if(process.env.BRIDGE_ENABLED!=='true')return res.status(503).json({error:'bridge_disabled'});
     const result=await new BridgeService(getPool()).run(50);
+    // Newly reconciled Obramat movements are Pagos de materiales («Regla Obramat»),
+    // applied as the system; a failure here never fails the Bridge run.
+    try{const rule=await new FinanzasService(getPool(),{role:'admin',id:null}).applyObramatRule();result.obramat={evaluados:rule.evaluados,clasificados:rule.clasificados,errores:rule.errores};}
+    catch(e){console.error('[obramat] rule',e.code||e.name);}
     res.status(result.errors?503:200).json(result);
   }));
   router.post('/notifications/claim',traced('alertas','Recogida de alertas',{

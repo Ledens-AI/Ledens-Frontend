@@ -123,6 +123,10 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     res.json(await svc(req).unassignedDocuments({ page: q.pagina, pageSize: q.tam, q: String(q.q || '').slice(0, 100), tipo: q.tipo || '', estado: q.estado || '', from: q.desde, to: q.hasta }));
   }));
   // Concepto de movimientos: every movement and its class (admins).
+  // «Regla Obramat» on demand (it also runs after each periodic Bridge run).
+  router.post('/movimientos/regla-obramat', traced('imputacion', 'Regla Obramat', { summary: (b) => ({ status: b.clasificados === 0 && b.errores ? 'rechazado' : 'ok', message: `${b.clasificados} clasificados · ${b.errores} sin clasificar`, detail: { evaluados: b.evaluados, clasificados: b.clasificados, errores: b.errores, vacio: !b.evaluados } }) })(async (req, res) => {
+    res.json(await svc(req).applyObramatRule());
+  }));
   router.get('/movimientos/pendientes', handle(async (req, res) => { res.json(await svc(req).movementsPending()); }));
   router.get('/movimientos', handle(async (req, res) => {
     res.json(await svc(req).movements({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), clase: req.query.clase || '', from: req.query.desde, to: req.query.hasta }));

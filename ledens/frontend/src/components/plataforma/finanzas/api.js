@@ -57,6 +57,7 @@ export const api = {
   // Concepto de movimientos (admins): every movement and its classification.
   movements: (f) => request('GET', '/api/finanzas/movimientos' + qs(f)),
   movementsPending: () => request('GET', '/api/finanzas/movimientos/pendientes'),
+  applyObramatRule: () => request('POST', '/api/finanzas/movimientos/regla-obramat', {}),
   classifyMovement: (id, body) => request('PUT', `/api/finanzas/movimientos/${id}/clasificacion`, body),
   // «Segregar conceptos» (Materiales pendiente de asignación): a provisional material payment.
   segregateMaterial: (materialId) => request('POST', `/api/finanzas/materiales/${materialId}/segregar`, {}),
