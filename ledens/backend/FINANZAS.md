@@ -55,7 +55,7 @@ Queda pendiente si algún registro sigue `unclassified` (u otra categoría), o s
 
 `ledens.treasury_movements` (migración 028) es la tabla conjunta de `ledens.bank_movements` y `ledens.cash_movements`: una fila por movimiento, con la columna **`origin`** = `bank_movements` o `cash_movements` según la tabla de la que viene. Es una vista, no una copia: `bank_movements` la escribe la importación bancaria (Revolut) y tiene claves foráneas de Bridge, materiales, pagos a trabajadores y cobros; el efectivo se sigue dando de alta en `cash_movements`. Así no hay datos duplicados que puedan desincronizarse.
 
-Columnas: `id`, `origin`, `occurred_on`, `counterparty`, `concept`, `description`, `reference`, `source_id`, `payer`, `beneficiary_name`, `search_text`, `amount` (firmado: pago negativo; el efectivo importado de FactMovimientosEfectivo, `kind` NULL, conserva su importe tal cual), `currency`, `state`, `is_internal_transfer`, `marked_transfer` (marcado como transferencia entre cuentas, 027: se lista en Concepto de movimientos y sale de Pendiente de conciliación), `direction` (`pago`/`cobro`; NULL si no se puede saber), `cash_kind`, `assigned_to`, `material_id`, `customer_payment_id` y `validable` (entra en las pantallas de validación: bancarios salvo traspasos internos, efectivo con `kind` explícito).
+Columnas: `id`, `origin`, `occurred_on`, `counterparty`, `concept`, `description`, `reference`, `source_id`, `payer`, `beneficiary_name`, `search_text`, `amount` (firmado: pago negativo; en efectivo, `abs(amount)` con el signo de su `kind`, 030; una fila importada no adoptada, `kind` NULL, conserva su importe tal cual), `currency`, `state`, `is_internal_transfer`, `marked_transfer` (marcado como transferencia entre cuentas, 027: se lista en Concepto de movimientos y sale de Pendiente de conciliación), `direction` (`pago`/`cobro`; NULL si no se puede saber), `cash_kind`, `assigned_to`, `material_id`, `customer_payment_id` y `validable` (entra en las pantallas de validación: bancarios salvo traspasos internos, efectivo con `kind` explícito y no descartado), `imported` e `imported_detail` (030).
 
 La leen Pendiente de conciliación (vista movimientos), Concepto de movimientos (lista, contador, regla Obramat y la búsqueda del movimiento al clasificarlo), Movimientos conciliados (que ahora incluye también el efectivo asignado) y el contador de la barra lateral. Sus filas llevan `origin`. Las escrituras siguen en cada tabla de origen, con su bloqueo `FOR UPDATE`. «Bridge Movimientos Documentos» sigue solo con movimientos bancarios: un documento se enlaza a un `bank_movement_id`.
 
@@ -67,6 +67,20 @@ Los pagos y cobros en efectivo no tienen banco detrás, así que viven en su pro
 - POST /api/finanzas/conciliacion/efectivo/:id/asignar `{target: materiales|clientes, projectId?, description?}`: un pago crea una fila de `material_expenses` (total negativo, como la importación); un cobro crea una de `customer_payments` (`id_pago='Efectivo'`). Los triggers de 006 registran el `financial_record`; con proyecto se imputa con FinanceService, sin proyecto queda en Pendientes de asignación.
 - Un pago a trabajadores se envía con POST /conciliacion/pago-trabajadores, igual que un movimiento bancario: el lote de 013 lleva `cash_movement_id` y los pagos guardados no tienen `bank_movement_id`. Devolver el lote a conciliación libera el efectivo.
 - DELETE /api/finanzas/conciliacion/efectivo/:id solo mientras no está asignado.
+
+### Efectivo importado del Excel (FactMovimientosEfectivo, migración 030)
+
+Las filas que trajo la importación contable (`movimientoefectivoid`, `tipomovimiento`, `concepto`, `tercero`, `project_source`, `categoria`…) entran en Pendiente de conciliación como cualquier efectivo, con `importado: true`, el motivo `efectivo_importado` (filtro «Efectivo importado del Excel») y `detalle_importado` (id, tipo, categoría, proyecto, observaciones…).
+
+- 030 rellena solo las columnas de la aplicación y **nunca reescribe las importadas**:
+  - `kind` sale de `tipomovimiento` (pago/gasto/salida → pago; cobro/ingreso/entrada → cobro); si no hay tipo, del signo del importe.
+  - `concept` sale de `concepto` y `counterparty` de `tercero`.
+  - El importe conserva su signo: la app usa `abs(amount)` y la dirección la da `kind`.
+- No se adoptan, y siguen fuera de las pantallas, las filas sin fecha, con importe cero o con más de dos decimales.
+- `obra_sugerida`: el proyecto cuyo `project_id` o nombre coincide con `project_source`. Se propone al asignar.
+- `posible_duplicado`: ya hay un material, un pago a trabajador o un cobro de cliente sin movimiento bancario con la misma fecha e importe, y sin efectivo asignado. Puede ser el mismo pago: hay que asignarlo **o** descartarlo, nunca las dos cosas.
+- Se asigna como cualquier efectivo (materiales, trabajadores, clientes) y entonces cuenta en los resultados como tesorería (`v_cash_records`), igual que el efectivo dado de alta a mano.
+- POST /api/finanzas/conciliacion/efectivo/:id/descartar `{reason}` (5–500 caracteres, solo un importado sin asignar): queda `assigned_to='descartado'` con `discard_reason`, fuera de todas las pantallas y de los resultados. Sirve para un duplicado o un ingreso en el banco. Un importado no se elimina (409).
 
 En rentabilidad, los registros aprobados que vienen de efectivo (`ledens.v_cash_records`) cuentan como cobro o pago de tesorería, porque ningún movimiento bancario ni enlace Bridge los cubrirá. Todas las operaciones quedan en Logs de transacciones (proceso «Efectivo»).
 
