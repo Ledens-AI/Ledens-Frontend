@@ -154,6 +154,8 @@ const MOVEMENT_COLUMNS=' SELECT id,tipo,origin,fecha::text fecha,tercero,concept
 export const DETAIL_MAX_BYTES=4*1024*1024;
 const DETAIL_TYPES=[['application/pdf',b=>b.subarray(0,5).toString()==='%PDF-'],['image/png',b=>b.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))],
  ['image/jpeg',b=>b[0]===255&&b[1]===216&&b[2]===255]];
+// A supplier refund record: a material registered from a bank receipt (negative cost, no document).
+const isRefund=r=>r.type==='material'&&!r.document_id&&Boolean(r.bank_movement_id)&&cents(r.importe)<0n;
 const hasTransfers=async c=>Boolean((await c.query("SELECT to_regclass('ledens.internal_transfers') name")).rows[0].name);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const labels={reclassified:'Cambio de clasificación',replace_allocations:'Asignación a proyecto',recognition:'Validación contable',review_flag:'Revisión',source_changed:'Origen actualizado',document_changed:'Factura actualizada'};
@@ -257,7 +259,10 @@ export class FinanzasService {
  // with its movement (its own bank movement, or the movements of its document):
  // this is where a document without concepts is reported, never when the
  // movement is classified in Concepto de movimientos.
- async missingConcepts(c,{bankMovementId=null,documentId=null}){
+ async missingConcepts(c,{bankMovementId=null,documentId=null,refund=false}){
+  // A supplier refund is registered from the movement itself and never uses its
+  // credit note's concepts (they are excluded on purpose, refund_replaced).
+  if(refund)return;
   const d=(await c.query(`SELECT d.numerodocumento FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id
    WHERE a.state='Confirmado' AND (a.bank_movement_id=$1 OR a.bank_movement_id IN(SELECT bank_movement_id FROM ledens.bank_document_allocations WHERE document_id=$2 AND state='Confirmado'))
     AND NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded')
@@ -266,12 +271,12 @@ export class FinanzasService {
  }
  async assign({type,id,projectId,version,requestId,reason}){
   const r=await this.source(type,id);if(!Number.isInteger(version)||!uuid(requestId))throw new FinError(400,'Recarga el registro antes de asignarlo');
-  if(projectId!==null)await this.missingConcepts(this.pool,{bankMovementId:r.bank_movement_id,documentId:r.document_id});
+  if(projectId!==null)await this.missingConcepts(this.pool,{bankMovementId:r.bank_movement_id,documentId:r.document_id,refund:isRefund(r)});
   await this.finance.bulk(this.user,{request_id:requestId,reason:this.reason(r,reason,version),records:[{record_id:r.record_id,version,allocations:projectId===null?[]:[{project_id:projectId,amount:r.importe}]}]});return {changed:true};
  }
  async distribute({type,id,parts,version,requestId,reason}){
   const r=await this.source(type,id);if(!Array.isArray(parts)||!parts.length||!Number.isInteger(version)||!uuid(requestId))throw new FinError(400,'Distribución no válida; recarga el registro');
-  await this.missingConcepts(this.pool,{bankMovementId:r.bank_movement_id,documentId:r.document_id});
+  await this.missingConcepts(this.pool,{bankMovementId:r.bank_movement_id,documentId:r.document_id,refund:isRefund(r)});
   await this.finance.bulk(this.user,{request_id:requestId,reason:this.reason(r,reason,version),records:[{record_id:r.record_id,version,allocations:parts.map(p=>({project_id:p.projectId,amount:p.amount}))}]});
   return {changed:true,exact:parts.reduce((s,p)=>s+cents(p.amount),0n)===cents(r.importe)};
  }
