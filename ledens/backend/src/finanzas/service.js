@@ -227,7 +227,12 @@ export class FinanzasService {
   const params=this.params();params.push('material');
   const materiales=(await this.query(`${BASE} SELECT count(*)::int pendientes,coalesce(sum(abs(l.importe-l.allocated)),0)::text importe_pendiente
    FROM listed l WHERE l.sin_proyecto AND ${TYPE_FILTER.material('$3')}`,params)).rows[0];
-  return {porTipo,materiales,total:rows.reduce((s,r)=>s+r.total,0),pendientes:rows.reduce((s,r)=>s+r.pendientes,0),revision:rows.reduce((s,r)=>s+r.revision,0),importePendiente:decimal(rows.reduce((s,r)=>s+cents(r.importe_pendiente),0n))};
+  // «Pagos de clientes» without a project, counted with the tab's own filter
+  // (client receipts and revenue concepts): the sidebar badge of that tab.
+  const cparams=this.params();cparams.push('cliente');
+  const clientes=(await this.query(`${BASE} SELECT count(*)::int pendientes,coalesce(sum(abs(l.importe-l.allocated)),0)::text importe_pendiente
+   FROM listed l WHERE l.sin_proyecto AND ${TYPE_FILTER.cliente('$3')}`,cparams)).rows[0];
+  return {porTipo,materiales,clientes,total:rows.reduce((s,r)=>s+r.total,0),pendientes:rows.reduce((s,r)=>s+r.pendientes,0),revision:rows.reduce((s,r)=>s+r.revision,0),importePendiente:decimal(rows.reduce((s,r)=>s+cents(r.importe_pendiente),0n))};
  }
  async source(type,id){if(!TYPES[type]||!uuid(id))throw new FinError(404,'Registro no encontrado');const r=(await this.query(`${BASE} SELECT * FROM listed WHERE type=$3 AND id=$4`,[...this.params(),type,id])).rows[0];if(!r)throw new FinError(404,'Registro no encontrado o sin permiso');return r;}
  async history(type,id){const r=await this.source(type,id);const events=await this.finance.history(this.user,r.record_id);const ids=[...new Set(events.map(e=>e.actor_id).filter(Boolean))];const names=ids.length?(await this.query('SELECT id,coalesce(name,email) label FROM users WHERE id=ANY($1::uuid[])',[ids])).rows:[];return events.map(e=>({id:e.id,at:e.created_at,actor_label:names.find(n=>n.id===e.actor_id)?.label||'Sistema',origin:e.actor_id?'manual':'automatica',action:labels[e.action]||e.action,reason:e.reason,old_allocations:e.before_value.allocations,new_allocations:e.after_value.allocations,old_label:e.before_value.allocations?.length===1?e.before_value.allocations[0].project_name:undefined,new_label:e.after_value.allocations?.length===1?e.after_value.allocations[0].project_name:undefined}));}
