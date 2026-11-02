@@ -164,3 +164,29 @@ test('a bank receipt with nothing registered can be a supplier refund: a negativ
  const cash=(await db.query("INSERT INTO ledens.cash_movements(kind,amount,occurred_on,concept) VALUES('cobro',20,'2026-10-13','Devolución en tienda') RETURNING id")).rows[0].id;
  await assert.rejects(classify(cash,'reembolso_proveedor'),{status:409,message:/efectivo/});
 });
+
+test('a provisional payment replaced by an invoice that later lost its concepts is restored when classified again as materials',async()=>{
+ const q=(sql,p)=>db.query(sql,p);
+ const b=(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES('MOV-omb',-7.44,-7.44,'2026-09-24','Omb Malaga','EUR','COMPLETED') RETURNING id`)).rows[0].id;
+ const {materialId,recordId}=await classify(b,'materiales');
+ const d=(await q(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento,tercero) VALUES(-7.44,'Pagar','2026-09-24','008-0010-411173','OBRAMAT') RETURNING id`)).rows[0].id;
+ const l=(await q("INSERT INTO ledens.invoice_lines(document_id,line_number,description) VALUES($1,1,'Tornillos') RETURNING id",[d])).rows[0].id;
+ const line=(await q(`INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,gross_amount,currency) VALUES($1,$2,'2026-09-24','Tornillos',7.44,'EUR') RETURNING id`,[l,d])).rows[0].id;
+ await q("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state,reconciled_on) VALUES($1,$2,-7.44,'Confirmado','2026-09-24')",[b,d]);
+ assert.equal((await q('SELECT status FROM ledens.financial_records WHERE id=$1',[recordId])).rows[0].status,'excluded','026 replaced the provisional');
+ // The invoice later loses its concepts (re-ingested): nothing represents the payment, it is pending again.
+ await q("UPDATE ledens.financial_records SET status='excluded',source_valid=false WHERE id=$1",[line]);
+ assert.equal((await row(b)).clase,'pendiente');
+ const res=await classify(b,'materiales');
+ assert.deepEqual([res.materialId,res.restored],[materialId,true]);
+ assert.deepEqual([(await row(b)).clase,(await row(b)).origen],['materiales','provisional']);
+ assert.deepEqual((await q('SELECT status,source_valid FROM ledens.financial_records WHERE id=$1',[recordId])).rows[0],{status:'pending',source_valid:true});
+ assert.equal((await q("SELECT count(*)::int n FROM ledens.finance_events WHERE record_id=$1 AND action='provisional_restored'",[recordId])).rows[0].n,1);
+ // A material excluded for any other reason is never brought back.
+ const b2=(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES('MOV-otro',-9,-9,'2026-09-25','Pago almacén','EUR','COMPLETED') RETURNING id`)).rows[0].id;
+ const m2=(await q("INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id) VALUES('ud','Importado',1,-9,-9,'2026-09-25',$1) RETURNING id",[b2])).rows[0].id;
+ await q("UPDATE ledens.financial_records SET status='excluded',source_valid=false WHERE material_id=$1",[m2]);
+ await assert.rejects(classify(b2,'materiales'),{status:409,message:/se sustituyó o excluyó/});
+});
