@@ -380,10 +380,13 @@ export class FinanzasService {
    if(b){
     const bare=(await c.query(`SELECT d.numerodocumento FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id
      WHERE a.bank_movement_id=$1 AND a.state='Confirmado' AND NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded')`,[id])).rows;
-    // As Pago de materiales with nothing registered it becomes a provisional
-    // material (below): its concepts are segregated later, in Materiales
-    // pendiente de asignación, once the document has them.
-    if(bare.length&&!(clase==='materiales'&&!records.length))throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta antes de clasificar el movimiento`);
+    // As Pago de materiales with nothing registered and a single reconciled
+    // document it becomes a provisional material (below): its concepts are
+    // segregated later, in Materiales pendiente de asignación. With several
+    // documents 026 would replace the whole payment by the first one to get
+    // concepts, so the cost of the others would be lost: still rejected.
+    const docs=(await c.query("SELECT count(DISTINCT document_id)::int n FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado'",[id])).rows[0].n;
+    if(bare.length&&!(clase==='materiales'&&!records.length&&docs===1))throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta antes de clasificar el movimiento`);
    }
    // A supplier refund is registered as a material from the movement itself. A
    // receipt that already has records (its reconciled document, a client receipt)

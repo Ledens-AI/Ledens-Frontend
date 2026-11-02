@@ -43,6 +43,16 @@ test('Concepto de movimientos classifies it as Pago de materiales: a provisional
  assert.equal((await pending()).filter(x=>x.provisional).length,1,'only the provisional payment can be segregated');
 });
 
+test('a payment reconciled with several documents without concepts still asks to review their ingestion',async()=>{
+ const b=(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES('MOV-dos',-80,-80,'2026-10-11','Pago dos facturas','EUR','COMPLETED') RETURNING id`)).rows[0].id;
+ for(const n of ['F-A','F-B']){const d=(await db.query(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento) VALUES(-40,'Pagar','2026-10-08',$1) RETURNING id`,[n])).rows[0].id;
+  await db.query("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state,reconciled_on) VALUES($1,$2,-40,'Confirmado','2026-10-11')",[b,d]);}
+ const r=(await asAdmin().movements({pageSize:100})).rows.find(x=>x.id===b);
+ await assert.rejects(asAdmin().classifyMovement({id:b,clase:'materiales',version:r.version}),{status:409,message:/F-A no tiene conceptos registrados; revisa su ingesta/});
+ assert.equal((await db.query('SELECT count(*)::int n FROM ledens.provisional_material_payments WHERE bank_movement_id=$1',[b])).rows[0].n,0);
+});
+
 test('«Segregar conceptos» reports the invoice without concepts, with what the dialog needs',async()=>{
  await assert.rejects(asAdmin().segregateMaterial(material),e=>e.status===409&&/008-0010-471790 no tiene conceptos registrados/.test(e.message)&&
   e.extra.movimiento_id===mov&&e.extra.sin_conceptos[0].id===doc&&e.extra.sin_conceptos[0].total==='-40');
