@@ -59,11 +59,23 @@ test('a refund reconciled with a credit note without concepts can still be a sup
  const d=(await db.query(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento) VALUES(12,'Cobrar','2026-10-12','008-0010-R281273') RETURNING id`)).rows[0].id;
  await db.query("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state,reconciled_on) VALUES($1,$2,12,'Confirmado','2026-10-12')",[b,d]);
  const find=async()=>(await asAdmin().movements({pageSize:100})).rows.find(x=>x.id===b);
- await assert.rejects(asAdmin().classifyMovement({id:b,clase:'clientes',version:(await find()).version}),{status:409,message:/R281273 no tiene conceptos/},'other classes still need its concepts');
  const res=await asAdmin().classifyMovement({id:b,clase:'reembolso_proveedor',version:(await find()).version});
  assert.deepEqual([res.via,res.provisional],['material',false]);
  assert.deepEqual([(await find()).clase,(await find()).origen],['reembolso_proveedor','registro']);
  assert.equal((await db.query('SELECT r.gross_amount::text g FROM ledens.material_expenses m JOIN ledens.financial_records r ON r.material_id=m.id WHERE m.bank_movement_id=$1',[b])).rows[0].g,'-12.00');
+});
+
+test('a receipt reconciled with a document without concepts can be a client receipt: no error, and it is no longer pending',async()=>{
+ const b=(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state,payer)
+  VALUES('MOV-cliente',455.90,455.90,'2026-09-30','Dinero añadido por DAL MOROS','EUR','COMPLETED','DAL MOROS ESPAÑA SL.') RETURNING id`)).rows[0].id;
+ const d=(await db.query(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento,tercero) VALUES(455.90,'Cobrar','2026-09-30','3T2026-292','DAL MOROS ESPAÑA SL.') RETURNING id`)).rows[0].id;
+ await db.query("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state,reconciled_on) VALUES($1,$2,455.90,'Confirmado','2026-09-30')",[b,d]);
+ const find=async()=>(await asAdmin().movements({pageSize:100})).rows.find(x=>x.id===b);
+ assert.equal((await find()).clase,'pendiente');
+ const res=await asAdmin().classifyMovement({id:b,clase:'clientes',version:(await find()).version});
+ assert.equal(res.via,'cobro-cliente');
+ assert.equal((await find()).clase,'clientes');
+ assert.equal((await db.query('SELECT count(*)::int n FROM ledens.customer_payments WHERE bank_movement_id=$1',[b])).rows[0].n,1);
 });
 
 test('«Segregar conceptos» reports the invoice without concepts, with what the dialog needs',async()=>{
