@@ -61,7 +61,10 @@ const TYPE_FILTER={
 // «Concepto de movimientos»: the class a record gives its movement ('x' = not one
 // of the three, so the movement stays pending).
 const CAT_CLASE=c=>`CASE WHEN ${c} IN ('materials','overhead') THEN 'materiales' WHEN ${c}='labor' THEN 'trabajadores' WHEN ${c} IN ('revenue','advance') THEN 'clientes' ELSE 'x' END`;
-export const MOVEMENT_CLASSES=['pendiente','materiales','trabajadores','clientes','reembolso_proveedor','mixto'];
+export const MOVEMENT_CLASSES=['pendiente','materiales','trabajadores','clientes','reembolso_proveedor','transferencia','mixto'];
+// «Transferencia entre cuentas»: only with another account of the company itself.
+export const OWN_COMPANY_TEXT="'sociedad\\s+inversora\\s+navarro'";
+const OWN_COMPANY_RE=/sociedad\s+inversora\s+navarro/i;
 // «Reembolso de proveedor»: money a supplier gives back (a return, a credit note).
 // It is a material with the sign of a receipt, so it lowers the material cost of
 // the obra it is assigned to instead of counting as a client receipt.
@@ -74,7 +77,7 @@ const OBRAMAT_TEXT="'(obramat|bricoman)'";
 const isObramatDoc=d=>`(${d}.tercero ~* ${OBRAMAT_TEXT} OR regexp_replace(upper(coalesce(${d}.niftercero,'')),'[^A-Z0-9]','','g')='${OBRAMAT_TAX_ID}')`;
 // A native Obramat advance or advance refund (014) never has records of its own:
 // the cost enters with the delivery invoice, so such a movement is materials as is.
-const movementsSql=purchases=>`WITH links AS(SELECT bank_movement_id,document_id FROM ledens.bank_document_allocations WHERE state='Confirmado'),
+const movementsSql=(purchases,transfers=false)=>`WITH links AS(SELECT bank_movement_id,document_id FROM ledens.bank_document_allocations WHERE state='Confirmado'),
  recs AS(SELECT DISTINCT x.mov,r.id,r.version,r.category FROM (
   SELECT f.bank_movement_id mov,f.id FROM ledens.financial_records f WHERE f.bank_movement_id IS NOT NULL
   UNION ALL SELECT l.bank_movement_id,f.id FROM links l JOIN ledens.financial_records f ON f.document_id=l.document_id
@@ -89,7 +92,9 @@ const movementsSql=purchases=>`WITH links AS(SELECT bank_movement_id,document_id
    b.total_amount>0 AND EXISTS(SELECT 1 FROM ledens.material_expenses me WHERE me.bank_movement_id=b.id) reembolso,
    EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=b.id) cobro_cliente,
    (concat_ws(' ',b.beneficiary_name,b.payer,b.description,b.reference) ~* ${OBRAMAT_TEXT} OR coalesce(d.obramat_doc,false)) obramat,
-   coalesce(d.solo_compras,false) solo_compras
+   coalesce(d.solo_compras,false) solo_compras,
+   ${transfers?'EXISTS(SELECT 1 FROM ledens.internal_transfers it WHERE it.bank_movement_id=b.id)':'false'} transferencia,
+   concat_ws(' ',b.beneficiary_name,b.payer,b.description) ~* ${OWN_COMPANY_TEXT} propia
   FROM ledens.bank_movements b LEFT JOIN LATERAL(SELECT string_agg(DISTINCT coalesce(dd.numerodocumento,'Sin número'),', ') documentos,count(*)::int n,
     bool_or(NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=dd.id AND r.source_valid AND r.status<>'excluded')) sin_registros,
     bool_or(${isObramatDoc('dd')}) obramat_doc,
@@ -99,23 +104,24 @@ const movementsSql=purchases=>`WITH links AS(SELECT bank_movement_id,document_id
   UNION ALL
   SELECT k.id,'efectivo',k.occurred_on,k.counterparty,k.concept,'Efectivo',CASE WHEN k.kind='pago' THEN -k.amount ELSE k.amount END,NULL,0,false,
    EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=k.id),false,false,k.customer_payment_id IS NOT NULL,
-   concat_ws(' ',k.counterparty,k.concept) ~* ${OBRAMAT_TEXT},false
+   concat_ws(' ',k.counterparty,k.concept) ~* ${OBRAMAT_TEXT},false,false,false
   FROM ledens.cash_movements k WHERE k.kind IN ('pago','cobro')),
  cls AS(SELECT m.*,coalesce(a.n,0) registros,coalesce(a.version,md5('')) version,
   ARRAY(SELECT DISTINCT e FROM unnest(array_remove(coalesce(a.clases,'{}'::text[]),'x')||CASE WHEN m.lote THEN ARRAY['trabajadores'] ELSE '{}'::text[] END) e ORDER BY e) conocidas,
   ('x'=ANY(coalesce(a.clases,'{}'::text[])) OR (m.doc_sin_registros AND NOT m.provisional AND NOT m.reembolso AND NOT m.cobro_cliente)) desconocido
   FROM movs m LEFT JOIN agg a ON a.mov=m.id),
- fin AS(SELECT c.*,CASE WHEN c.obramat AND c.solo_compras THEN 'materiales' WHEN c.desconocido OR cardinality(c.conocidas)=0 THEN 'pendiente'
+ fin AS(SELECT c.*,CASE WHEN c.transferencia THEN 'transferencia' WHEN c.obramat AND c.solo_compras THEN 'materiales' WHEN c.desconocido OR cardinality(c.conocidas)=0 THEN 'pendiente'
    WHEN cardinality(c.conocidas)=1 THEN CASE WHEN c.conocidas[1]='materiales' AND c.importe>0 THEN 'reembolso_proveedor' ELSE c.conocidas[1] END ELSE 'mixto' END clase,
   CASE WHEN c.importe<0 THEN 'pago' ELSE 'cobro' END sentido FROM cls c)`;
 // One row of «Concepto de movimientos» (list and single movement).
-const MOVEMENT_COLUMNS=' SELECT id,tipo,fecha::text fecha,tercero,concepto,referencia,importe::text importe,documentos,clase,conocidas,sentido,version,registros,lote,obramat,'+
- "CASE WHEN obramat AND solo_compras THEN 'compra_obramat' WHEN provisional THEN 'provisional' WHEN reembolso THEN 'registro' WHEN n_docs>0 THEN 'bridge' WHEN lote THEN 'trabajadores' WHEN registros>0 THEN 'registro' ELSE 'ninguno' END origen";
+const MOVEMENT_COLUMNS=' SELECT id,tipo,fecha::text fecha,tercero,concepto,referencia,importe::text importe,documentos,clase,conocidas,sentido,version,registros,lote,obramat,propia,'+
+ "CASE WHEN transferencia THEN 'transferencia' WHEN obramat AND solo_compras THEN 'compra_obramat' WHEN provisional THEN 'provisional' WHEN reembolso THEN 'registro' WHEN n_docs>0 THEN 'bridge' WHEN lote THEN 'trabajadores' WHEN registros>0 THEN 'registro' ELSE 'ninguno' END origen";
 // «Adjuntar detalle»: the product detail of a reconciled document without
 // concepts is read with the invoice OCR (Document Intelligence, F0: 4 MB).
 export const DETAIL_MAX_BYTES=4*1024*1024;
 const DETAIL_TYPES=[['application/pdf',b=>b.subarray(0,5).toString()==='%PDF-'],['image/png',b=>b.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))],
  ['image/jpeg',b=>b[0]===255&&b[1]===216&&b[2]===255]];
+const hasTransfers=async c=>Boolean((await c.query("SELECT to_regclass('ledens.internal_transfers') name")).rows[0].name);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const labels={reclassified:'Cambio de clasificación',replace_allocations:'Asignación a proyecto',recognition:'Validación contable',review_flag:'Revisión',source_changed:'Origen actualizado',document_changed:'Factura actualizada'};
 const requestFor=(seed,key)=>{const h=createHash('sha256').update(seed+'|'+key).digest('hex').slice(0,32);return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;};
@@ -291,6 +297,7 @@ export class FinanzasService {
   // Aggregate each Bridge side before joining: multiple links must never duplicate a source row.
   const bridge=`bridge_doc AS(SELECT document_id,count(*)::int enlaces,count(*) FILTER(WHERE state<>'Confirmado' OR state IS NULL)::int revision,coalesce(sum(allocated_amount) FILTER(WHERE state='Confirmado'),0) confirmado FROM ledens.bank_document_allocations GROUP BY document_id),
   bridge_bank AS(SELECT a.bank_movement_id,count(*)::int enlaces,count(*) FILTER(WHERE a.state<>'Confirmado' OR a.state IS NULL)::int revision,coalesce(sum(a.allocated_amount) FILTER(WHERE a.state='Confirmado'),0) confirmado,string_agg(DISTINCT coalesce(d.numerodocumento,'Sin número'),', ') documentos FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id GROUP BY a.bank_movement_id)`;
+  const transfers=await hasTransfers(this.pool);
   const hideCovered=await hasPurchases(this.pool)?"NOT EXISTS(SELECT 1 FROM ledens.v_purchase_coverage pc WHERE pc.document_id=x.id AND pc.paid>=pc.goods_gross)":'true';
   let base;
   if(view==='registros')base=BASE+', '+bridge+`, candidates AS(SELECT l.id,l.type,l.fecha,l.tercero,l.concepto,l.numerodocumento,l.id::text referencia,l.importe,l.document_id,
@@ -302,7 +309,7 @@ export class FinanzasService {
   else {const bank=view==='movimientos';base='WITH '+bridge+`, candidates AS(SELECT x.id,'`+(bank?'movimiento':'documento')+`'::text type,`+(bank?'x.completed_on':'x.document_on')+` fecha,`+(bank?"coalesce(x.beneficiary_name,x.payer)":"x.tercero")+` tercero,`+(bank?'x.description':"to_jsonb(x)->>'descripcion'")+` concepto,`+(bank?'a.documentos':'x.numerodocumento')+` numerodocumento,`+(bank?'x.source_id':'x.id::text')+` referencia,`+(bank?'x.total_amount':'x.total')+` importe,`+(bank?'NULL::uuid':'x.id')+` document_id,coalesce(a.enlaces,0) enlaces,coalesce(a.confirmado,0)::text conciliado,
     array_remove(ARRAY[CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_bridge' END,`+(bank?"CASE WHEN coalesce(a.enlaces,0)=0 THEN 'sin_documento' END,":"")+`CASE WHEN a.revision>0 THEN 'revision' END,CASE WHEN a.enlaces>0 AND coalesce(a.confirmado,0)<>`+(bank?'x.total_amount':'x.total')+` THEN 'parcial' END],NULL) motivos,
     (coalesce(a.enlaces,0)=0 OR a.revision>0 OR coalesce(a.confirmado,0)<>`+(bank?'x.total_amount':'x.total')+`) pendiente
-    FROM ledens.`+(bank?'bank_movements':'documents')+` x LEFT JOIN `+(bank?'bridge_bank a ON a.bank_movement_id':'bridge_doc a ON a.document_id')+`=x.id `+(bank?'WHERE NOT coalesce(x.is_internal_transfer,false) AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=x.id) AND NOT EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=x.id)'+CASH_CANDIDATES:'WHERE '+hideCovered)+`)`;}
+    FROM ledens.`+(bank?'bank_movements':'documents')+` x LEFT JOIN `+(bank?'bridge_bank a ON a.bank_movement_id':'bridge_doc a ON a.document_id')+`=x.id `+(bank?'WHERE NOT coalesce(x.is_internal_transfer,false)'+(transfers?' AND NOT EXISTS(SELECT 1 FROM ledens.internal_transfers it WHERE it.bank_movement_id=x.id)':'')+' AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=x.id) AND NOT EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=x.id)'+CASH_CANDIDATES:'WHERE '+hideCovered)+`)`;}
   const filtered=base+' SELECT *, (importe-coalesce(conciliado::numeric,0))::text por_conciliar FROM candidates WHERE '+where.join(' AND ');
   const rows=(await this.query(filtered+' ORDER BY fecha DESC NULLS LAST,id LIMIT '+size+' OFFSET '+((p-1)*size),params)).rows;
   const total=(await this.query('SELECT count(*)::int n FROM ('+filtered+') matching',params)).rows[0].n;
@@ -364,7 +371,7 @@ export class FinanzasService {
   const total=(await this.query('SELECT count(*)::int n FROM ('+sql+') x',params)).rows[0].n;
   return {rows,total,resumen,page:p,pageSize:size};
  }
- async movementsSql(c=this.pool){return movementsSql(await hasPurchases(c));}
+ async movementsSql(c=this.pool){return movementsSql(await hasPurchases(c),await hasTransfers(c));}
  // What the Obramat rule needs to know about one movement (bank or cash).
  async obramatInfo(c,id,b,k){
   const text=(b?[b.beneficiary_name,b.payer,b.description,b.reference]:[k.counterparty,k.concept]).filter(Boolean).join(' ');
@@ -404,7 +411,7 @@ export class FinanzasService {
  async classifyMovement({id,clase,version,reason}={}){
   if(this.user.role!=='admin')throw new FinError(403,'Clasificar movimientos requiere administrador');
   if(!uuid(id))throw new FinError(404,'Movimiento no encontrado');
-  if(!MOVEMENT_CLASES[clase])throw new FinError(400,'Clasificación no válida');
+  if(!MOVEMENT_CLASES[clase]&&clase!=='transferencia')throw new FinError(400,'Clasificación no válida');
   if(typeof version!=='string'||!/^[0-9a-f]{32}$/.test(version))throw new FinError(400,'Versión no válida');
   const why=typeof reason==='string'?reason.trim():'';
   if(why.length>500)throw new FinError(400,'Motivo no válido (máximo 500 caracteres)');
@@ -415,6 +422,24 @@ export class FinanzasService {
    if(b?.is_internal_transfer)throw new FinError(409,'Es un traspaso interno');
    const amount=b?cents(b.total_amount):k.kind==='pago'?-cents(k.amount):cents(k.amount);
    if(amount===null||amount===0n)throw new FinError(409,'El movimiento no tiene un importe válido');
+   // «Transferencia entre cuentas»: marked, or unmarked to classify it otherwise.
+   const transfers=await hasTransfers(c);
+   const marked=b&&transfers&&(await c.query('SELECT 1 FROM ledens.internal_transfers WHERE bank_movement_id=$1',[id])).rows.length>0;
+   if(clase==='transferencia'){
+    if(!transfers)throw new FinError(503,'Las transferencias entre cuentas no están disponibles todavía');
+    if(!b)throw new FinError(409,'Un movimiento en efectivo no puede ser una transferencia entre cuentas');
+    if(marked)throw new FinError(409,'Ya está clasificado así');
+    if(!OWN_COMPANY_RE.test([b.beneficiary_name,b.payer,b.description].filter(Boolean).join(' ')))throw new FinError(409,'Solo un movimiento con otra cuenta de Sociedad Inversora Navarro Robinson puede ser una transferencia entre cuentas');
+    if((await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1',[id])).rows.length)throw new FinError(409,'Está en Pendiente de trabajador: devuélvelo a conciliación desde esa pantalla para cambiarlo');
+    if((await c.query("SELECT 1 FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado' LIMIT 1",[id])).rows.length)throw new FinError(409,'Está conciliado con un documento: una transferencia entre cuentas no tiene factura');
+    if((await c.query("SELECT 1 FROM ledens.financial_records WHERE bank_movement_id=$1 AND source_valid AND status<>'excluded' LIMIT 1",[id])).rows.length)throw new FinError(409,'Ya tiene registros contables: no puede ser una transferencia entre cuentas');
+    await c.query('INSERT INTO ledens.internal_transfers(bank_movement_id,marked_by,reason) VALUES($1,$2,$3)',[id,this.user.id,why||null]);
+    return {id,clase,via:'transferencia'};
+   }
+   if(marked){
+    if(why.length<5)throw new FinError(400,'Indica el motivo del cambio (al menos cinco caracteres)');
+    await c.query('DELETE FROM ledens.internal_transfers WHERE bank_movement_id=$1',[id]);
+   }
    if(amount<0n&&clase==='clientes')throw new FinError(409,'Un pago no puede clasificarse como cobro de clientes');
    if(amount<0n&&clase==='reembolso_proveedor')throw new FinError(409,'Un pago no puede ser un reembolso de proveedor');
    if(amount>0n&&!['clientes','reembolso_proveedor'].includes(clase))throw new FinError(409,'Un cobro solo puede ser cobro de clientes o reembolso de proveedor');
