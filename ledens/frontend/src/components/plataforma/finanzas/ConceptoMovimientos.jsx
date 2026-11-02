@@ -8,6 +8,7 @@ export const CLASE_MOV = {
   materiales: { label: 'Pago de materiales', bg: '#E3E7F3', fg: '#3E4D85', icon: 'ri-hammer-line' },
   trabajadores: { label: 'Pago a trabajadores', bg: '#DEF3F0', fg: '#2F6B63', icon: 'ri-user-settings-line' },
   clientes: { label: 'Cobro de clientes', bg: '#FDF0F4', fg: '#B84371', icon: 'ri-hand-coin-line' },
+  reembolso_proveedor: { label: 'Reembolso de proveedor', bg: '#EEF4E4', fg: '#4A6B22', icon: 'ri-refund-2-line' },
   mixto: { label: 'Varias clases', bg: '#F2F2EF', fg: '#3A3A38', icon: 'ri-shuffle-line' },
 };
 const ORIGEN = { bridge: 'Deducido del Bridge con documentos', trabajadores: 'En Pendiente de trabajador', registro: 'Registro contable del movimiento', provisional: 'Provisional hasta conciliar su factura', ninguno: 'Sin documento conciliado' };
@@ -16,10 +17,14 @@ const EFECTO = {
   materiales: 'Se registrará como pago de materiales provisional y aparecerá en «Materiales pendiente de asignación» para elegir la obra. Cuando el Bridge concilie su factura, la factura lo sustituirá con esta clasificación y esta obra.',
   trabajadores: 'Pasará a «Pendiente de trabajador» para repartirlo entre trabajadores y obras.',
   clientes: 'Se registrará como cobro de cliente en «Pagos de clientes».',
+  reembolso_proveedor: 'Se registrará en «Materiales pendiente de asignación» como material en negativo: al asignarlo a una obra, descuenta su coste de materiales.',
 };
-// A payment is Materiales or Trabajadores; a receipt only Clientes (the backend enforces it too).
-const choices = (r) => (r.sentido === 'cobro' ? ['clientes'] : ['materiales', 'trabajadores']);
-const canClassify = (r) => !r.lote && choices(r).some((c) => c !== r.clase);
+// A payment is Materiales or Trabajadores; a receipt Clientes or, when it is a bank
+// receipt with nothing registered yet, Reembolso de proveedor (the backend enforces it too).
+const refundable = (r) => r.tipo === 'banco' && r.registros === 0;
+const choices = (r) => (r.sentido === 'cobro' ? ['clientes', ...(refundable(r) ? ['reembolso_proveedor'] : [])] : ['materiales', 'trabajadores']);
+// A registered supplier refund is a material: it is not reclassified from here.
+const canClassify = (r) => !r.lote && r.clase !== 'reembolso_proveedor' && choices(r).some((c) => c !== r.clase);
 
 function Classify({ row, onClose, onDone }) {
   const options = choices(row).filter((c) => c !== row.clase);
@@ -42,7 +47,9 @@ function Classify({ row, onClose, onDone }) {
       <p><strong>{row.concepto || row.referencia || 'Movimiento'}</strong> · {row.tercero || '—'} · {eur(row.importe)} · {fecha(row.fecha)}</p>
       <p className="fin-muted fin-small">
         Ahora: {CLASE_MOV[row.clase]?.label || row.clase}.{' '}
-        {row.sentido === 'cobro' ? 'Es un cobro: solo puede ser cobro de clientes.' : 'Es un pago: puede ser de materiales o a trabajadores.'}
+        {row.sentido === 'cobro'
+          ? (refundable(row) ? 'Es un cobro: puede ser cobro de clientes o reembolso de proveedor.' : 'Es un cobro: puede ser cobro de clientes. Reembolso de proveedor solo es posible en un cobro bancario sin documento ni registros.')
+          : 'Es un pago: puede ser de materiales o a trabajadores.'}
       </p>
       {options.length ? (
         <fieldset className="fin-choices">
@@ -64,7 +71,7 @@ function Classify({ row, onClose, onDone }) {
 }
 
 /* Concepto de movimientos (admins): every bank and cash movement with its class
- * (Pago de materiales, Pago a trabajadores, Cobro de clientes), concluded from
+ * (Pago de materiales, Pago a trabajadores, Cobro de clientes, Reembolso de proveedor), concluded from
  * the documents the Bridge reconciled with it, or «Pendiente de clasificación». */
 export default function ConceptoMovimientos({ toast, onChanged }) {
   const [q, setQ] = useState(''), [query, setQuery] = useState('');
