@@ -89,6 +89,11 @@ export const MOVEMENT_CLASSES=['pendiente','materiales','trabajadores','clientes
 // «Transferencia entre cuentas»: only with another account of the company itself.
 export const OWN_COMPANY_TEXT="'sociedad\\s+inversora\\s+navarro'";
 const OWN_COMPANY_RE=/sociedad\s+inversora\s+navarro/i;
+// A bank «TRASPASO» with no beneficiary nor payer (the bank names no other party):
+// a transfer between the company's own accounts too. The person decides.
+const TRASPASO_SQL=t=>`(${t}.description ~* '^\\s*traspaso' AND nullif(btrim(coalesce(${t}.beneficiary_name,'')),'') IS NULL AND nullif(btrim(coalesce(${t}.payer,'')),'') IS NULL)`;
+const isTraspaso=b=>/^\s*traspaso/i.test(b.description||'')&&!String(b.beneficiary_name||'').trim()&&!String(b.payer||'').trim();
+const ownTransfer=b=>OWN_COMPANY_RE.test([b.beneficiary_name,b.payer,b.description].filter(Boolean).join(' '))||isTraspaso(b);
 // «Reembolso de proveedor»: money a supplier gives back (a return, a credit note).
 // It is a material with the sign of a receipt, so it lowers the material cost of
 // the obra it is assigned to instead of counting as a client receipt.
@@ -120,7 +125,7 @@ const movementsSql=purchases=>`WITH links AS(SELECT bank_movement_id,document_id
    (t.search_text ~* ${OBRAMAT_TEXT} OR coalesce(d.obramat_doc,false)) obramat,
    coalesce(d.solo_compras,false) solo_compras,
    t.marked_transfer transferencia,
-   t.origin='bank_movements' AND concat_ws(' ',t.beneficiary_name,t.payer,t.description) ~* ${OWN_COMPANY_TEXT} propia
+   t.origin='bank_movements' AND (concat_ws(' ',t.beneficiary_name,t.payer,t.description) ~* ${OWN_COMPANY_TEXT} OR ${TRASPASO_SQL('t')}) propia
   FROM ledens.treasury_movements t LEFT JOIN LATERAL(SELECT string_agg(DISTINCT coalesce(dd.numerodocumento,'Sin número'),', ') documentos,count(*)::int n,
     bool_or(NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=dd.id AND r.source_valid AND r.status<>'excluded')) sin_registros,
     bool_or(${isObramatDoc('dd')}) obramat_doc,
@@ -514,7 +519,7 @@ export class FinanzasService {
     if(!transfers)throw new FinError(503,'Las transferencias entre cuentas no están disponibles todavía');
     if(!b)throw new FinError(409,'Un movimiento en efectivo no puede ser una transferencia entre cuentas');
     if(marked)throw new FinError(409,'Ya está clasificado así');
-    if(!OWN_COMPANY_RE.test([b.beneficiary_name,b.payer,b.description].filter(Boolean).join(' ')))throw new FinError(409,'Solo un movimiento con otra cuenta de Sociedad Inversora Navarro Robinson puede ser una transferencia entre cuentas');
+    if(!ownTransfer(b))throw new FinError(409,'Solo un movimiento con otra cuenta de Sociedad Inversora Navarro Robinson (o un «TRASPASO» sin beneficiario ni ordenante) puede ser una transferencia entre cuentas');
     if((await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1',[id])).rows.length)throw new FinError(409,'Está en Pendiente de trabajador: devuélvelo a conciliación desde esa pantalla para cambiarlo');
     if((await c.query("SELECT 1 FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado' LIMIT 1",[id])).rows.length)throw new FinError(409,'Está conciliado con un documento: una transferencia entre cuentas no tiene factura');
     if((await c.query("SELECT 1 FROM ledens.financial_records WHERE bank_movement_id=$1 AND source_valid AND status<>'excluded' LIMIT 1",[id])).rows.length)throw new FinError(409,'Ya tiene registros contables: no puede ser una transferencia entre cuentas');
@@ -699,7 +704,33 @@ export class FinanzasService {
  // class to the lines of a receipt document, which carry the sign of revenue.
  async materialPaymentOne(c,b,{provisional=true}={}){
   if(b.currency&&b.currency!=='EUR')throw new FinError(409,'Solo movimientos en euros');
-  if((await c.query('SELECT 1 FROM ledens.material_expenses WHERE bank_movement_id=$1 LIMIT 1',[b.id])).rows.length)throw new FinError(409,'Ya está registrado como material');
+  const prev=(await c.query(`SELECT me.id material_id,r.id record_id,r.status,r.source_valid,pm.material_id provisional,pm.replaced_at,pm.carried_project_id,
+    (SELECT e.action FROM ledens.finance_events e WHERE e.record_id=r.id ORDER BY e.id DESC LIMIT 1) last_action
+   FROM ledens.material_expenses me LEFT JOIN ledens.financial_records r ON r.material_id=me.id
+   LEFT JOIN ledens.provisional_material_payments pm ON pm.material_id=me.id WHERE me.bank_movement_id=$1 ORDER BY me.id`,[b.id])).rows;
+  if(prev.length){
+   // A provisional payment 026 replaced by its invoice, whose concepts are gone
+   // since (re-ingested, or excluded by a later registration): nothing active
+   // represents the payment any more, so it is restored as provisional (audited)
+   // and 026 replaces it again when the invoice gets its concepts back.
+   const p=prev.length===1?prev[0]:null;
+   if(provisional&&p?.provisional&&p.replaced_at&&p.record_id&&p.status==='excluded'&&p.last_action==='provisional_replaced'){
+    const before=(await c.query('SELECT * FROM ledens.financial_records WHERE id=$1 FOR UPDATE',[p.record_id])).rows[0];
+    const after=(await c.query("UPDATE ledens.financial_records SET status='pending',source_valid=true,category='materials',version=version+1,updated_at=now() WHERE id=$1 RETURNING *",[p.record_id])).rows[0];
+    // 026 took its obra away (carried_project_id) when it replaced it: give it back.
+    if(p.carried_project_id&&!(await c.query('SELECT 1 FROM ledens.project_financial_allocations WHERE record_id=$1',[p.record_id])).rows.length){
+     await c.query('INSERT INTO ledens.project_financial_allocations(record_id,project_id,allocated_amount) VALUES($1,$2,$3)',[p.record_id,p.carried_project_id,after.gross_amount]);
+     const name=(await c.query('SELECT name FROM ledens.projects WHERE id=$1',[p.carried_project_id])).rows[0]?.name||null;
+     await c.query(`INSERT INTO ledens.finance_events(record_id,actor_id,action,reason,before_value,after_value) VALUES($1,$2,'replace_allocations','Obra recuperada al restaurar el pago de materiales provisional',$3,$4)`,
+      [p.record_id,this.user.id,JSON.stringify({allocations:[]}),JSON.stringify({allocations:[{project_id:p.carried_project_id,project_name:name,allocated_amount:String(after.gross_amount)}]})]);
+    }
+    await c.query('UPDATE ledens.provisional_material_payments SET replaced_at=NULL,replaced_by_document_id=NULL,carried_project_id=NULL WHERE material_id=$1',[p.material_id]);
+    await this.finance.audit(c,before,this.user,'provisional_restored','Pago de materiales provisional restaurado: la factura que lo sustituyó ya no tiene conceptos',after);
+    return {materialId:p.material_id,recordId:p.record_id,provisional:true,restored:true};
+   }
+   if(prev.some(x=>x.record_id&&x.source_valid&&x.status!=='excluded'))throw new FinError(409,'Ya está registrado como material');
+   throw new FinError(409,'Este movimiento ya tuvo un material que se sustituyó o excluyó al registrar su factura, y esa factura ya no tiene conceptos: revisa la ingesta de su documento conciliado');
+  }
   const total=decimal(cents(b.total_amount));
   const m=(await c.query(`INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id)
    VALUES('ud',$1,1,$2,$2,$3,$4) RETURNING id`,[b.description||b.reference||b.source_id||(provisional?'Pago de materiales':'Reembolso de proveedor'),total,b.completed_on,b.id])).rows[0];
