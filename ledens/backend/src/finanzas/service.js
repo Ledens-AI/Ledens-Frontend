@@ -538,6 +538,9 @@ export class FinanzasService {
     OR r.document_id IN(SELECT document_id FROM ledens.bank_document_allocations WHERE bank_movement_id=$1)
     OR r.material_id IN(SELECT id FROM ledens.material_expenses WHERE bank_movement_id=$1)
     OR r.material_id=$2 OR r.customer_payment_id=$3
+    -- Worker payments saved from its batch (a cash batch's have no bank movement).
+    OR r.worker_payment_id IN(SELECT s.worker_payment_id FROM ledens.worker_payment_splits s JOIN ledens.worker_payment_batches wb ON wb.id=s.batch_id
+     WHERE (wb.bank_movement_id=$1 OR wb.cash_movement_id=$1) AND s.worker_payment_id IS NOT NULL)
    ORDER BY r.created_at,r.id`,[id,cash?.material_id||null,cash?.customer_payment_id||null]);
   const provisionales=bank?await one(`SELECT material_id,created_at,replaced_at,replaced_by_document_id,carried_project_id FROM ledens.provisional_material_payments WHERE bank_movement_id=$1`):[];
   const lote=(await one('SELECT id,role,total_amount::text total FROM ledens.worker_payment_batches WHERE bank_movement_id=$1 OR cash_movement_id=$1'))[0]||null;
