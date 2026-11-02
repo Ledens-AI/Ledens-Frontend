@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from './api.js';
 import { eur, fecha } from './format.js';
 import ProjectPicker from './ProjectPicker.jsx';
+import PeriodoTrabajo, { suggestedPeriod } from './PeriodoTrabajo.jsx';
 import { Badge, Empty, ErrorBox, Pager } from './ui.jsx';
 
 const ROL = { oficial: { label: 'Oficial', bg: '#E3E7F3', fg: '#3E4D85' }, ayudante: { label: 'Ayudante', bg: '#DEF3F0', fg: '#2F6B63' } };
@@ -9,14 +10,16 @@ const ROL = { oficial: { label: 'Oficial', bg: '#E3E7F3', fg: '#3E4D85' }, ayuda
 /* «Pendiente de trabajador»: bank movements sent here from «Pendiente de
  * conciliación» with «Pago a trabajadores», already split by the server
  * (FinanzasService.splitWorkerPayment). Each line needs a worker and a project;
- * «Guardar» creates the payment, which then only appears, read-only, in
- * «Pagos a trabajadores» with the movement's date. */
+ * «Guardar» creates the payment, which then appears in «Pagos a trabajadores»
+ * with the movement's date and the periodo trabajado chosen here (the week,
+ * month or year it pays for; suggested from the payment date, editable there
+ * too). */
 export default function PendienteTrabajador({ toast, onChanged }) {
   const [q, setQ] = useState(''), [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null), [error, setError] = useState(''), [reload, setReload] = useState(0);
   const [employees, setEmployees] = useState(null), [empError, setEmpError] = useState('');
-  // lineId → { employeeId, project, saving, error }
+  // lineId → { employeeId, project, periodo, saving, error }
   const [draft, setDraft] = useState(() => new Map());
 
   useEffect(() => { const t = setTimeout(() => { setQuery(q); setPage(1); }, 300); return () => clearTimeout(t); }, [q]);
@@ -32,6 +35,9 @@ export default function PendienteTrabajador({ toast, onChanged }) {
   const patch = (ids, p) => setDraft((m) => { const n = new Map(m); ids.forEach((id) => n.set(id, { ...(n.get(id) || {}), ...p })); return n; });
   const ready = (id) => { const d = get(id); return d.employeeId && d.project && !d.saving; };
   const allLines = (data?.rows || []).flatMap((b) => b.lines);
+  // Periodo trabajado of a line: the one chosen, else the suggestion from its payment date.
+  const paidOn = new Map((data?.rows || []).flatMap((b) => b.lines.map((l) => [l.id, b.fecha])));
+  const periodOf = (id) => (get(id).periodo !== undefined ? get(id).periodo : suggestedPeriod(paidOn.get(id)));
   const readyIds = allLines.map((l) => l.id).filter(ready);
 
   // Saved lines leave the page; a movement without lines left disappears too.
@@ -39,7 +45,7 @@ export default function PendienteTrabajador({ toast, onChanged }) {
     if (!ids.length) return;
     patch(ids, { saving: true, error: '' });
     try {
-      const res = await api.saveWorkerSplits(ids.map((id) => ({ splitId: id, employeeId: get(id).employeeId, projectId: get(id).project.id })));
+      const res = await api.saveWorkerSplits(ids.map((id) => ({ splitId: id, employeeId: get(id).employeeId, projectId: get(id).project.id, period: periodOf(id)?.period ?? null, startsOn: periodOf(id)?.startsOn ?? null })));
       const ok = new Set(res.results.filter((r) => r.ok).map((r) => r.splitId));
       res.results.filter((r) => !r.ok).forEach((r) => patch([r.splitId], { saving: false, error: r.error }));
       setDraft((m) => { const n = new Map(m); ok.forEach((id) => n.delete(id)); return n; });
@@ -104,6 +110,8 @@ export default function PendienteTrabajador({ toast, onChanged }) {
       {(data?.rows || []).map((b) => {
         const lineIds = b.lines.map((l) => l.id);
         const busy = lineIds.some((id) => get(id).saving);
+        // «Para todos» shows the period every line shares, if they all share one.
+        const shared = lineIds.map(periodOf).reduce((a, p) => (a === undefined ? p : a && p && a.period === p.period && a.startsOn === p.startsOn ? a : null), undefined) || null;
         return (
           <div className="fin-card is-flush" key={b.id}>
             <div className="fin-batch-head">
@@ -118,21 +126,26 @@ export default function PendienteTrabajador({ toast, onChanged }) {
                 <div className="fin-field fin-w-picker"><span>Proyecto para todos</span>
                   <ProjectPicker value={null} placeholder="Proyecto…" label="Proyecto para todos los pagos del movimiento" disabled={busy}
                     onChange={(p) => patch(lineIds, { project: p, error: '' })} /></div>
+                <div className="fin-field"><span>Periodo trabajado para todos</span>
+                  <PeriodoTrabajo value={shared} refDate={b.fecha} disabled={busy} label="Periodo trabajado de todos los pagos del movimiento"
+                    onChange={(v) => v && patch(lineIds, { periodo: v, error: '' })} /></div>
                 {b.saved === 0 ? <button type="button" className="fin-btn is-ghost fin-self-end" disabled={busy} onClick={() => giveBack(b)}>Devolver a conciliación</button> : null}
               </div>
             </div>
             <div className="fin-table-wrap">
               <table className="fin-table">
-                <thead><tr><th>Pago</th><th>Fecha</th><th className="fin-num">Importe</th><th>Rol</th><th>Trabajador</th><th className="fin-col-project">Proyecto</th><th><span className="fin-sr">Guardar</span></th></tr></thead>
+                <thead><tr><th>Pago</th><th>Fecha</th><th className="fin-num">Importe</th><th>Rol</th><th>Periodo trabajado</th><th>Trabajador</th><th className="fin-col-project">Proyecto</th><th><span className="fin-sr">Guardar</span></th></tr></thead>
                 <tbody>
                   {b.lines.map((l) => {
                     const d = get(l.id);
                     return (
-                      <tr key={l.id} className={d.employeeId || d.project ? 'is-staged' : ''}>
+                      <tr key={l.id} className={d.employeeId || d.project || d.periodo !== undefined ? 'is-staged' : ''}>
                         <td className="fin-nowrap">{`${l.line} de ${b.lines.length + b.saved}`}</td>
                         <td className="fin-nowrap">{fecha(b.fecha)}</td>
                         <td className="fin-num fin-nowrap"><strong>{eur(l.amount)}</strong></td>
                         <td><Badge {...ROL[l.role]}>{ROL[l.role].label}</Badge></td>
+                        <td className="fin-nowrap"><PeriodoTrabajo value={periodOf(l.id)} refDate={b.fecha} disabled={d.saving} allowEmpty
+                          onChange={(v) => patch([l.id], { periodo: v, error: '' })} /></td>
                         <td>{employeeSelect(d.employeeId, (v) => patch([l.id], { employeeId: v, error: '' }), 'Trabajador', d.saving)}</td>
                         <td className="fin-col-project">
                           <ProjectPicker compact value={d.project || null} placeholder="Proyecto…" disabled={d.saving} onChange={(p) => patch([l.id], { project: p, error: '' })} />

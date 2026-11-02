@@ -69,6 +69,12 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     res.json(await svc(req).workerPaymentSeries({ ...recordFilters(req.query), periodo: req.query.periodo || undefined }));
   }));
 
+  // { ids: [worker payment id], period: 'semana' | 'mes' | 'anio' | null, startsOn: 'YYYY-MM-DD' | null }
+  router.put('/pagos-trabajadores/periodo', traced('pago_trabajadores', 'Periodo trabajado', { summary: (b) => ({ message: `${b.updated} ${b.updated === 1 ? 'pago cambiado' : 'pagos cambiados'}` }) })(async (req, res) => {
+    const b = req.body || {};
+    res.json(await svc(req).setWorkPeriods({ ids: b.ids, period: b.period ?? null, startsOn: b.startsOn ?? null }));
+  }));
+
   router.get('/registros/:type/:id', handle(async (req, res) => {
     res.json({ record: await svc(req).getRecord(typeParam(req), req.params.id) });
   }));
@@ -217,9 +223,9 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     res.json({ employees: await svc(req).employees() });
   }));
 
-  // { items: [{ splitId, employeeId, projectId }] } — one result per line.
+  // { items: [{ splitId, employeeId, projectId, period?, startsOn? }] } — one result per line.
   router.post('/pendiente-trabajador/guardar', traced('pago_trabajadores', 'Guardar pagos', { summary: b=>({status:b.ok===0&&b.failed?'rechazado':'ok',message:`${b.ok} correctos · ${b.failed} con error`,detail:{correctos:b.ok,errores:b.failed}}) })(async (req, res) => {
-    const items = Array.isArray(req.body?.items) ? req.body.items.map((i) => ({ splitId: i?.splitId, employeeId: i?.employeeId, projectId: i?.projectId })) : req.body?.items;
+    const items = Array.isArray(req.body?.items) ? req.body.items.map((i) => ({ splitId: i?.splitId, employeeId: i?.employeeId, projectId: i?.projectId, period: i?.period ?? null, startsOn: i?.startsOn ?? null })) : req.body?.items;
     res.json(await svc(req).saveWorkerSplits({ items }));
   }));
 

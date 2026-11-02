@@ -2,7 +2,7 @@ import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import express from 'express';
-import {FinanzasService,splitWorkerPayment} from '../src/finanzas/service.js';
+import {FinanzasService,splitWorkerPayment,workPeriod} from '../src/finanzas/service.js';
 import {createFinanzasRouter} from '../src/routes/finanzas.js';
 // Pago a trabajadores on PGlite with the shared finance fixture; synthetic rows only.
 let db,pool,admin,jefe,p1,p2,oficial,ayudante,emp1,emp2;
@@ -11,7 +11,7 @@ before(async()=>{
  const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
  await db.exec('ALTER TABLE users ADD COLUMN name text');
- for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','027_transferencias_internas.sql','028_treasury_movements.sql','030_efectivo_importado.sql'])
+ for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','027_transferencias_internas.sql','028_treasury_movements.sql','030_efectivo_importado.sql','031_periodo_pago_trabajadores.sql'])
   await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
  [admin,jefe]=(await db.query("INSERT INTO users(email,role,name) VALUES('admin@pt.test','admin','Admin'),('jefe@pt.test','jefe','Jefe') RETURNING id,role")).rows;
  [p1,p2]=(await db.query("INSERT INTO ledens.projects(name,project_id) VALUES('Marbella','OBRA-001'),('Velez','OBRA-002') RETURNING id")).rows.map(x=>x.id);
@@ -166,4 +166,48 @@ test('Pagos a trabajadores chart: paid per worker and week / month / year, with 
  const list=await asAdmin().listRecords({type:'trabajador',...range,tercero:'Trabajador Uno'});
  assert.equal(list.total,3);
  await assert.rejects(asAdmin().workerPaymentSeries({periodo:'dia'}),{status:400});
+});
+
+test('periodo trabajado: any day is stored as the first day of its week, month or year',()=>{
+ assert.deepEqual(workPeriod('semana','2026-10-31'),{period:'semana',startsOn:'2026-10-26'},'Saturday → its Monday');
+ assert.deepEqual(workPeriod('semana','2026-10-26'),{period:'semana',startsOn:'2026-10-26'});
+ assert.deepEqual(workPeriod('semana','2026-11-01'),{period:'semana',startsOn:'2026-10-26'},'Sunday belongs to the week before');
+ assert.deepEqual(workPeriod('mes','2026-10-17'),{period:'mes',startsOn:'2026-10-01'});
+ assert.deepEqual(workPeriod('anio','2026-10-17'),{period:'anio',startsOn:'2026-01-01'});
+ assert.equal(workPeriod(null,null),null);assert.equal(workPeriod('',''),null);
+ assert.throws(()=>workPeriod('dia','2026-10-17'),{status:400});
+ assert.throws(()=>workPeriod('semana','2026-02-30'),{status:400});
+ assert.throws(()=>workPeriod('semana',null),{status:400});
+});
+
+test('periodo trabajado: saved with the line, editable afterwards, and the chart counts the payment in it',async()=>{
+ const m=await movement('-200.00',{date:'2026-11-02',source:'4T2026-950'});
+ await asAdmin().classifyWorkerPayments({movementIds:[m]});
+ const [l1,l2]=(await asAdmin().workerQueue()).rows.find(r=>r.bank_movement_id===m).lines;
+ const bad=asAdmin().saveWorkerSplits({items:[{splitId:l1.id,employeeId:emp1,projectId:p1,period:'semana',startsOn:'nope'}]});
+ await assert.rejects(bad,{status:400});
+ const res=await asAdmin().saveWorkerSplits({items:[{splitId:l1.id,employeeId:emp1,projectId:p1,period:'semana',startsOn:'2026-10-31'},{splitId:l2.id,employeeId:emp1,projectId:p1}]});
+ assert.equal(res.ok,2);
+ const [w1,w2]=res.results.map(r=>r.workerPaymentId);
+ const rows=(await asAdmin().listRecords({type:'trabajador',from:'2026-11-02',to:'2026-11-02'})).rows;
+ const r1=rows.find(r=>r.id===w1),r2=rows.find(r=>r.id===w2);
+ assert.deepEqual([r1.periodo_trabajo,r1.periodo_inicio],['semana','2026-10-26']);
+ assert.deepEqual([r2.periodo_trabajo,r2.periodo_inicio],[null,null],'a line saved without a period has none');
+ // The chart puts the first one in the week it pays for, the second on its date.
+ let week=await asAdmin().workerPaymentSeries({from:'2026-11-02',to:'2026-11-02',periodo:'semana'});
+ assert.deepEqual(week.series.map(x=>[x.periodo,Math.abs(Number(x.importe)),x.pagos]),[['2026-10-26',60,1],['2026-11-02',60,1]]);
+ // Editing: several at once, then clearing one.
+ const up=await asAdmin().setWorkPeriods({ids:[w1,w2],period:'semana',startsOn:'2026-10-30'});
+ assert.equal(up.updated,1,'w1 already had that week');
+ week=await asAdmin().workerPaymentSeries({from:'2026-11-02',to:'2026-11-02',periodo:'semana'});
+ assert.deepEqual(week.series.map(x=>[x.periodo,x.pagos]),[['2026-10-26',2]]);
+ await asAdmin().setWorkPeriods({ids:[w2],period:null,startsOn:null});
+ assert.equal((await db.query('SELECT count(*)::int n FROM ledens.worker_payment_periods WHERE worker_payment_id=$1',[w2])).rows[0].n,0);
+ const ev=(await db.query("SELECT e.action FROM ledens.finance_events e JOIN ledens.financial_records f ON f.id=e.record_id WHERE f.worker_payment_id=$1 AND e.action='work_period'",[w2])).rows;
+ assert.equal(ev.length,2,'every change is audited on the record');
+ await assert.rejects(asAdmin().setWorkPeriods({ids:[w1],period:'quincena',startsOn:'2026-10-26'}),{status:400});
+ await assert.rejects(asAdmin().setWorkPeriods({ids:[],period:'semana',startsOn:'2026-10-26'}),{status:400});
+ // A jefe without write permission on the project cannot change it.
+ const outsider=(await db.query("INSERT INTO users(email,role,name) VALUES('jefe2@pt.test','jefe','Jefe 2') RETURNING id,role")).rows[0];
+ await assert.rejects(new FinanzasService(pool,outsider).setWorkPeriods({ids:[w1],period:'mes',startsOn:'2026-10-01'}),{status:403});
 });

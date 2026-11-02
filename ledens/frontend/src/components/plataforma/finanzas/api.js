@@ -47,6 +47,8 @@ export const api = {
   summary: () => request('GET', '/api/finanzas/resumen'),
   records: (f) => request('GET', '/api/finanzas/registros' + qs(f)),
   workerSeries: (f) => request('GET', '/api/finanzas/pagos-trabajadores/serie' + qs(f)),
+  // Periodo trabajado of saved worker payments: { ids, period, startsOn } (null clears it).
+  setWorkPeriods: (body) => request('PUT', '/api/finanzas/pagos-trabajadores/periodo', body),
   record: (type, id) => request('GET', `/api/finanzas/registros/${type}/${id}`),
   assign: (type, id, body) => request('PUT', `/api/finanzas/registros/${type}/${id}/proyecto`, body),
   distribute: (type, id, body) => request('PUT', `/api/finanzas/registros/${type}/${id}/distribucion`, body),
