@@ -45,6 +45,11 @@ const BASE=`WITH base AS (
 // categories; a reclassification changes financial_records.category only, never
 // moves a row between the imported source tables.
 export const CLASES={materiales:'materials',trabajadores:'labor',clientes:'revenue'};
+// «Conceptos de facturas» adds «Reembolso de proveedor»: a receipt from a supplier
+// (refund, credit note) is a material cost with a positive amount, so it lowers the
+// obra's material cost instead of counting as client revenue. Only for receipts.
+export const INVOICE_CLASES={...CLASES,reembolso_proveedor:'materials'};
+const INVOICE_CHOICES={cobro:['clientes','reembolso_proveedor'],pago:['materiales','trabajadores']};
 const CLASE_SQL=`CASE WHEN l.category IN ('materials','overhead') THEN 'materiales' WHEN l.category='labor' THEN 'trabajadores'
  WHEN l.category IN ('revenue','advance') THEN 'clientes' WHEN l.category='unclassified' THEN 'sin_clasificar' ELSE 'otros' END`;
 // A record is a payment or a receipt by its document, else its source, else its bank movement.
@@ -254,17 +259,20 @@ export class FinanzasService {
  // «Conceptos de facturas»: each invoice whose lines are invoice concepts (not an
  // imported material, worker payment or client payment), as one row, with how its
  // lines are classified. Classifying the invoice changes the category of all of
- // them at once (materiales / trabajadores / clientes), audited per record.
+ // them at once (materiales / trabajadores / clientes / reembolso_proveedor), audited per record.
  async invoices({page=1,pageSize=25,q='',clase='',from='',to=''}={}){
   if(this.user.role!=='admin')throw new FinError(403,'Clasificar facturas requiere administrador');
   const size=Math.min(100,Math.max(1,Number(pageSize)||25)),p=Math.max(1,Math.min(4000,Number(page)||1));
   if(!Number.isInteger(size)||!Number.isInteger(p))throw new FinError(400,'Paginación no válida');
   const params=[...this.params(),'%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',numerodocumento,tercero,conceptos) ILIKE $3"];
-  if(clase){if(![...Object.keys(CLASES),'sin_clasificar','mixta','otros'].includes(clase))throw new FinError(400,'Clasificación no válida');
+  if(clase){if(![...Object.keys(INVOICE_CLASES),'sin_clasificar','mixta','otros'].includes(clase))throw new FinError(400,'Clasificación no válida');
    // «Sin clasificar»: any line still unclassified, even if the others are not.
    if(clase==='sin_clasificar')where.push("'sin_clasificar'=ANY(clases)");else{params.push(clase);where.push('clase=$'+params.length);}}
   for(const [v,op] of [[from,'>='],[to,'<=']])if(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v)))throw new FinError(400,'Fecha no válida');params.push(v);where.push('fecha '+op+' $'+params.length+'::date');}
-  const sql=BASE+`, lines AS(SELECT l.*,${CLASE_SQL} clase FROM listed l WHERE l.type='concepto' AND l.document_id IS NOT NULL),
+  // A material line of a receipt is a supplier refund.
+  const sql=BASE+`, lines0 AS(SELECT l.*,${CLASE_SQL} clase0 FROM listed l WHERE l.type='concepto' AND l.document_id IS NOT NULL),
+   lines AS(SELECT x.*,CASE WHEN x.clase0='materiales' AND (d.tipo='Cobrar' OR (d.tipo IS DISTINCT FROM 'Pagar' AND d.total>0)) THEN 'reembolso_proveedor' ELSE x.clase0 END clase
+    FROM lines0 x JOIN ledens.documents d ON d.id=x.document_id),
    inv AS(SELECT d.id,d.numerodocumento,d.tercero,d.document_on fecha,d.total,d.tipo doc_tipo,count(*)::int lineas,sum(x.importe)::text importe_lineas,
     array_agg(DISTINCT x.clase) clases,CASE WHEN count(DISTINCT x.clase)=1 THEN min(x.clase) ELSE 'mixta' END clase,
     string_agg(coalesce(x.concepto,''),' · ' ORDER BY x.line_number NULLS LAST,x.record_id) conceptos,
@@ -279,7 +287,7 @@ export class FinanzasService {
  async classifyInvoice({documentId,clase,version,reason}={}){
   if(this.user.role!=='admin')throw new FinError(403,'Clasificar facturas requiere administrador');
   if(!uuid(documentId))throw new FinError(404,'Factura no encontrada');
-  if(!CLASES[clase])throw new FinError(400,'Clasificación no válida');
+  if(!INVOICE_CLASES[clase])throw new FinError(400,'Clasificación no válida');
   if(typeof version!=='string'||!/^[0-9a-f]{32}$/.test(version))throw new FinError(400,'Versión no válida');
   const why=typeof reason==='string'?reason.trim():'';
   if(why.length>500)throw new FinError(400,'Motivo no válido (máximo 500 caracteres)');
@@ -291,9 +299,10 @@ export class FinanzasService {
    if(current!==version)throw new FinError(409,'La factura ha cambiado. Actualiza la lista.');
    const doc=(await c.query('SELECT tipo,total FROM ledens.documents WHERE id=$1',[documentId])).rows[0];
    const sentido=doc.tipo==='Cobrar'?'cobro':doc.tipo==='Pagar'?'pago':Number(doc.total)<0?'pago':Number(doc.total)>0?'cobro':null;
-   if(sentido==='pago'&&clase==='clientes')throw new FinError(409,'Una factura de pago no puede clasificarse como cobro de clientes');
-   if(sentido==='cobro'&&clase!=='clientes')throw new FinError(409,'Una factura de cobro solo puede clasificarse como de clientes');
-   const target=CLASES[clase],same=r=>r.category===target||(target==='materials'&&r.category==='overhead');
+   if(sentido==='pago'&&!INVOICE_CHOICES.pago.includes(clase))throw new FinError(409,clase==='clientes'?'Una factura de pago no puede clasificarse como cobro de clientes':'Una factura de pago no puede ser un reembolso de proveedor');
+   if(sentido==='cobro'&&!INVOICE_CHOICES.cobro.includes(clase))throw new FinError(409,'Una factura de cobro solo puede ser un cobro de clientes o un reembolso de proveedor');
+   if(!sentido&&clase==='reembolso_proveedor')throw new FinError(409,'Solo una factura de cobro puede ser un reembolso de proveedor');
+   const target=INVOICE_CLASES[clase],same=r=>r.category===target||(target==='materials'&&r.category==='overhead');
    const changing=records.filter(r=>!same(r));
    if(!changing.length)throw new FinError(409,'La factura ya está clasificada así');
    // Changing what was already classified needs its reason, like «Movimientos conciliados».

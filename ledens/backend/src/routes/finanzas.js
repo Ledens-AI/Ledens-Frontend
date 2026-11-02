@@ -120,7 +120,7 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
   router.get('/facturas', handle(async (req, res) => {
     res.json(await svc(req).invoices({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), clase: req.query.clase || '', from: req.query.desde, to: req.query.hasta }));
   }));
-  // { clase: 'materiales' | 'trabajadores' | 'clientes', version, reason? }
+  // { clase: 'materiales' | 'trabajadores' | 'clientes' | 'reembolso_proveedor', version, reason? }
   router.put('/facturas/:documentId/clasificacion', traced('imputacion', 'Clasificación de factura', { entity: (req) => ({ type: 'documento', id: req.params.documentId }), summary: (b) => ({ message: `Factura clasificada como ${b.clase} (${b.changed} de ${b.lineas} líneas)`, detail: { clase: b.clase, categoria: b.category } }) })(async (req, res) => {
     const b = req.body || {};
     res.json(await svc(req).classifyInvoice({ documentId: req.params.documentId, clase: b.clase, version: b.version, reason: b.reason }));

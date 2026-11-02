@@ -67,6 +67,20 @@ test('the direction, the version and a reason for a change guard the classificat
  await assert.rejects(new FinanzasService(pool,jefe).classifyInvoice({documentId:stale.id,clase:'materiales',version:stale.version}),{status:403});
 });
 
+test('a receipt can be a supplier refund: a material that lowers costs, never on a payment',async()=>{
+ const d=(await db.query(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento,tercero) VALUES(45,'Cobrar','2026-10-09','F-ABONO','Proveedor') RETURNING id`)).rows[0].id;
+ const l=(await db.query("INSERT INTO ledens.invoice_lines(document_id,line_number,description) VALUES($1,1,'Abono azulejos') RETURNING id",[d])).rows[0].id;
+ await db.query(`INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,gross_amount,currency) VALUES($1,$2,'2026-10-09','Abono azulejos',45,'EUR')`,[l,d]);
+ await assert.rejects(classify('F-PAGO','reembolso_proveedor','No es un cobro'),{status:409,message:/reembolso/});
+ const res=await classify('F-ABONO','reembolso_proveedor');
+ assert.deepEqual([res.category,res.clase],['materials','reembolso_proveedor']);
+ const row=await invoice('F-ABONO');
+ assert.equal(row.clase,'reembolso_proveedor');
+ assert.equal((await asAdmin().invoices({clase:'reembolso_proveedor'})).total,1);
+ assert.ok((await materialPending()).includes('Abono azulejos'));
+ assert.equal((await classify('F-ABONO','clientes','Era un cobro de cliente')).category,'revenue');
+});
+
 test('Pendiente de conciliación carries what «Asignar documento» needs for each bank movement',async()=>{
  const row=(await asAdmin().reconciliation({pageSize:100})).rows.find(r=>r.id===loose.id);
  assert.deepEqual(row.bank,{id:loose.id,description:'Pago sin factura',reference:null,total_amount:'-90',remaining:row.por_conciliar,state:'COMPLETED',currency:'EUR',bank_fingerprint:bankFingerprint(loose)});

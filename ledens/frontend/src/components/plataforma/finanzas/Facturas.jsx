@@ -4,11 +4,17 @@ import { eur, fecha } from './format.js';
 import { Badge, Dialog, Empty, ErrorBox, Pager } from './ui.jsx';
 import { CLASE } from './Conciliados.jsx';
 
-const CLASES = { ...CLASE, mixta: { label: 'Mixta (clasificar de nuevo)', bg: '#F2F2EF', fg: '#3A3A38', icon: 'ri-shuffle-line' } };
+const CLASES = {
+  ...CLASE,
+  reembolso_proveedor: { label: 'Reembolso de proveedor', bg: '#EEF4E4', fg: '#4A6B22', icon: 'ri-refund-2-line' },
+  mixta: { label: 'Mixta (clasificar de nuevo)', bg: '#F2F2EF', fg: '#3A3A38', icon: 'ri-shuffle-line' } };
 // Where the lines go once classified (the tab that then lists them).
-const DESTINO = { materiales: 'Materiales', trabajadores: 'Pagos a trabajadores', clientes: 'Pagos de clientes' };
-// A payment invoice is Materiales or Trabajadores; a receipt only Clientes (the backend enforces it too).
-const choices = (r) => (r.sentido === 'cobro' ? ['clientes'] : r.sentido === 'pago' ? ['materiales', 'trabajadores'] : ['materiales', 'trabajadores', 'clientes']);
+// A supplier refund is a material cost with a positive amount: it lowers the obra's materials.
+const DESTINO = { materiales: 'Materiales', trabajadores: 'Pagos a trabajadores', clientes: 'Pagos de clientes', reembolso_proveedor: 'Materiales' };
+const OPCION = { materiales: 'Pago de materiales', trabajadores: 'Pago de trabajadores', clientes: 'Cobro de clientes', reembolso_proveedor: 'Reembolso de proveedor' };
+// A payment invoice is Materiales or Trabajadores; a receipt Cobro de clientes or
+// Reembolso de proveedor (the backend enforces it too).
+const choices = (r) => (r.sentido === 'cobro' ? ['clientes', 'reembolso_proveedor'] : r.sentido === 'pago' ? ['materiales', 'trabajadores'] : ['materiales', 'trabajadores', 'clientes']);
 
 function Classify({ row, onClose, onDone }) {
   const options = choices(row).filter((c) => c !== row.clase);
@@ -30,7 +36,7 @@ function Classify({ row, onClose, onDone }) {
       <p><strong>{row.numerodocumento || 'Factura sin número'}</strong> · {row.tercero || '—'} · {eur(row.total)}</p>
       <p className="fin-muted fin-small">
         Ahora: {CLASES[row.clase]?.label || row.clase}. Se clasifica el documento entero de una vez.{' '}
-        {row.sentido === 'cobro' ? 'Es una factura de cobro: solo puede ser de clientes.' : row.sentido === 'pago' ? 'Es una factura de pago: puede ser de materiales o de trabajadores.' : ''}
+        {row.sentido === 'cobro' ? 'Es una factura de cobro: puede ser un cobro de clientes o un reembolso de proveedor.' : row.sentido === 'pago' ? 'Es una factura de pago: puede ser de materiales o de trabajadores.' : ''}
       </p>
       {options.length ? (
         <fieldset className="fin-choices">
@@ -38,8 +44,8 @@ function Classify({ row, onClose, onDone }) {
           {options.map((c) => (
             <label key={c} className="fin-choice">
               <input type="radio" name="clase-factura" checked={clase === c} onChange={() => setClase(c)} />
-              <span><strong>{c === 'materiales' ? 'Pago de materiales' : c === 'trabajadores' ? 'Pago de trabajadores' : 'Cobro de clientes'}</strong>
-                <span className="fin-muted"> · la factura pasa entera a «{DESTINO[c]}»</span></span>
+              <span><strong>{OPCION[c]}</strong>
+                <span className="fin-muted"> · la factura pasa entera a «{DESTINO[c]}»{c === 'reembolso_proveedor' ? ' y descuenta el coste de materiales' : ''}</span></span>
             </label>
           ))}
         </fieldset>
@@ -53,7 +59,7 @@ function Classify({ row, onClose, onDone }) {
 
 /* Conceptos de facturas (admins): one row per invoice (never per line) whose
  * type was not recognised automatically, classified as a whole document as Materiales, Pagos a
- * trabajadores or Cobro de clientes. */
+ * trabajadores, Cobro de clientes or (a receipt) Reembolso de proveedor. */
 export default function Facturas({ toast, onChanged }) {
   const [q, setQ] = useState(''), [query, setQuery] = useState('');
   const [clase, setClase] = useState('sin_clasificar'), [desde, setDesde] = useState(''), [hasta, setHasta] = useState('');
@@ -78,7 +84,7 @@ export default function Facturas({ toast, onChanged }) {
           <select value={clase} onChange={filter(setClase)}>
             <option value="sin_clasificar">Pendientes de clasificar</option>
             <option value="">Todas</option>
-            {['materiales', 'trabajadores', 'clientes', 'mixta', 'otros'].map((k) => <option key={k} value={k}>{CLASES[k].label}</option>)}
+            {['materiales', 'trabajadores', 'clientes', 'reembolso_proveedor', 'mixta', 'otros'].map((k) => <option key={k} value={k}>{CLASES[k].label}</option>)}
           </select></label>
         <label className="fin-field"><span>Desde</span><input type="date" value={desde} onChange={filter(setDesde)} /></label>
         <label className="fin-field"><span>Hasta</span><input type="date" value={hasta} onChange={filter(setHasta)} /></label>
