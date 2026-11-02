@@ -29,7 +29,7 @@ export function textTotals(text) {
 // Spanish tax ids printed in normalized text (one optional space between parts:
 // «B 19753805», «12345678 Z», «X 1234567 L»).
 const SPANISH_TAX_ID = /\b(?:([A-HJNPQRSUVW]) ?(\d{7}) ?([0-9A-J])|(\d{8}) ?([A-Z])|([XYZ]) ?(\d{7}) ?([A-Z]))\b/g;
-const BUYER_LABEL = /\b(?:CLIENTE|DATOS DEL CLIENTE|FACTURAR A|FACTURADO A|BILL TO|BILLED TO|CUSTOMER|DESTINATARIO)\b/g;
+const BUYER_LABEL = /\b(?:CLIENTE|DATOS DEL CLIENTE|FACTURAR A|FACTURADO A|RECEPTOR|BILL TO|BILLED TO|CUSTOMER|DESTINATARIO)\b/g;
 // When the OCR placed no tax id on either side: our tax id printed shortly
 // (≤160 characters) after a buyer label («CLIENTE», «Facturar a», «Bill to»…)
 // means we are the buyer. One other Spanish tax id in the text is the
@@ -190,8 +190,14 @@ export function extractInvoice(result, {businessTaxId=process.env.BRIDGE_BUSINES
   const supplier=!sellerOwn&&!buyerOwn&&vendorTax.length>=8&&vendorTax!==own;
   let direction=supplier?'Pagar':sellerOwn===buyerOwn?null:sellerOwn?'Cobrar':'Pagar';
   // The OCR placed no tax id at all (neither side): the PDF text may still show
-  // ours as the customer's, after a buyer label (buyerFromText).
-  const textBuyer=!direction&&!sellerOwn&&!buyerOwn&&pdfText?buyerFromText(pdfText,own):null;
+  // ours as the customer's, after a buyer label (buyerFromText). Photos and scans
+  // have no text layer: the OCR's own text is read the same way, and the
+  // confidence is that of the OCR words that read our tax id.
+  const content=result.analyzeResult?.content||'';
+  const ocrBuyer=!pdfText&&content?buyerFromText(content,own):null;
+  const ownWords=ocrBuyer?(result.analyzeResult.pages||[]).flatMap(p=>p.words||[]).filter(w=>compact(w.content).includes(own)):[];
+  const textBuyer=!direction&&!sellerOwn&&!buyerOwn?(pdfText?buyerFromText(pdfText,own):ownWords.length?ocrBuyer:null):null;
+  const buyerConfidence=pdfText?TEXT_CONFIDENCE:Math.min(...ownWords.map(w=>w.confidence));
   if(textBuyer)direction='Pagar';
   // Nor in the PDF text: a document with no customer may print the seller's id where the OCR read it (sellerFromContent).
   const textSeller=!direction&&!sellerOwn&&!buyerOwn&&!f.CustomerName&&!f.CustomerTaxId?sellerFromContent(result,own):null;
@@ -214,7 +220,7 @@ export function extractInvoice(result, {businessTaxId=process.env.BRIDGE_BUSINES
   // Direction: the confidence of the tax id that set it, confirmed when that id is printed in the text.
   let directionConfidence=direction&&positive?(f[directionField]?.confidence||0):0;
   const directionId=taxId(text(directionField));
-  if(textBuyer){directionConfidence=positive?TEXT_CONFIDENCE:0;corroborated.direction='customer_label_in_text';}
+  if(textBuyer){directionConfidence=positive?buyerConfidence:0;corroborated.direction=pdfText?'customer_label_in_text':'customer_label_in_ocr_text';}
   else if(textSeller){directionConfidence=positive?textSeller.confidence:0;corroborated.direction='seller_tax_id_in_ocr_text';}
   else if(direction&&positive&&directionConfidence<INVOICE_MIN_CONFIDENCE&&directionId.length>=8&&pdfText&&compact(pdfText).includes(directionId)){
     directionConfidence=TEXT_CONFIDENCE;corroborated.direction=directionField;}
