@@ -9,11 +9,13 @@ let viewAsId = null;
 export const setViewAs = (id) => { viewAsId = id || null; };
 export const viewAsHeaders = () => (viewAsId ? { 'X-Ledens-View-As': viewAsId } : {});
 
+// A File/Blob body is sent as is (raw upload); anything else as JSON.
 async function request(method, url, body) {
-  if(body&&method!=='GET')body={...body,request_id:body.request_id||crypto.randomUUID()};
+  const raw = typeof Blob !== 'undefined' && body instanceof Blob;
+  if(body&&!raw&&method!=='GET')body={...body,request_id:body.request_id||crypto.randomUUID()};
   let r;
   try {
-    r = await fetch(url, { method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...viewAsHeaders() }, body: body ? JSON.stringify(body) : undefined });
+    r = await fetch(url, { method, headers: { ...(body ? { 'Content-Type': raw ? (body.type || 'application/octet-stream') : 'application/json' } : {}), ...viewAsHeaders() }, body: raw ? body : body ? JSON.stringify(body) : undefined });
   } catch {
     throw new ApiError(0, 'Error de conexión. Comprueba tu red e inténtalo de nuevo.');
   }
@@ -55,6 +57,10 @@ export const api = {
   // Concepto de movimientos (admins): every movement and its classification.
   movements: (f) => request('GET', '/api/finanzas/movimientos' + qs(f)),
   classifyMovement: (id, body) => request('PUT', `/api/finanzas/movimientos/${id}/clasificacion`, body),
+  // «Segregar conceptos» (Materiales pendiente de asignación): a provisional material payment.
+  segregateMaterial: (materialId) => request('POST', `/api/finanzas/materiales/${materialId}/segregar`, {}),
+  // «Adjuntar detalle»: the file with the product detail of a reconciled document without concepts.
+  attachDocumentDetail: (id, documentId, file) => request('POST', `/api/finanzas/movimientos/${id}/documentos/${documentId}/detalle`, file),
   reconciliation: (f) => request('GET', '/api/finanzas/conciliacion' + qs(f)),
   // Movimientos conciliados (admins): classification and its change.
   reconciled: (f) => request('GET', '/api/finanzas/conciliados' + qs(f)),

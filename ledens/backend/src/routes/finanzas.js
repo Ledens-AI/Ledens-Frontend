@@ -1,10 +1,11 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { getPool, isDbConfigured } from '../db/pool.js';
 import { requireAuth, checkRole } from '../auth/sessions.js';
 import { viewAs } from '../auth/viewAs.js';
 import {FinanceError} from '../finance/service.js';
-import { FinanzasService, FinError, TYPES, isUuid } from '../finanzas/service.js';
+import { FinanzasService, FinError, TYPES, isUuid, DETAIL_MAX_BYTES } from '../finanzas/service.js';
+import { InvoiceOcr } from '../ingestion/ocr.js';
 import { ProjectsService } from '../finanzas/projects.js';
 import { WorkersService } from '../finanzas/workers.js';
 import { traced, RunLogService } from '../logs/runs.js';
@@ -17,7 +18,7 @@ export const FINANZAS_ROLES = ['admin', 'jefe'];
 
 // `authenticate` replaces only the session lookup (tests); the role check is
 // always the real one.
-export function createFinanzasRouter({ service, projects, workers, runLogs, authenticate, findUser, origin=process.env.CORS_ORIGIN } = {}) {
+export function createFinanzasRouter({ service, projects, workers, runLogs, authenticate, findUser, origin=process.env.CORS_ORIGIN, ocr } = {}) {
   const router = Router();
   router.use((_req, res, next) => {
     if (!service && !isDbConfigured()) return res.status(503).json({ error: 'Gestión financiera no disponible todavía' });
@@ -130,6 +131,20 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     const b = req.body || {};
     res.json(await svc(req).classifyMovement({ id: req.params.id, clase: b.clase, version: b.version, reason: b.reason }));
   }));
+  // «Segregar conceptos» (Materiales pendiente de asignación): a provisional material payment
+  // replaced by the concepts of its reconciled invoice; 409 with sin_conceptos when it has none.
+  router.post('/materiales/:materialId/segregar', traced('imputacion', 'Segregar conceptos de la factura', { entity: (req) => ({ type: 'material', id: req.params.materialId }), summary: (b) => ({ message: 'Pago provisional sustituido por los conceptos de ' + (b.documentos || []).join(', ') }) })(async (req, res) => {
+    res.json(await svc(req).segregateMaterial(req.params.materialId));
+  }));
+  // «Adjuntar detalle»: the raw file (PDF, JPG or PNG) with the product detail of a
+  // reconciled document that has no concepts; the OCR reads it (costs F0 quota,
+  // so it has its own small limit).
+  const detailLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Demasiados documentos seguidos. Espera unos minutos.' } });
+  const readerOf = () => ocr || (process.env.DI_ENDPOINT && process.env.DI_KEY ? new InvoiceOcr(process.env.DI_ENDPOINT, process.env.DI_KEY) : null);
+  router.post('/movimientos/:id/documentos/:documentId/detalle', detailLimit, express.raw({ type: () => true, limit: DETAIL_MAX_BYTES }),
+    traced('imputacion', 'Detalle de productos adjuntado', { entity: (req) => ({ type: 'documento', id: req.params.documentId }), summary: (b) => ({ message: `${b.lineas} conceptos registrados desde el detalle adjunto`, detail: { movimiento_id: b.movimiento?.id, lineas: b.lineas } }) })(async (req, res) => {
+      res.json(await svc(req).attachDocumentDetail({ id: req.params.id, documentId: req.params.documentId, content: Buffer.isBuffer(req.body) ? req.body : null, ocr: readerOf() }));
+    }));
 
   router.get('/conciliacion', handle(async (req, res) => {
     const view = req.query.vista || 'movimientos';
