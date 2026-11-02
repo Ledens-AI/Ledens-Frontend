@@ -87,6 +87,7 @@ const movementsSql=purchases=>`WITH links AS(SELECT bank_movement_id,document_id
    EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=b.id) lote,
    EXISTS(SELECT 1 FROM ledens.provisional_material_payments pm WHERE pm.bank_movement_id=b.id AND pm.replaced_at IS NULL) provisional,
    b.total_amount>0 AND EXISTS(SELECT 1 FROM ledens.material_expenses me WHERE me.bank_movement_id=b.id) reembolso,
+   EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=b.id) cobro_cliente,
    (concat_ws(' ',b.beneficiary_name,b.payer,b.description,b.reference) ~* ${OBRAMAT_TEXT} OR coalesce(d.obramat_doc,false)) obramat,
    coalesce(d.solo_compras,false) solo_compras
   FROM ledens.bank_movements b LEFT JOIN LATERAL(SELECT string_agg(DISTINCT coalesce(dd.numerodocumento,'Sin número'),', ') documentos,count(*)::int n,
@@ -97,12 +98,12 @@ const movementsSql=purchases=>`WITH links AS(SELECT bank_movement_id,document_id
   WHERE NOT coalesce(b.is_internal_transfer,false) AND b.total_amount<>0
   UNION ALL
   SELECT k.id,'efectivo',k.occurred_on,k.counterparty,k.concept,'Efectivo',CASE WHEN k.kind='pago' THEN -k.amount ELSE k.amount END,NULL,0,false,
-   EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=k.id),false,false,
+   EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=k.id),false,false,k.customer_payment_id IS NOT NULL,
    concat_ws(' ',k.counterparty,k.concept) ~* ${OBRAMAT_TEXT},false
   FROM ledens.cash_movements k WHERE k.kind IN ('pago','cobro')),
  cls AS(SELECT m.*,coalesce(a.n,0) registros,coalesce(a.version,md5('')) version,
   ARRAY(SELECT DISTINCT e FROM unnest(array_remove(coalesce(a.clases,'{}'::text[]),'x')||CASE WHEN m.lote THEN ARRAY['trabajadores'] ELSE '{}'::text[] END) e ORDER BY e) conocidas,
-  ('x'=ANY(coalesce(a.clases,'{}'::text[])) OR (m.doc_sin_registros AND NOT m.provisional AND NOT m.reembolso)) desconocido
+  ('x'=ANY(coalesce(a.clases,'{}'::text[])) OR (m.doc_sin_registros AND NOT m.provisional AND NOT m.reembolso AND NOT m.cobro_cliente)) desconocido
   FROM movs m LEFT JOIN agg a ON a.mov=m.id),
  fin AS(SELECT c.*,CASE WHEN c.obramat AND c.solo_compras THEN 'materiales' WHEN c.desconocido OR cardinality(c.conocidas)=0 THEN 'pendiente'
    WHEN cardinality(c.conocidas)=1 THEN CASE WHEN c.conocidas[1]='materiales' AND c.importe>0 THEN 'reembolso_proveedor' ELSE c.conocidas[1] END ELSE 'mixto' END clase,
@@ -439,7 +440,10 @@ export class FinanzasService {
     const docs=(await c.query("SELECT count(DISTINCT document_id)::int n FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado'",[id])).rows[0].n;
     // A supplier refund is registered from the movement itself (below), whatever
     // its reconciled credit note has: it never waits for the document's concepts.
-    if(bare.length&&clase!=='reembolso_proveedor'&&!(clase==='materiales'&&!records.length&&docs===1))throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta antes de clasificar el movimiento`);
+    // A client receipt is treasury (advance): revenue comes from the issued
+    // invoice, so a document still without concepts never blocks it (Pagos de
+    // clientes and Pendiente de conciliación report what is missing).
+    if(bare.length&&!['reembolso_proveedor','clientes'].includes(clase)&&!(clase==='materiales'&&!records.length&&docs===1))throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta antes de clasificar el movimiento`);
    }
    // A supplier refund is registered as a material from the movement itself. A
    // receipt that already has records (its reconciled document, a client receipt)
@@ -457,8 +461,12 @@ export class FinanzasService {
      const allocated=(await c.query('SELECT DISTINCT record_id FROM ledens.project_financial_allocations WHERE record_id=ANY($1::uuid[])',[records.map(r=>r.id)])).rows.length;
      if(allocated||records.some(r=>!r.invoice_line_id||notes.get(r.document_id)!=='Cobrar'||r.status!=='pending'||r.category!=='unclassified'))
       throw new FinError(409,'Este cobro tiene registros ya clasificados, aprobados o con obra (o un cobro de cliente): revísalos antes de registrarlo como reembolso de proveedor');
+     // A credit note's lines may be stored negative (the usual sign of an abono) or
+     // positive (as a Cobrar document): they are excluded anyway, so only their
+     // size has to match the refund, all with the same sign.
      const sum=records.reduce((t,r)=>t+cents(r.gross_amount),0n);
-     if(sum!==amount)throw new FinError(409,`Los conceptos del abono conciliado suman ${decimal(sum)} € y el cobro ${decimal(amount)} €: revisa el abono antes de registrarlo como reembolso de proveedor`);
+     if(new Set(records.map(r=>cents(r.gross_amount)>0n)).size>1)throw new FinError(409,'Los conceptos del abono conciliado mezclan importes positivos y negativos: revisa el abono antes de registrarlo como reembolso de proveedor');
+     if((sum<0n?-sum:sum)!==amount)throw new FinError(409,`Los conceptos del abono conciliado suman ${decimal(sum)} € y el cobro ${decimal(amount)} €: revisa el abono antes de registrarlo como reembolso de proveedor`);
      for(const r of records){
       const after=(await c.query("UPDATE ledens.financial_records SET status='excluded',source_valid=false,version=version+1,updated_at=now() WHERE id=$1 RETURNING *",[r.id])).rows[0];
       await this.finance.audit(c,r,this.user,'refund_replaced','Concepto del abono sustituido por el reembolso de proveedor registrado desde el movimiento',after);
@@ -483,7 +491,7 @@ export class FinanzasService {
    }
    if(clase==='trabajadores')return {id,clase,via:'pendiente-trabajador',...(b?await this.classifyOne(c,id):await this.classifyCash(c,id))};
    if(!b){const kk=await this.cashForUpdate(c,id);return {id,clase,via:'efectivo',...await this.assignCashIn(c,kk,clase,null,'')};}
-   if(clase==='clientes')return {id,clase,via:'cobro-cliente',...await this.customerPaymentOne(c,id,null)};
+   if(clase==='clientes')return {id,clase,via:'cobro-cliente',...await this.customerPaymentOne(c,id,null,{allowReconciled:true})};
    return {id,clase,via:'material',...await this.materialPaymentOne(c,b)};
   });
  }
@@ -642,7 +650,10 @@ export class FinanzasService {
    return {results,ok:results.filter(r=>r.ok).length,failed:results.filter(r=>!r.ok).length};
   });
  }
- async customerPaymentOne(c,id,projectId){
+ // From Concepto de movimientos a reconciled receipt may also become a client
+ // receipt (allowReconciled): profitability then takes its cash from the
+ // reconciled document, never from the receipt (no double count).
+ async customerPaymentOne(c,id,projectId,{allowReconciled=false}={}){
   const m=(await c.query('SELECT id,source_id,total_amount,currency,completed_on,is_internal_transfer,payer,beneficiary_name FROM ledens.bank_movements WHERE id=$1 FOR UPDATE',[id])).rows[0];
   if(!m)throw new FinError(404,'Movimiento no encontrado');
   if(m.is_internal_transfer)throw new FinError(409,'Es un traspaso interno');
@@ -651,7 +662,7 @@ export class FinanzasService {
   if(total===null||total<=0n)throw new FinError(409,'Solo se registran cobros (importe positivo)');
   if((await c.query('SELECT 1 FROM ledens.customer_payments WHERE bank_movement_id=$1 LIMIT 1',[id])).rows.length)throw new FinError(409,'Ya está registrado como pago de cliente');
   if((await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1',[id])).rows.length)throw new FinError(409,'Está en Pendiente de trabajador');
-  if((await c.query("SELECT 1 FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado' LIMIT 1",[id])).rows.length)throw new FinError(409,'Ya está conciliado con un documento');
+  if(!allowReconciled&&(await c.query("SELECT 1 FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado' LIMIT 1",[id])).rows.length)throw new FinError(409,'Ya está conciliado con un documento');
   const p=(await c.query(`INSERT INTO ledens.customer_payments(occurred_on,id_pago,cliente,total,bank_movement_id)
    VALUES($1,$2,$3,$4,$5) RETURNING id`,[m.completed_on,m.source_id,m.payer||m.beneficiary_name||null,decimal(total),id])).rows[0];
   const r=(await c.query('SELECT id,version,gross_amount FROM ledens.financial_records WHERE customer_payment_id=$1',[p.id])).rows[0];

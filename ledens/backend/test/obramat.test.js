@@ -34,6 +34,9 @@ before(async()=>{
  // Another supplier's refund whose credit note has concepts, and one already classified.
  m.otro=await bank(15,'Devolución Leroy');m.otroDoc=await doc(15,'Cobrar','LM-ABONO','Leroy Merlin');await link(m.otro,m.otroDoc,15);await line(m.otroDoc,1,'15','Abono');
  m.cliente=await bank(200,'Transferencia');m.clienteDoc=await doc(200,'Cobrar','F-CLI','Cliente');await link(m.cliente,m.clienteDoc,200);await line(m.clienteDoc,1,'200','Certificación','revenue');
+ // A credit note whose lines are stored negative (the abono's own sign).
+ m.negativo=await bank(10,'Devolución negativa');m.negativoDoc=await doc(10,'Cobrar','008-0010-R281111','Proveedor');await link(m.negativo,m.negativoDoc,10);await line(m.negativoDoc,1,'-10','Devolución');
+ m.mezcla=await bank(5,'Devolución mezclada');m.mezclaDoc=await doc(5,'Cobrar','AB-MIX','Proveedor');await link(m.mezcla,m.mezclaDoc,5);await line(m.mezclaDoc,1,'10','Abono');await line(m.mezclaDoc,2,'-5','Cargo');
  m.descuadre=await bank(30,'Devolución descuadrada');m.descuadreDoc=await doc(30,'Cobrar','AB-30','Proveedor');await link(m.descuadre,m.descuadreDoc,30);await line(m.descuadreDoc,1,'25','Abono parcial');
 });
 after(()=>db?.close());
@@ -59,6 +62,11 @@ test('a refund whose credit note has concepts is registered once, from the movem
  const live=(await db.query("SELECT gross_amount::text g,material_id IS NOT NULL mat FROM ledens.financial_records WHERE (document_id=$1 OR bank_movement_id=$2) AND source_valid AND status<>'excluded'",[m.otroDoc,m.otro])).rows;
  assert.deepEqual(live,[{g:'-15.00',mat:true}],'only the refund counts, lowering the cost');
  assert.equal((await db.query("SELECT count(*)::int n FROM ledens.finance_events e JOIN ledens.financial_records r ON r.id=e.record_id WHERE r.document_id=$1 AND e.action='refund_replaced'",[m.otroDoc])).rows[0].n,1);
+ // Lines stored negative match the refund by their size; mixed signs are refused.
+ assert.equal((await classify(m.negativo,'reembolso_proveedor')).via,'material');
+ assert.equal((await row(m.negativo)).clase,'reembolso_proveedor');
+ assert.equal((await db.query("SELECT r.gross_amount::text g FROM ledens.material_expenses x JOIN ledens.financial_records r ON r.material_id=x.id WHERE x.bank_movement_id=$1",[m.negativo])).rows[0].g,'-10.00');
+ await assert.rejects(classify(m.mezcla,'reembolso_proveedor'),{status:409,message:/mezclan importes positivos y negativos/});
 });
 
 test('«Regla Obramat» classifies every pending, reconciled Obramat movement as materials, as the system',async()=>{
