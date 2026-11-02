@@ -5,7 +5,10 @@ import { Dialog, Empty, ErrorBox, Pager } from './ui.jsx';
 import { AssignCash, CashForm } from './Efectivo.jsx';
 import ProjectPicker from './ProjectPicker.jsx';
 import { Assignment } from './BridgeMovimientos.jsx';
-const MOTIVOS = {sin_documento:'Sin documento',sin_bridge:'Sin registros en el Bridge',revision:'Bridge en revisión',parcial:'Conciliación parcial o con diferencia',efectivo:'Efectivo sin asignar'};
+const MOTIVOS = {sin_documento:'Sin documento',sin_bridge:'Sin registros en el Bridge',revision:'Bridge en revisión',parcial:'Conciliación parcial o con diferencia',efectivo:'Efectivo sin asignar',efectivo_importado:'Efectivo importado del Excel',posible_duplicado:'Posible duplicado: ya hay un pago o cobro sin banco con esa fecha e importe'};
+// What FactMovimientosEfectivo said about an imported cash entry (029).
+const importDetail=(r)=>{const d=r.detalle_importado;if(!d)return '';
+  return [d.categoria,d.proyecto&&('Proyecto '+d.proyecto),d.observaciones].filter(Boolean).join(' · ');};
 const TIPOS = {material:'Material',trabajador:'Trabajador',cliente:'Cliente',concepto:'Concepto de factura',movimiento:'Movimiento bancario',documento:'Documento',efectivo:'Efectivo'};
 // Only outgoing movements (bank or cash) can be sent to «Pago a trabajadores»;
 // incoming bank movements the Bridge did not recognise, to «Pago de clientes»
@@ -53,6 +56,12 @@ export default function Conciliacion({ toast,go,onChanged }) {
   const removeCash=async(r)=>{
     if(!window.confirm(`¿Eliminar el ${Number(r.importe)<0?'pago':'cobro'} en efectivo de ${eur(Math.abs(r.importe))}?`))return;
     try{await api.deleteCash(r.id);drop(r.id);toast?.('Efectivo eliminado.');}catch(e){toast?.(e.message);}
+  };
+  // An imported entry is never deleted: it is discarded with a reason (duplicate, deposit into the bank…).
+  const discardCash=async(r)=>{
+    const reason=window.prompt(`Motivo para descartar el ${Number(r.importe)<0?'pago':'cobro'} importado de ${eur(Math.abs(r.importe))} (no contará en los resultados):`);
+    if(reason===null)return;
+    try{await api.discardCash(r.id,reason);drop(r.id);toast?.('Efectivo importado descartado.');}catch(e){toast?.(e.message);}
   };
   const DEST={trabajadores:'Pendiente de trabajador',materiales:'Pagos de materiales',clientes:'Pagos de clientes'};
   const toggle=(id)=>setSelected(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n;});
@@ -109,13 +118,14 @@ export default function Conciliacion({ toast,go,onChanged }) {
         <thead><tr><th className="fin-col-check"><input type="checkbox" aria-label="Seleccionar los movimientos de esta página" disabled={!selectable.length} checked={allOn} onChange={()=>setSelected(s=>{const n=new Set(s);selectable.forEach(r=>allOn?n.delete(r.id):n.add(r.id));return n;})} /></th><th>Fecha</th><th>Tipo</th><th>Tercero</th><th>Concepto / referencia</th><th>Documento</th><th className="fin-num">Importe</th><th className="fin-num">Conciliado</th><th className="fin-num">Pendiente</th><th className="fin-num">Enlaces Bridge</th><th>Motivo pendiente</th><th><span className="fin-sr">Acciones</span></th></tr></thead>
         <tbody>{data.rows.map(r=><React.Fragment key={r.type+':'+r.id}><tr className={selected.has(r.id)?'is-selected':''}>
           <td className="fin-col-check">{choosable(r)?<input type="checkbox" aria-label="Seleccionar movimiento" checked={selected.has(r.id)} onChange={()=>toggle(r.id)} />:null}</td>
-          <td className="fin-nowrap">{fecha(r.fecha)}</td><td>{TIPOS[r.type]||r.type}</td><td>{r.tercero||'—'}</td>
-          <td className="fin-ellipsis is-wide" title={r.concepto||r.referencia}>{r.concepto||r.referencia||'—'}</td><td>{r.type==='efectivo'?'—':r.numerodocumento||(r.enlaces?'Sin número':'Sin documento')}</td>
+          <td className="fin-nowrap">{fecha(r.fecha)}</td><td>{TIPOS[r.type]||r.type}{r.importado?<div className="fin-muted fin-small">Importado{r.detalle_importado?.id?` · ${r.detalle_importado.id}`:''}</div>:null}</td><td>{r.tercero||'—'}</td>
+          <td className="fin-ellipsis is-wide" title={[r.concepto||r.referencia,importDetail(r)].filter(Boolean).join(' · ')}>{r.concepto||r.referencia||'—'}{importDetail(r)?<div className="fin-muted fin-small">{importDetail(r)}</div>:null}</td><td>{r.type==='efectivo'?'—':r.numerodocumento||(r.enlaces?'Sin número':'Sin documento')}</td>
           <td className="fin-num fin-nowrap">{eur(r.importe)}</td><td className="fin-num fin-nowrap">{eur(r.conciliado)}</td><td className="fin-num fin-nowrap">{eur(r.por_conciliar)}</td><td className="fin-num">{r.enlaces}</td>
           <td>{r.motivos.map(m=><div key={m}>{MOTIVOS[m]||m}</div>)}</td>
           <td>{r.type==='efectivo'?<div className="fin-cash-actions">
             <button type="button" className="fin-btn" onClick={()=>setAssigning(r)}>Asignar</button>
-            <button type="button" className="fin-iconbtn" title="Eliminar efectivo" aria-label="Eliminar efectivo" onClick={()=>removeCash(r)}><i className="ri-delete-bin-line"></i></button>
+            {r.importado?<button type="button" className="fin-iconbtn" title="Descartar efectivo importado" aria-label="Descartar efectivo importado" onClick={()=>discardCash(r)}><i className="ri-close-circle-line"></i></button>
+            :<button type="button" className="fin-iconbtn" title="Eliminar efectivo" aria-label="Eliminar efectivo" onClick={()=>removeCash(r)}><i className="ri-delete-bin-line"></i></button>}
           </div>:r.bank?<button type="button" className="fin-btn" disabled={!canLink(r)} title={canLink(r)?undefined:'El movimiento debe estar completado, en euros y con importe pendiente'} aria-expanded={linking===r.id} onClick={()=>setLinking(linking===r.id?null:r.id)}>Asignar documento</button>:null}</td>
         </tr>{linking===r.id&&r.bank?<tr><td colSpan={12}><Assignment bank={r.bank} onSaved={linked} onCancel={()=>setLinking(null)} onConflict={m=>{setLinking(null);setReload(n=>n+1);onChanged?.();toast?.(m+' Selecciona de nuevo el movimiento y el documento.');}} /></td></tr>:null}</React.Fragment>)}</tbody>
       </table></div><Pager page={page} pageSize={25} total={data.total} onPage={setPage} /></>:null}
