@@ -44,7 +44,7 @@ test('every movement appears once with the class concluded from the Bridge, or p
  assert.deepEqual([(await row(m.obramat.id)).clase,(await row(m.obramat.id)).origen,(await row(m.obramat.id)).documentos],['pendiente','bridge','F-OBRAMAT']);
  assert.deepEqual([(await row(m.material.id)).clase,(await row(m.material.id)).origen],['materiales','bridge']);
  for(const id of [m.pago.id,m.cobro.id,m.nomina.id,m.bare.id,m.cash.id])assert.equal((await row(id)).clase,'pendiente');
- assert.deepEqual(all.resumen,{pendiente:6,materiales:1,trabajadores:0,clientes:0,mixto:0});
+ assert.deepEqual(all.resumen,{pendiente:6,materiales:1,trabajadores:0,clientes:0,reembolso_proveedor:0,mixto:0});
  assert.equal((await list({clase:'pendiente'})).total,6);
  assert.equal((await list({q:'Obramat'})).total,1);
  await assert.rejects(list({clase:'nada'}),{status:400});
@@ -128,4 +128,23 @@ test('a provisional material payment is replaced by its invoice when the Bridge 
  await confirm(b2,d2,-60);
  assert.deepEqual(await live(b2),[{category:'materials',gross:'60',project:null}]);
  assert.equal((await row(b2)).clase,'materiales');
+});
+
+test('a bank receipt with nothing registered can be a supplier refund: a negative material cost, never on a payment, cash or a receipt with records',async()=>{
+ const b=(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES('MOV-abono',45,45,'2026-10-13','Devolución Leroy','EUR','COMPLETED') RETURNING id`)).rows[0].id;
+ const res=await classify(b,'reembolso_proveedor');
+ assert.deepEqual([res.via,res.provisional],['material',false]);
+ assert.deepEqual([(await row(b)).clase,(await row(b)).origen],['reembolso_proveedor','registro']);
+ const r=(await db.query('SELECT r.category,r.gross_amount::text gross,m.total::text total FROM ledens.material_expenses m JOIN ledens.financial_records r ON r.material_id=m.id WHERE m.bank_movement_id=$1',[b])).rows[0];
+ assert.deepEqual(r,{category:'materials',gross:'-45.00',total:'45.00'},'the record lowers the material cost');
+ assert.equal((await db.query('SELECT count(*)::int n FROM ledens.provisional_material_payments WHERE bank_movement_id=$1',[b])).rows[0].n,0);
+ assert.ok((await asAdmin().listRecords({type:'material',pending:true,pageSize:100})).rows.some(x=>x.concepto==='Devolución Leroy'));
+ assert.equal((await list({clase:'reembolso_proveedor'})).total,1);
+ assert.equal((await list()).resumen.reembolso_proveedor,1);
+ await assert.rejects(classify(b,'clientes','Era un cliente'),{status:409,message:/reembolso de proveedor/});
+ await assert.rejects(classify(m.bare.id,'reembolso_proveedor'),{status:409,message:/Un pago/});
+ await assert.rejects(classify(m.cobro.id,'reembolso_proveedor','Era una devolución'),{status:409,message:/registros/});
+ const cash=(await db.query("INSERT INTO ledens.cash_movements(kind,amount,occurred_on,concept) VALUES('cobro',20,'2026-10-13','Devolución en tienda') RETURNING id")).rows[0].id;
+ await assert.rejects(classify(cash,'reembolso_proveedor'),{status:409,message:/efectivo/});
 });

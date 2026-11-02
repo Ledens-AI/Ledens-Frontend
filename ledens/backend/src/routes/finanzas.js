@@ -125,7 +125,7 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
   router.get('/movimientos', handle(async (req, res) => {
     res.json(await svc(req).movements({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), clase: req.query.clase || '', from: req.query.desde, to: req.query.hasta }));
   }));
-  // { clase: 'materiales' | 'trabajadores' | 'clientes', version, reason? }
+  // { clase: 'materiales' | 'trabajadores' | 'clientes' | 'reembolso_proveedor', version, reason? }
   router.put('/movimientos/:id/clasificacion', traced('imputacion', 'Clasificación de movimiento', { entity: (req) => ({ type: 'movimiento', id: req.params.id }), summary: (b) => ({ message: 'Movimiento clasificado como ' + b.clase, detail: { clase: b.clase, via: b.via } }) })(async (req, res) => {
     const b = req.body || {};
     res.json(await svc(req).classifyMovement({ id: req.params.id, clase: b.clase, version: b.version, reason: b.reason }));

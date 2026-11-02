@@ -60,7 +60,11 @@ const TYPE_FILTER={
 // «Concepto de movimientos»: the class a record gives its movement ('x' = not one
 // of the three, so the movement stays pending).
 const CAT_CLASE=c=>`CASE WHEN ${c} IN ('materials','overhead') THEN 'materiales' WHEN ${c}='labor' THEN 'trabajadores' WHEN ${c} IN ('revenue','advance') THEN 'clientes' ELSE 'x' END`;
-export const MOVEMENT_CLASSES=['pendiente','materiales','trabajadores','clientes','mixto'];
+export const MOVEMENT_CLASSES=['pendiente','materiales','trabajadores','clientes','reembolso_proveedor','mixto'];
+// «Reembolso de proveedor»: money a supplier gives back (a return, a credit note).
+// It is a material with the sign of a receipt, so it lowers the material cost of
+// the obra it is assigned to instead of counting as a client receipt.
+const MOVEMENT_CLASES={...CLASES,reembolso_proveedor:'materials'};
 const MOVEMENTS_SQL=`WITH links AS(SELECT bank_movement_id,document_id FROM ledens.bank_document_allocations WHERE state='Confirmado'),
  recs AS(SELECT DISTINCT x.mov,r.id,r.version,r.category FROM (
   SELECT f.bank_movement_id mov,f.id FROM ledens.financial_records f WHERE f.bank_movement_id IS NOT NULL
@@ -85,7 +89,8 @@ const MOVEMENTS_SQL=`WITH links AS(SELECT bank_movement_id,document_id FROM lede
   ARRAY(SELECT DISTINCT e FROM unnest(array_remove(coalesce(a.clases,'{}'::text[]),'x')||CASE WHEN m.lote THEN ARRAY['trabajadores'] ELSE '{}'::text[] END) e ORDER BY e) conocidas,
   ('x'=ANY(coalesce(a.clases,'{}'::text[])) OR m.doc_sin_registros) desconocido
   FROM movs m LEFT JOIN agg a ON a.mov=m.id),
- fin AS(SELECT c.*,CASE WHEN c.desconocido OR cardinality(c.conocidas)=0 THEN 'pendiente' WHEN cardinality(c.conocidas)=1 THEN c.conocidas[1] ELSE 'mixto' END clase,
+ fin AS(SELECT c.*,CASE WHEN c.desconocido OR cardinality(c.conocidas)=0 THEN 'pendiente'
+   WHEN cardinality(c.conocidas)=1 THEN CASE WHEN c.conocidas[1]='materiales' AND c.importe>0 THEN 'reembolso_proveedor' ELSE c.conocidas[1] END ELSE 'mixto' END clase,
   CASE WHEN c.importe<0 THEN 'pago' ELSE 'cobro' END sentido FROM cls c)`;
 const labels={reclassified:'Cambio de clasificación',replace_allocations:'Asignación a proyecto',recognition:'Validación contable',review_flag:'Revisión',source_changed:'Origen actualizado',document_changed:'Factura actualizada'};
 const requestFor=(seed,key)=>{const h=createHash('sha256').update(seed+'|'+key).digest('hex').slice(0,32);return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;};
@@ -335,7 +340,7 @@ export class FinanzasService {
  async classifyMovement({id,clase,version,reason}={}){
   if(this.user.role!=='admin')throw new FinError(403,'Clasificar movimientos requiere administrador');
   if(!uuid(id))throw new FinError(404,'Movimiento no encontrado');
-  if(!CLASES[clase])throw new FinError(400,'Clasificación no válida');
+  if(!MOVEMENT_CLASES[clase])throw new FinError(400,'Clasificación no válida');
   if(typeof version!=='string'||!/^[0-9a-f]{32}$/.test(version))throw new FinError(400,'Versión no válida');
   const why=typeof reason==='string'?reason.trim():'';
   if(why.length>500)throw new FinError(400,'Motivo no válido (máximo 500 caracteres)');
@@ -347,7 +352,8 @@ export class FinanzasService {
    const amount=b?cents(b.total_amount):k.kind==='pago'?-cents(k.amount):cents(k.amount);
    if(amount===null||amount===0n)throw new FinError(409,'El movimiento no tiene un importe válido');
    if(amount<0n&&clase==='clientes')throw new FinError(409,'Un pago no puede clasificarse como cobro de clientes');
-   if(amount>0n&&clase!=='clientes')throw new FinError(409,'Un cobro solo puede clasificarse como cobro de clientes');
+   if(amount<0n&&clase==='reembolso_proveedor')throw new FinError(409,'Un pago no puede ser un reembolso de proveedor');
+   if(amount>0n&&!['clientes','reembolso_proveedor'].includes(clase))throw new FinError(409,'Un cobro solo puede ser cobro de clientes o reembolso de proveedor');
    const ids=(await c.query(`SELECT DISTINCT r.id FROM ledens.financial_records r WHERE r.source_valid AND r.status<>'excluded' AND (
      r.bank_movement_id=$1 OR r.document_id IN(SELECT document_id FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado')
      OR r.material_id=$2 OR r.customer_payment_id=$3)`,[id,k?.material_id||null,k?.customer_payment_id||null])).rows.map(r=>r.id);
@@ -361,6 +367,16 @@ export class FinanzasService {
      WHERE a.bank_movement_id=$1 AND a.state='Confirmado' AND NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded')`,[id])).rows;
     if(bare.length)throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta antes de clasificar el movimiento`);
    }
+   // A supplier refund is registered as a material from the movement itself. A
+   // receipt that already has records (its reconciled document, a client receipt)
+   // keeps them: those records carry the sign of revenue, so turning them into
+   // materials would add cost instead of lowering it.
+   if(clase==='reembolso_proveedor'){
+    if(!b)throw new FinError(409,'Un reembolso de proveedor en efectivo todavía no se puede registrar');
+    if(records.length)throw new FinError(409,'Este cobro ya tiene registros contables (su documento conciliado o un cobro de cliente): solo un cobro sin documento puede registrarse como reembolso de proveedor');
+    return {id,clase,via:'material',...await this.materialPaymentOne(c,b,{provisional:false})};
+   }
+   if(amount>0n&&records.some(r=>r.material_id))throw new FinError(409,'Es un reembolso de proveedor registrado en Materiales; no se puede cambiar desde aquí');
    if(records.length){
     const target=CLASES[clase],same=r=>r.category===target||(target==='materials'&&r.category==='overhead');
     const changing=records.filter(r=>!same(r));
@@ -385,14 +401,18 @@ export class FinanzasService {
  // tied to the movement, signed like the import (a cost is negative there). It is
  // provisional: when the Bridge confirms the movement's invoice, 026 excludes it
  // and the invoice's records inherit its class and obra (no double count).
- async materialPaymentOne(c,b){
+ // A supplier refund (a receipt) uses the same row with a positive total, so its
+ // record lowers the material cost. It is not provisional: 026 would hand its
+ // class to the lines of a receipt document, which carry the sign of revenue.
+ async materialPaymentOne(c,b,{provisional=true}={}){
   if(b.currency&&b.currency!=='EUR')throw new FinError(409,'Solo movimientos en euros');
   if((await c.query('SELECT 1 FROM ledens.material_expenses WHERE bank_movement_id=$1 LIMIT 1',[b.id])).rows.length)throw new FinError(409,'Ya está registrado como material');
   const total=decimal(cents(b.total_amount));
   const m=(await c.query(`INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id)
-   VALUES('ud',$1,1,$2,$2,$3,$4) RETURNING id`,[b.description||b.reference||b.source_id||'Pago de materiales',total,b.completed_on,b.id])).rows[0];
+   VALUES('ud',$1,1,$2,$2,$3,$4) RETURNING id`,[b.description||b.reference||b.source_id||(provisional?'Pago de materiales':'Reembolso de proveedor'),total,b.completed_on,b.id])).rows[0];
   const r=(await c.query('SELECT id FROM ledens.financial_records WHERE material_id=$1',[m.id])).rows[0];
   if(!r)throw new FinError(503,'No se pudo registrar el material en la contabilidad');
+  if(!provisional)return {materialId:m.id,recordId:r.id,provisional:false};
   // Provisional until the Bridge reconciles its invoice (026 replaces it then).
   await c.query('INSERT INTO ledens.provisional_material_payments(material_id,bank_movement_id,created_by) VALUES($1,$2,$3)',[m.id,b.id,this.user.id]);
   return {materialId:m.id,recordId:r.id,provisional:true};
