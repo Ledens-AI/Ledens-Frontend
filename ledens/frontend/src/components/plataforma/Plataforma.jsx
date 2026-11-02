@@ -147,7 +147,7 @@ class PlataformaView extends React.Component {
       <LangOverride lang={v.isClient ? null : 'es'}>
       <div className="plat">
     <div style={{ display: "grid", gridTemplateColumns: "248px minmax(0,1fr)", minHeight: "100vh" }}>
-      <aside style={{ background: "#fff", borderRight: "1px solid #EDEDEA", display: "flex", flexDirection: "column", gap: "24px", padding: "22px 16px", position: "sticky", top: "0", height: "100vh" }}>
+      <aside style={{ background: "#fff", borderRight: "1px solid #EDEDEA", display: "flex", flexDirection: "column", gap: "24px", padding: "22px 16px", position: "sticky", top: "0", height: "100vh", overflowY: "auto" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "0 8px" }}>
           <img src={logo} alt="" style={{ width: "34px", height: "34px" }} />
           <span style={{ fontWeight: "700", fontSize: "27px", letterSpacing: "-0.07em", color: "#5567AE", lineHeight: "1" }}>
@@ -157,7 +157,7 @@ class PlataformaView extends React.Component {
         <div style={{ padding: "0 8px", fontSize: "12px", fontWeight: "700", letterSpacing: "0.04em", color: "#6B6B68", textTransform: "uppercase" }}>
           {v.areaLabel}
         </div>
-        <nav style={{ display: "flex", flexDirection: "column", gap: "2px", marginTop: "-12px" }}>
+        <nav className="plat-nav" style={{ display: "flex", flexDirection: "column", gap: "2px", marginTop: "-12px", flex: "1 1 auto", minHeight: "0", overflowY: "auto", overscrollBehavior: "contain" }}>
           {(v.nav || []).map((n, n_i) => n.header ? (
             <div key={n_i} className="plat-nav-group">{n.header}</div>
           ) : (
@@ -178,7 +178,6 @@ class PlataformaView extends React.Component {
             </React.Fragment>
           ))}
         </nav>
-        <div className="plat-spacer" style={{ flex: "1" }}></div>
         {v.isClient ? (
           <>
             <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "16px", borderRadius: "12px", background: "#F2F4FA" }}>
