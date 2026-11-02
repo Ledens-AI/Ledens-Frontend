@@ -120,3 +120,14 @@ test('a movement with another account of the company can be a transfer between a
  assert.equal((await classify(t,'clientes','Era un cobro de cliente')).clase,'clientes');
  assert.equal((await db.query('SELECT count(*)::int n FROM ledens.internal_transfers WHERE bank_movement_id=$1',[t])).rows[0].n,0);
 });
+
+test('a bank «TRASPASO» with no beneficiary nor payer can be a transfer between accounts; with another party it cannot',async()=>{
+ const mov=async(amount,who,description)=>(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,beneficiary_name,currency,state)
+  VALUES($1,$2,$2,'2026-09-19',$3,$4,'EUR','COMPLETED') RETURNING id`,['MOV-'+description+(who||''),amount,description,who])).rows[0].id;
+ const t=await mov(2000,null,'TRASPASO');
+ const ajeno=await mov(-300,'Fontanería López','TRASPASO a proveedor');
+ assert.deepEqual([(await row(t)).propia,(await row(ajeno)).propia],[true,false]);
+ assert.equal((await classify(t,'transferencia')).via,'transferencia');
+ assert.equal((await row(t)).clase,'transferencia');
+ await assert.rejects(classify(ajeno,'transferencia'),{status:409,message:/TRASPASO/});
+});
