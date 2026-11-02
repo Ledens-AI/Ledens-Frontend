@@ -47,7 +47,8 @@ export function CashForm({ onClose, onSaved }) {
 export function AssignCash({ row, onClose, onDone }) {
   const pago = Number(row.importe) < 0;
   const [target, setTarget] = useState(pago ? 'trabajadores' : 'clientes');
-  const [project, setProject] = useState(null), [description, setDescription] = useState(row.concepto || '');
+  // Imported cash (030): the obra its «proyecto» matches is proposed.
+  const [project, setProject] = useState(row.obra_sugerida || null), [description, setDescription] = useState(row.concepto || '');
   // A cobro saved before the client was required: name it now (or take the obra's).
   const [client, setClient] = useState('');
   const needsClient = target === 'clientes' && !row.tercero;
@@ -75,6 +76,8 @@ export function AssignCash({ row, onClose, onDone }) {
         <button type="button" className="fin-btn is-primary" disabled={saving || (needsClient && !client.trim() && !project?.cliente)} onClick={save}>{saving ? 'Asignando…' : 'Asignar'}</button>
       </>}>
       <p><strong>{eur(row.importe)}</strong> · {fecha(row.fecha)} · {row.concepto}{row.tercero ? ` · ${row.tercero}` : ''}</p>
+      {row.importado ? <p className="fin-muted fin-small">Importado del Excel{row.detalle_importado?.id ? ` (${row.detalle_importado.id})` : ''}{[row.detalle_importado?.tipo, row.detalle_importado?.categoria, row.detalle_importado?.proyecto && `proyecto ${row.detalle_importado.proyecto}`, row.detalle_importado?.observaciones].filter(Boolean).map((x) => ` · ${x}`).join('')}</p> : null}
+      {row.motivos?.includes('posible_duplicado') ? <p className="fin-warn" role="note"><i className="ri-alert-line"></i> Ya hay un pago o cobro sin movimiento bancario con esta fecha e importe. Si es el mismo, descártalo en vez de asignarlo para no contarlo dos veces.</p> : null}
       <fieldset className="fin-choices">
         <legend>Destino</legend>
         {options.map(([k, l, help]) => (

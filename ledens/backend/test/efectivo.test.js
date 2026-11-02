@@ -11,7 +11,7 @@ before(async()=>{
  const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
  await db.exec('ALTER TABLE users ADD COLUMN name text');
- for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','026_materiales_provisionales.sql','029_provisional_todas_las_facturas.sql','027_transferencias_internas.sql','028_treasury_movements.sql'])
+ for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','026_materiales_provisionales.sql','029_provisional_todas_las_facturas.sql','027_transferencias_internas.sql','028_treasury_movements.sql','030_efectivo_importado.sql'])
   await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
  [admin,jefe]=(await db.query("INSERT INTO users(email,role,name) VALUES('admin@ef.test','admin','Admin'),('jefe@ef.test','jefe','Jefe') RETURNING id,role")).rows;
  p1=(await db.query("INSERT INTO ledens.projects(name,project_id) VALUES('Marbella','OBRA-001') RETURNING id")).rows[0].id;
@@ -89,6 +89,10 @@ test('a cash payment to workers goes through Pendiente de trabajador and can go 
  const recs=(await db.query(`SELECT r.id,r.version,r.bank_movement_id FROM ledens.financial_records r JOIN ledens.worker_payment_splits s ON s.worker_payment_id=r.worker_payment_id
   WHERE s.batch_id=$1`,[b2.id])).rows;
  assert.ok(recs.every(r=>r.bank_movement_id===null));
+ // The read-only diagnosis of the cash movement shows them, found through its batch.
+ const dg=await asAdmin().movementDiagnosis(back.id);
+ assert.deepEqual(dg.registros.filter(r=>r.tipo==='trabajador').map(r=>r.id).sort(),recs.map(r=>r.id).sort());
+ assert.ok(dg.registros.filter(r=>r.tipo==='trabajador').every(r=>r.obras?.[0]?.project_id===p1));
  const before=await asAdmin().finance.summary(admin,p1);
  for(const r of recs)await approve(asAdmin().finance,r,'labor','60');
  const s=await asAdmin().finance.summary(admin,p1);
