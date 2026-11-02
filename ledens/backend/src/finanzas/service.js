@@ -704,7 +704,7 @@ export class FinanzasService {
  // class to the lines of a receipt document, which carry the sign of revenue.
  async materialPaymentOne(c,b,{provisional=true}={}){
   if(b.currency&&b.currency!=='EUR')throw new FinError(409,'Solo movimientos en euros');
-  const prev=(await c.query(`SELECT me.id material_id,r.id record_id,r.status,r.source_valid,pm.material_id provisional,pm.replaced_at,
+  const prev=(await c.query(`SELECT me.id material_id,r.id record_id,r.status,r.source_valid,pm.material_id provisional,pm.replaced_at,pm.carried_project_id,
     (SELECT e.action FROM ledens.finance_events e WHERE e.record_id=r.id ORDER BY e.id DESC LIMIT 1) last_action
    FROM ledens.material_expenses me LEFT JOIN ledens.financial_records r ON r.material_id=me.id
    LEFT JOIN ledens.provisional_material_payments pm ON pm.material_id=me.id WHERE me.bank_movement_id=$1 ORDER BY me.id`,[b.id])).rows;
@@ -717,6 +717,13 @@ export class FinanzasService {
    if(provisional&&p?.provisional&&p.replaced_at&&p.record_id&&p.status==='excluded'&&p.last_action==='provisional_replaced'){
     const before=(await c.query('SELECT * FROM ledens.financial_records WHERE id=$1 FOR UPDATE',[p.record_id])).rows[0];
     const after=(await c.query("UPDATE ledens.financial_records SET status='pending',source_valid=true,category='materials',version=version+1,updated_at=now() WHERE id=$1 RETURNING *",[p.record_id])).rows[0];
+    // 026 took its obra away (carried_project_id) when it replaced it: give it back.
+    if(p.carried_project_id&&!(await c.query('SELECT 1 FROM ledens.project_financial_allocations WHERE record_id=$1',[p.record_id])).rows.length){
+     await c.query('INSERT INTO ledens.project_financial_allocations(record_id,project_id,allocated_amount) VALUES($1,$2,$3)',[p.record_id,p.carried_project_id,after.gross_amount]);
+     const name=(await c.query('SELECT name FROM ledens.projects WHERE id=$1',[p.carried_project_id])).rows[0]?.name||null;
+     await c.query(`INSERT INTO ledens.finance_events(record_id,actor_id,action,reason,before_value,after_value) VALUES($1,$2,'replace_allocations','Obra recuperada al restaurar el pago de materiales provisional',$3,$4)`,
+      [p.record_id,this.user.id,JSON.stringify({allocations:[]}),JSON.stringify({allocations:[{project_id:p.carried_project_id,project_name:name,allocated_amount:String(after.gross_amount)}]})]);
+    }
     await c.query('UPDATE ledens.provisional_material_payments SET replaced_at=NULL,replaced_by_document_id=NULL,carried_project_id=NULL WHERE material_id=$1',[p.material_id]);
     await this.finance.audit(c,before,this.user,'provisional_restored','Pago de materiales provisional restaurado: la factura que lo sustituyó ya no tiene conceptos',after);
     return {materialId:p.material_id,recordId:p.record_id,provisional:true,restored:true};

@@ -170,6 +170,10 @@ test('a provisional payment replaced by an invoice that later lost its concepts 
  const b=(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
   VALUES('MOV-omb',-7.44,-7.44,'2026-09-24','Omb Malaga','EUR','COMPLETED') RETURNING id`)).rows[0].id;
  const {materialId,recordId}=await classify(b,'materiales');
+ // Assigned whole to an obra before its invoice arrives.
+ const obra=(await q("INSERT INTO ledens.projects(name,project_id) VALUES('Obra Omb','P-OMB') RETURNING id")).rows[0].id;
+ const rec=(await asAdmin().listRecords({type:'material',pending:true,q:'Omb Malaga'})).rows[0];
+ await asAdmin().assign({type:'material',id:materialId,projectId:obra,version:rec.version,requestId:crypto.randomUUID()});
  const d=(await q(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento,tercero) VALUES(-7.44,'Pagar','2026-09-24','008-0010-411173','OBRAMAT') RETURNING id`)).rows[0].id;
  const l=(await q("INSERT INTO ledens.invoice_lines(document_id,line_number,description) VALUES($1,1,'Tornillos') RETURNING id",[d])).rows[0].id;
  const line=(await q(`INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,gross_amount,currency) VALUES($1,$2,'2026-09-24','Tornillos',7.44,'EUR') RETURNING id`,[l,d])).rows[0].id;
@@ -183,6 +187,7 @@ test('a provisional payment replaced by an invoice that later lost its concepts 
  assert.deepEqual([(await row(b)).clase,(await row(b)).origen],['materiales','provisional']);
  assert.deepEqual((await q('SELECT status,source_valid FROM ledens.financial_records WHERE id=$1',[recordId])).rows[0],{status:'pending',source_valid:true});
  assert.equal((await q("SELECT count(*)::int n FROM ledens.finance_events WHERE record_id=$1 AND action='provisional_restored'",[recordId])).rows[0].n,1);
+ assert.deepEqual((await q('SELECT project_id,allocated_amount::text amount FROM ledens.project_financial_allocations WHERE record_id=$1',[recordId])).rows,[{project_id:obra,amount:'7.44'}],'it keeps the obra it had before 026 replaced it');
  // A material excluded for any other reason is never brought back.
  const b2=(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
   VALUES('MOV-otro',-9,-9,'2026-09-25','Pago almacén','EUR','COMPLETED') RETURNING id`)).rows[0].id;
