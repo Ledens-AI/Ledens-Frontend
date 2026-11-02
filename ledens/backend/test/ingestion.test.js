@@ -142,6 +142,20 @@ test('a ticket with no customer is a purchase from the one valid Spanish tax id 
     ticket('Nif: 44582380P',{CustomerName:{valueString:'Otro',confidence:.9}})])assert.equal(extractInvoice(t).direction,null);
 });
 
+test('a photo with no tax id fields is ours to pay when the OCR text prints our tax id after «RECEPTOR»',async()=>{
+  const {archiveIssue}=await import('../src/ingestion/completeness.js');
+  const photo=(content,conf=.95)=>{const at=content.indexOf('B19753805');return {analyzeResult:{content,documents:[{fields:{InvoiceDate:{valueDate:'2026-10-20',confidence:.94},
+    VendorName:{valueString:'MARKOIL, S.A.U.',confidence:.93},CustomerName:{valueString:'SOCIEDAD INVERSORA NAVARRO-ROBINSON, S.',confidence:.89},
+    InvoiceTotal:{valueCurrency:{amount:72.27,currencyCode:'EUR'},confidence:.93}}}],
+    pages:[{words:at<0?[]:[{content:'B19753805',confidence:conf,span:{offset:at,length:9}}]}]}};};
+  const r=extractInvoice(photo('EMISOR\nMARKOIL, S.A.U.\nA79209854\nRECEPTOR\nSOCIEDAD INVERSORA NAVARRO-ROBINSON, S.\nMALAGA\nB19753805\nTOTAL FACTURA: 72.27'));
+  assert.deepEqual([r.direction,r.total,r.taxId,r.directionConfidence,r.corroborated.direction],['Pagar',-72.27,'A79209854',.95,'customer_label_in_ocr_text']);
+  assert.equal(archiveIssue({document_on:r.date,total:r.total,tipo:r.direction,invoice_currency:r.currency,date_confidence:r.confidence,total_confidence:r.totalConfidence,direction_confidence:r.directionConfidence}),null);
+  // Our tax id as the issuer, before any buyer label: not a purchase. A poorly read id keeps it in review.
+  assert.equal(extractInvoice(photo('EMISOR\nB19753805\nRECEPTOR\nOTRA S.L.\nA79209854')).direction,null);
+  assert.ok(extractInvoice(photo('RECEPTOR\nB19753805\nA79209854',.4)).directionConfidence<.5);
+});
+
 test('supplier corroboration uses only high-confidence words inside the vendor field and a verified vendor NIF',()=>{
  const result={analyzeResult:{documents:[{fields:{VendorName:{valueString:'OBRAMAT',confidence:.481,spans:[{offset:0,length:7}]},VendorTaxId:{valueString:'B84406289',confidence:.82},CustomerName:{valueString:'Company'}}}],pages:[{words:[{content:'OBRAMAT',confidence:.989,span:{offset:0,length:7}},{content:'OBRAMAT',confidence:.999,span:{offset:100,length:7}}]}]}};
  const e=partyNameEvidence(result,'Vendor');assert.equal(e.name_field_confidence,.481);assert.equal(e.word_confidence,.989);assert.equal(e.tax_id_confidence,.82);
