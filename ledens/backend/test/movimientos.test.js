@@ -140,6 +140,21 @@ test('a bank receipt with nothing registered can be a supplier refund: a negativ
  assert.deepEqual(r,{category:'materials',gross:'-45.00',total:'45.00'},'the record lowers the material cost');
  assert.equal((await db.query('SELECT count(*)::int n FROM ledens.provisional_material_payments WHERE bank_movement_id=$1',[b])).rows[0].n,0);
  assert.ok((await asAdmin().listRecords({type:'material',pending:true,pageSize:100})).rows.some(x=>x.concepto==='Devolución Leroy'));
+ // Assigned to an obra and approved on the bank receipt alone, it lowers that obra's material cost.
+ const project=(await db.query("INSERT INTO ledens.projects(name,project_id) VALUES('Obra Reembolso','P-REEMB') RETURNING id")).rows[0].id;
+ const rec=(await asAdmin().listRecords({type:'material',pending:true,q:'Devolución Leroy'})).rows[0];
+ await asAdmin().assign({type:'material',id:res.materialId,projectId:project,version:rec.version,requestId:crypto.randomUUID()});
+ const fin=asAdmin().finance,record=async(id)=>(await db.query('SELECT id,version FROM ledens.financial_records WHERE id=$1',[id])).rows[0];
+ const approve=async(id,net)=>fin.approve(admin,id,{version:(await record(id)).version,category:'materials',status:'approved',currency:'EUR',net_amount:net,vat_amount:'0',nondeductible_vat:'0',withholding_amount:'0',recognized_on:'2026-10-13',reason:'Devolución comprobada en el banco'});
+ assert.equal((await approve(res.recordId,'-45')).status,'approved');
+ assert.equal(Number((await fin.summary(admin,project)).material_cost),-45);
+ // The exception is only for refunds: a material payment without its invoice still needs the document.
+ const pagoRec=(await db.query('SELECT r.id FROM ledens.material_expenses m JOIN ledens.financial_records r ON r.material_id=m.id WHERE m.bank_movement_id=$1',[m.pago.id])).rows[0].id;
+ await assert.rejects(approve(pagoRec,'90'),{message:'recognition_requires_document'});
+ // Never above the bank receipt: a second refund on the same movement cannot be approved.
+ const extra=(await db.query("INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id) VALUES('ud','Otra devolución',1,10,10,'2026-10-13',$1) RETURNING id",[b])).rows[0].id;
+ const extraRec=(await db.query('SELECT id FROM ledens.financial_records WHERE material_id=$1',[extra])).rows[0].id;
+ await assert.rejects(approve(extraRec,'-10'),{message:'bank_amount_exceeded'});
  assert.equal((await list({clase:'reembolso_proveedor'})).total,1);
  assert.equal((await list()).resumen.reembolso_proveedor,1);
  await assert.rejects(classify(b,'clientes','Era un cliente'),{status:409,message:/reembolso de proveedor/});
