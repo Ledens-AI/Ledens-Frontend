@@ -55,6 +55,23 @@ test('without a project it waits in Pendientes de asignación; only incoming eur
  await assert.rejects(asAdmin().classifyCustomerPayments({movementIds:[await movement('10.00')],projectId:'00000000-0000-4000-8000-000000000000'}),{status:400});
 });
 
+test('Pagos de clientes always shows a client',async()=>{
+ await db.exec('ALTER TABLE ledens.projects ADD COLUMN IF NOT EXISTS customer_name_source text');
+ const proj=(await db.query("INSERT INTO ledens.projects(name,project_id,customer_name_source) VALUES('Nerja','OBRA-002','Cliente de la Obra') RETURNING id")).rows[0].id;
+ // A receipt with no ordering party takes the obra's client when it is recorded.
+ const m=await movement('210.00',{payer:''});
+ await asAdmin().classifyCustomerPayments({movementIds:[m],projectId:proj});
+ assert.equal((await db.query('SELECT cliente FROM ledens.customer_payments WHERE bank_movement_id=$1',[m])).rows[0].cliente,'Cliente de la Obra');
+ // Rows recorded before without a client are read from the movement, the obra, or flagged.
+ const legacy=async(bank,project)=>{const c=(await db.query('INSERT INTO ledens.customer_payments(occurred_on,id_pago,total,bank_movement_id) VALUES($1,$2,$3,$4) RETURNING id',['2026-10-20','X'+Math.random(),'99.00',bank])).rows[0].id;
+  const r=(await db.query('UPDATE ledens.financial_records SET counterparty=NULL WHERE customer_payment_id=$1 RETURNING id,version,gross_amount',[c])).rows[0];
+  if(project)await asAdmin().finance.replace(pool,admin,{record_id:r.id,version:r.version,allocations:[{project_id:project,amount:r.gross_amount}]},'test');return c;};
+ const fromBank=await legacy(await movement('99.00',{payer:'Ordenante Banco'})),fromProject=await legacy(null,proj),none=await legacy(null);
+ const rows=(await asAdmin().listRecords({type:'cliente',pageSize:100})).rows,by=id=>rows.find(r=>r.id===id)?.tercero;
+ assert.deepEqual([by(fromBank),by(fromProject),by(none)],['Ordenante Banco','Cliente de la Obra','Cliente sin identificar']);
+ assert.ok(rows.every(r=>r.tercero),'never empty');
+});
+
 test('HTTP: admins only and the allowed origin',async()=>{
  const app=express();app.use(express.json());
  app.use('/api/finanzas',createFinanzasRouter({service:asAdmin(),origin:'https://ledens.test',authenticate:(req,_res,next)=>{req.user=req.get('x-role')==='client'?{id:jefe.id,role:'client'}:{...admin};next();}}));
