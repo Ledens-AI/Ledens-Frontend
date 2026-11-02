@@ -162,7 +162,18 @@ export class FinanceService {
      // Payroll has no supplier invoice: a worker payment is recognized on its bank
      // movement alone, capped by that movement like an advance.
      const payroll=body.category==='labor'&&r.worker_payment_id&&r.bank_movement_id&&!r.document_id;
-     if(body.category!=='advance'&&!payroll&&r.bank_movement_id&&!r.document_id)fail(409,'recognition_requires_document');
+     // A supplier refund («Reembolso de proveedor» in Concepto de movimientos) has no
+     // document either: a material with a negative amount registered from a bank
+     // receipt, recognized on that movement alone and capped by it like payroll.
+     const refund=body.category==='materials'&&r.material_id&&r.bank_movement_id&&!r.document_id&&cents(r.gross_amount)<0n;
+     if(body.category!=='advance'&&!payroll&&!refund&&r.bank_movement_id&&!r.document_id)fail(409,'recognition_requires_document');
+     if(refund){
+       const envelope=(await c.query(`SELECT b.total_amount capacity,coalesce(sum(abs(r.gross_amount)),0) used FROM ledens.bank_movements b
+         LEFT JOIN ledens.financial_records r ON r.bank_movement_id=b.id AND r.id<>$2 AND r.status='approved' AND r.category='materials' AND r.document_id IS NULL AND r.gross_amount<0
+         WHERE b.id=$1 AND b.total_amount>0 GROUP BY b.id`,[r.bank_movement_id,r.id])).rows[0];
+       if(!envelope)fail(409,'refund_requires_bank_receipt');
+       if(absolute(cents(r.gross_amount))+cents(envelope.used)>cents(envelope.capacity))fail(409,'bank_amount_exceeded');
+     }
      if(payroll){
        const envelope=(await c.query(`SELECT abs(b.total_amount) capacity,coalesce(sum(abs(r.gross_amount)),0) used FROM ledens.bank_movements b
          LEFT JOIN ledens.financial_records r ON r.bank_movement_id=b.id AND r.id<>$2 AND r.status='approved' AND r.category='labor' AND r.document_id IS NULL
