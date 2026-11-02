@@ -143,3 +143,26 @@ test('segregated payroll is approved without a document, enters profitability an
  const extra=(await db.query('SELECT id,version FROM ledens.financial_records WHERE worker_payment_id=$1',[w])).rows[0];
  await assert.rejects(approve(extra),{message:'bank_amount_exceeded'});
 });
+
+test('Pagos a trabajadores chart: paid per worker and week / month / year, with the table filters',async()=>{
+ const pay=(amount,date,emp,name)=>db.query('INSERT INTO ledens.worker_payments(amount,occurred_on,employee_id,empleado) VALUES($1,$2,$3,$4)',[amount,date,emp,name]);
+ await pay(-100,'2025-03-03',emp1,'Trabajador Uno');await pay(-50,'2025-03-05',emp1,'Trabajador Uno');
+ await pay(-60,'2025-03-04',emp2,'Trabajador Dos');await pay(-200,'2025-03-12',emp1,'Trabajador Uno');
+ const range={from:'2025-03-01',to:'2025-03-31'};
+ const week=await asAdmin().workerPaymentSeries({...range,periodo:'semana'});
+ const cell=(s,p,w)=>s.series.find(x=>x.periodo===p&&x.trabajador===w);
+ assert.equal(Number(cell(week,'2025-03-03','Trabajador Uno').importe),150);assert.equal(cell(week,'2025-03-03','Trabajador Uno').pagos,2);
+ assert.equal(Number(cell(week,'2025-03-03','Trabajador Dos').importe),60);
+ assert.equal(Number(cell(week,'2025-03-10','Trabajador Uno').importe),200);
+ assert.equal(week.series.length,3);
+ const month=await asAdmin().workerPaymentSeries({...range,periodo:'mes'});
+ assert.equal(Number(cell(month,'2025-03-01','Trabajador Uno').importe),350);
+ const year=await asAdmin().workerPaymentSeries({...range,periodo:'anio',tercero:'Trabajador Dos'});
+ assert.deepEqual(year.series.map(x=>[x.periodo,x.trabajador,Number(x.importe)]),[['2025-01-01','Trabajador Dos',60]]);
+ assert.ok(year.trabajadores.some(t=>t.nombre==='Trabajador Uno'),'the worker list ignores the filters');
+ const rol=await asAdmin().workerPaymentSeries({...range,rol:'Oficial 1ª'});
+ assert.ok(rol.series.every(x=>x.trabajador==='Trabajador Uno'));
+ const list=await asAdmin().listRecords({type:'trabajador',...range,tercero:'Trabajador Uno'});
+ assert.equal(list.total,3);
+ await assert.rejects(asAdmin().workerPaymentSeries({periodo:'dia'}),{status:400});
+});

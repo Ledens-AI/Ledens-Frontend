@@ -55,13 +55,18 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
     res.json({ ...summary, actividad: activity });
   }));
 
+  const recordFilters = (q) => ({
+    type: q.tipo || undefined, pending: q.pendientes === '1', estado: q.estado || undefined, project: q.proyecto || undefined,
+    q: String(q.q || '').slice(0, 100), from: q.desde || undefined, to: q.hasta || undefined, min: q.min, max: q.max,
+    tercero: typeof q.trabajador === 'string' ? q.trabajador : undefined, rol: typeof q.rol === 'string' ? q.rol : undefined,
+  });
   router.get('/registros', handle(async (req, res) => {
     const q = req.query;
-    res.json(await svc(req).listRecords({
-      type: q.tipo || undefined, pending: q.pendientes === '1', estado: q.estado || undefined, project: q.proyecto || undefined,
-      q: String(q.q || '').slice(0, 100), from: q.desde || undefined, to: q.hasta || undefined, min: q.min, max: q.max,
-      sort: q.orden, dir: q.dir, page: q.pagina, pageSize: q.tam,
-    }));
+    res.json(await svc(req).listRecords({ ...recordFilters(q), sort: q.orden, dir: q.dir, page: q.pagina, pageSize: q.tam }));
+  }));
+  // «Pagos a trabajadores»: paid per worker and week / month / year (chart).
+  router.get('/pagos-trabajadores/serie', handle(async (req, res) => {
+    res.json(await svc(req).workerPaymentSeries({ ...recordFilters(req.query), periodo: req.query.periodo || undefined }));
   }));
 
   router.get('/registros/:type/:id', handle(async (req, res) => {

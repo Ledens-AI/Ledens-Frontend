@@ -5,9 +5,11 @@ import ProjectPicker from './ProjectPicker.jsx';
 import RecordDrawer from './RecordDrawer.jsx';
 import { Kpi, Badge, Dialog, Empty, ErrorBox, Pager } from './ui.jsx';
 import SegregarConceptos from './SegregarConceptos.jsx';
+import PagosTrabajadoresChart from './PagosTrabajadoresChart.jsx';
 
 const key = (r) => r.type + ':' + r.id;
-const EMPTY_FILTERS = { q: '', tipo: '', estado: '', proyecto: null, desde: '', hasta: '', min: '', max: '' };
+const EMPTY_FILTERS = { q: '', tipo: '', estado: '', proyecto: null, desde: '', hasta: '', min: '', max: '', trabajador: null, rol: '' };
+const PERIODOS = [['semana', 'Semana'], ['mes', 'Mes'], ['anio', 'Año']];
 
 /* One screen for "Materiales pendiente de asignación" (mode="pendientes": only
  * what the Materiales tab lists, without a project — never worker payments or
@@ -34,6 +36,11 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
   const [reload, setReload] = useState(0);
   // Projects chosen in the table but not saved yet: key → { row, project, saving, error }.
   const [staged, setStaged] = useState(() => new Map());
+  // «Pagos a trabajadores» chart: grouping and bar layout, and its data.
+  const [periodo, setPeriodo] = useState('semana');
+  const [layout, setLayout] = useState('apiladas');
+  const [chart, setChart] = useState(null);
+  const [chartError, setChartError] = useState('');
 
   useEffect(() => { setFilters({ ...EMPTY_FILTERS, proyecto: initialProject || null }); setDraftQ(''); setPage(1); setSelected(new Map()); setStaged(new Map()); }, [mode, initialProject]);
   useEffect(() => { const t = setTimeout(() => { setFilters((f) => (f.q === draftQ ? f : { ...f, q: draftQ })); setPage(1); }, 300); return () => clearTimeout(t); }, [draftQ]);
@@ -44,13 +51,27 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
     api.records({
       pendientes: pending ? 1 : undefined, tipo: pending ? 'material' : mode, estado: filters.estado,
       proyecto: filters.proyecto?.id, q: filters.q, desde: filters.desde, hasta: filters.hasta,
-      min: filters.min, max: filters.max, orden: sort.by, dir: sort.dir, pagina: page, tam: 25,
+      min: filters.min, max: filters.max, trabajador: filters.trabajador ?? undefined, rol: filters.rol, orden: sort.by, dir: sort.dir, pagina: page, tam: 25,
     }).then(
       (d) => { if (!cancelled) { setData(d); setError(''); setLoading(false); } },
       (e) => { if (!cancelled) { setError(e.message); setLoading(false); } },
     );
     return () => { cancelled = true; };
   }, [mode, pending, filters, sort, page, reload]);
+
+  useEffect(() => {
+    if (!readOnly) return undefined;
+    let cancelled = false;
+    api.workerSeries({
+      estado: filters.estado, proyecto: filters.proyecto?.id, q: filters.q, desde: filters.desde, hasta: filters.hasta,
+      min: filters.min, max: filters.max, trabajador: filters.trabajador ?? undefined, rol: filters.rol, periodo,
+    }).then(
+      (d) => { if (!cancelled) { setChart(d); setChartError(''); } },
+      (e) => { if (!cancelled) setChartError(e.message); },
+    );
+    return () => { cancelled = true; };
+  }, [readOnly, filters, periodo, reload]);
+  const roles = [...new Set((chart?.trabajadores || []).flatMap((t) => t.roles || []))].sort((a, b) => a.localeCompare(b, 'es'));
 
   const refresh = useCallback(() => { setReload((n) => n + 1); onChanged?.(); }, [onChanged]);
   const setF = (patch) => { setFilters((f) => ({ ...f, ...patch })); setPage(1); };
@@ -189,7 +210,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
     </th>
   );
 
-  const hasFilters = filters.q || filters.tipo || filters.estado || filters.proyecto || filters.desde || filters.hasta || filters.min || filters.max;
+  const hasFilters = filters.q || filters.tipo || filters.estado || filters.proyecto || filters.desde || filters.hasta || filters.min || filters.max || filters.trabajador || filters.rol;
   const terceroLabel = TIPO[pending ? 'material' : mode].tercero;
 
   return (
@@ -221,12 +242,52 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
             </div>
           </>
         )}
+        {readOnly ? (
+          <>
+            <label className="fin-field">
+              <span>Trabajador</span>
+              <select value={filters.trabajador || ''} onChange={(e) => setF({ trabajador: e.target.value || null })}>
+                <option value="">Todos</option>
+                {(chart?.trabajadores || []).filter((t) => t.nombre).map((t) => <option key={t.nombre} value={t.nombre}>{t.nombre}</option>)}
+              </select>
+            </label>
+            <label className="fin-field">
+              <span>Rol</span>
+              <select value={filters.rol} onChange={(e) => setF({ rol: e.target.value })}>
+                <option value="">Todos</option>
+                {roles.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </label>
+            <label className="fin-field">
+              <span>Agrupar por</span>
+              <select value={periodo} onChange={(e) => setPeriodo(e.target.value)}>
+                {PERIODOS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </label>
+          </>
+        ) : null}
         <label className="fin-field"><span>Desde</span><input type="date" value={filters.desde} onChange={(e) => setF({ desde: e.target.value })} /></label>
         <label className="fin-field"><span>Hasta</span><input type="date" value={filters.hasta} onChange={(e) => setF({ hasta: e.target.value })} /></label>
         <label className="fin-field fin-w-num"><span>Importe mín.</span><input type="number" step="0.01" inputMode="decimal" value={filters.min} onChange={(e) => setF({ min: e.target.value })} /></label>
         <label className="fin-field fin-w-num"><span>Importe máx.</span><input type="number" step="0.01" inputMode="decimal" value={filters.max} onChange={(e) => setF({ max: e.target.value })} /></label>
         {hasFilters ? <button type="button" className="fin-btn is-ghost fin-self-end" onClick={() => { setDraftQ(''); setF({ ...EMPTY_FILTERS }); }}>Limpiar filtros</button> : null}
       </div>
+
+      {readOnly ? (
+        <div className="fin-card">
+          <div className="fin-card-head">
+            <h2>{`Pagado a cada trabajador por ${PERIODOS.find((x) => x[0] === periodo)[1].toLowerCase()}`}</h2>
+            <div className="fin-segmented" role="group" aria-label="Tipo de barras">
+              {[['apiladas', 'Apiladas'], ['agrupadas', 'Agrupadas']].map(([v, l]) => (
+                <button key={v} type="button" className={layout === v ? 'is-on' : ''} aria-pressed={layout === v} onClick={() => setLayout(v)}>{l}</button>
+              ))}
+            </div>
+          </div>
+          {chartError ? <ErrorBox message={chartError} onRetry={() => setReload((n) => n + 1)} /> : null}
+          {!chart && !chartError ? <div className="fin-loading">Calculando…</div> : null}
+          {chart && !chartError ? <PagosTrabajadoresChart data={chart} layout={layout} /> : null}
+        </div>
+      ) : null}
 
       {!readOnly && stagedList.length ? (
         <div className="fin-bulkbar is-staged" role="region" aria-label="Asignaciones sin guardar">

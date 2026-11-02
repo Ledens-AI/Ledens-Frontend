@@ -53,6 +53,7 @@ const direction=r=>r.doc_tipo==='Cobrar'||r.customer_payment_id?'cobro':r.doc_ti
  r.bank_total!==null&&r.bank_total!==undefined?(Number(r.bank_total)<0?'pago':'cobro'):null;
 // Materiales / Pagos a trabajadores follow the category, so a reclassified
 // record moves tab; an imported source keeps its tab until reclassified.
+const PERIODS={semana:'week',mes:'month',anio:'year'};
 const TYPE_FILTER={
  material:t=>`((l.type=${t} AND l.category<>'labor') OR (l.type<>${t} AND l.type<>'cliente' AND l.category='materials'))`,
  trabajador:t=>`((l.type=${t} AND l.category NOT IN ('materials','overhead')) OR (l.type<>${t} AND l.type<>'cliente' AND l.category='labor'))`,
@@ -150,9 +151,26 @@ export class FinanzasService {
   if(f.estado){if(!STATES.includes(f.estado))throw new FinError(400,'Estado no válido');where.push('l.estado='+bind(f.estado));}
   if(f.project){if(!uuid(f.project))throw new FinError(400,'Proyecto no válido');where.push(`EXISTS(SELECT 1 FROM ledens.project_financial_allocations pa WHERE pa.record_id=l.record_id AND pa.project_id=${bind(f.project)})`);}
   if(f.q)where.push(`concat_ws(' ',l.tercero,l.concepto,l.numerodocumento) ILIKE ${bind('%'+f.q+'%')}`);
+  // «Pagos a trabajadores»: one worker (as listed, '' = none) and one role.
+  if(f.tercero!==undefined&&f.tercero!==null){where.push(`coalesce(l.tercero,'')=${bind(String(f.tercero).slice(0,200))}`);}
+  if(f.rol)where.push(`l.rol=${bind(String(f.rol).slice(0,100))}`);
   for(const [key,op] of [['from','>='],['to','<=']])if(f[key]){if(!/^\d{4}-\d{2}-\d{2}$/.test(f[key]))throw new FinError(400,'Fecha no válida');where.push(`l.fecha ${op} ${bind(f[key])}::date`);}
   for(const [key,op] of [['min','>='],['max','<=']])if(f[key]!==undefined&&f[key]!==''){if(cents(f[key])===null)throw new FinError(400,'Importe no válido');where.push(`abs(l.importe) ${op} abs(${bind(f[key])}::numeric)`);}
   return {params,where:where.length?'WHERE '+where.join(' AND '):''};
+ }
+ // «Pagos a trabajadores» chart: what each worker was paid per week, month or
+ // year, with the same filters as the table. `trabajadores` lists every worker
+ // ever paid (ignoring the filters, biggest total first) so the screen can give
+ // each one a colour that does not change when the filters do.
+ async workerPaymentSeries(f={}){
+  const unit=PERIODS[f.periodo||'semana'];if(!unit)throw new FinError(400,'Periodo no válido');
+  const {params,where}=this.filters({...f,type:'trabajador'});
+  const series=(await this.query(`${BASE} SELECT date_trunc('${unit}',l.fecha)::date::text periodo,coalesce(l.tercero,'') trabajador,
+   sum(l.importe)::text importe,count(*)::int pagos FROM listed l ${where} GROUP BY 1,2 ORDER BY 1,2`,params)).rows;
+  const all=this.filters({type:'trabajador'});
+  const trabajadores=(await this.query(`${BASE} SELECT coalesce(l.tercero,'') nombre,array_remove(array_agg(DISTINCT l.rol),NULL) roles,
+   sum(l.importe)::text total FROM listed l ${all.where} GROUP BY 1 ORDER BY sum(abs(l.importe)) DESC,1`,all.params)).rows;
+  return {periodo:f.periodo||'semana',series,trabajadores};
  }
  async listRecords(f={}){
   const {params,where}=this.filters(f);const sorts={fecha:'fecha',importe:'importe',tercero:'tercero',concepto:'concepto',tipo:'type',estado:'estado'};
