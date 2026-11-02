@@ -233,6 +233,45 @@ export class FinanzasService {
    evolucion:monthly.flatMap(m=>{const mes=String(m.month instanceof Date?m.month.toISOString():m.month).slice(0,7);return [{mes,type:'material',importe:m.direct_cost},{mes,type:'cliente',importe:m.revenue}];}),
    noDisponibles:[{kpi:'Validación pendiente',motivo:`${s.pending_review} registros aún no forman parte del resultado económico`},{kpi:'Beneficio neto',motivo:'El resultado directo no incluye gastos generales, amortización, financiación ni impuesto sobre sociedades.'}]};
  }
+ // «Rentabilidad por proyecto»: ingresos − costes of every project from the
+ // movements assigned to it (one row per record and project, so a split record
+ // counts its share in each). Every assigned record counts, approved or not:
+ // the result does not wait for accounting validation or for the movements
+ // still pending classification. A record is income when its category is
+ // revenue/advance (or it is a client payment); anything else is a cost, so a
+ // supplier refund (negative cost) lowers the cost. The chart ignores the
+ // project filter; the table and totals honour it.
+ async projectResults(f={}){
+  const params=this.params(),where=[];const bind=v=>{params.push(v);return '$'+params.length;};
+  const tipos={ingresos:'r.ingreso',materiales:"NOT r.ingreso AND r.category IN ('materials','overhead')",trabajadores:"NOT r.ingreso AND r.category='labor'",
+   otros:"NOT r.ingreso AND r.category NOT IN ('materials','overhead','labor')"};
+  if(f.tipo){if(!tipos[f.tipo])throw new FinError(400,'Tipo no válido');where.push(tipos[f.tipo]);}
+  if(f.contable){const s={aprobado:'approved',pendiente:'pending'}[f.contable];if(!s)throw new FinError(400,'Estado contable no válido');where.push('r.accounting_status='+bind(s));}
+  if(f.q)where.push(`concat_ws(' ',r.tercero,r.concepto,r.numerodocumento) ILIKE ${bind('%'+f.q+'%')}`);
+  for(const [key,op] of [['from','>='],['to','<=']])if(f[key]){if(!/^\d{4}-\d{2}-\d{2}$/.test(f[key]))throw new FinError(400,'Fecha no válida');where.push(`r.fecha ${op} ${bind(f[key])}::date`);}
+  const common=where.length?where.join(' AND '):'true';
+  let projectWhere=common;
+  if(f.project){if(!uuid(f.project))throw new FinError(400,'Proyecto no válido');projectWhere+=' AND r.project_id='+bind(f.project);}
+  const sql=`${BASE}, alloc AS (SELECT l.record_id,l.id,l.type,l.category,l.accounting_status,l.fecha,l.tercero,l.concepto,l.numerodocumento,l.line_number,l.document_id,
+    l.importe,pa.allocated_amount asignado,pa.project_id,pr.name project_label,pr.project_id project_code,
+    (l.category IN ('revenue','advance') OR l.type='cliente') ingreso
+   FROM listed l JOIN ledens.project_financial_allocations pa ON pa.record_id=l.record_id JOIN ledens.projects pr ON pr.id=pa.project_id
+   WHERE ($1 OR EXISTS(SELECT 1 FROM ledens.finance_project_permissions fp WHERE fp.user_id=$2 AND fp.project_id=pa.project_id))),
+   r AS (SELECT r.*,CASE WHEN r.ingreso THEN r.asignado ELSE -r.asignado END resultado FROM alloc r)`;
+  const projects=(await this.query(`${sql} SELECT r.project_id id,r.project_label label,r.project_code code,
+    coalesce(sum(r.resultado) FILTER(WHERE r.ingreso),0)::text ingresos,coalesce(-sum(r.resultado) FILTER(WHERE NOT r.ingreso),0)::text costes,
+    sum(r.resultado)::text resultado,count(*)::int movimientos FROM r WHERE ${common} GROUP BY 1,2,3 ORDER BY sum(r.resultado) DESC,2`,params.slice(0,params.length-(f.project?1:0)))).rows;
+  const t=(await this.query(`${sql} SELECT count(*)::int n,coalesce(sum(r.resultado) FILTER(WHERE r.ingreso),0)::text ingresos,
+    coalesce(-sum(r.resultado) FILTER(WHERE NOT r.ingreso),0)::text costes,coalesce(sum(r.resultado),0)::text resultado FROM r WHERE ${projectWhere}`,params)).rows[0];
+  const sorts={fecha:'r.fecha',importe:'r.resultado',tercero:'r.tercero',concepto:'r.concepto',proyecto:'r.project_label'};
+  const page=Math.max(1,Math.min(4000,Number(f.page)||1)),pageSize=Math.max(1,Math.min(100,Number(f.pageSize)||25));
+  if(!Number.isInteger(page)||!Number.isInteger(pageSize))throw new FinError(400,'Paginación no válida');
+  const rows=(await this.query(`${sql} SELECT r.id,r.type,r.category,r.accounting_status,r.fecha::text fecha,r.tercero,r.concepto,r.numerodocumento,r.line_number,r.document_id,
+    r.importe::text importe,r.asignado::text asignado,r.resultado::text resultado,r.ingreso,r.project_id,r.project_label,r.project_code
+    FROM r WHERE ${projectWhere} ORDER BY ${sorts[f.sort]||'r.fecha'} ${f.dir==='asc'?'ASC':'DESC'} NULLS LAST,r.record_id,r.project_id
+    LIMIT ${pageSize} OFFSET ${(page-1)*pageSize}`,params)).rows;
+  return {proyectos:projects,totales:{movimientos:t.n,ingresos:t.ingresos,costes:t.costes,resultado:t.resultado},rows,total:t.n,page,pageSize};
+ }
  // ------------------------------------------------------------- movimientos conciliados
  // Every record behind a reconciled movement (confirmed Bridge link of its
  // document, or the movement itself), with how it is classified. Admin, like the inbox.

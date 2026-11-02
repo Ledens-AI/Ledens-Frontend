@@ -103,6 +103,16 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
       reason: reasonOf(b), note: typeof b.note === 'string' ? b.note.slice(0, 500) : undefined, actor: actor(req) }));
   }));
 
+  // Rentabilidad por proyecto: ingresos − costes per project and the movements behind them.
+  router.get('/rentabilidad', handle(async (req, res) => {
+    const q = req.query;
+    res.json(await svc(req).projectResults({
+      project: q.proyecto || undefined, tipo: q.tipo || undefined, contable: q.contable || undefined,
+      q: String(q.q || '').slice(0, 100), from: q.desde || undefined, to: q.hasta || undefined,
+      sort: q.orden, dir: q.dir, page: q.pagina, pageSize: q.tam,
+    }));
+  }));
+
   router.get('/proyectos/:id/rentabilidad', handle(async (req, res) => {
     res.json(await svc(req).profitability(req.params.id));
   }));

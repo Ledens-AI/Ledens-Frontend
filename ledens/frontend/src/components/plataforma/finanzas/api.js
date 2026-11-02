@@ -51,6 +51,8 @@ export const api = {
   distribute: (type, id, body) => request('PUT', `/api/finanzas/registros/${type}/${id}/distribucion`, body),
   review: (type, id, body) => request('PUT', `/api/finanzas/registros/${type}/${id}/revision`, body),
   bulk: (body) => request('POST', '/api/finanzas/registros/lote', body),
+  // Rentabilidad por proyecto: ingresos − costes per project and the movements assigned to them.
+  projectResults: (f) => request('GET', '/api/finanzas/rentabilidad' + qs(f)),
   profitability: (projectId) => request('GET', `/api/finanzas/proyectos/${projectId}/rentabilidad`),
   // Documentos sin asignar (admins): processed documents with no confirmed movement.
   unassignedDocuments: (f) => request('GET', '/api/finanzas/documentos-sin-asignar' + qs(f)),
