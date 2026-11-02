@@ -532,6 +532,66 @@ export class FinanzasService {
   }
   return {evaluados:rows.length,clasificados:results.filter(r=>r.ok).length,errores:results.filter(r=>!r.ok).length,results};
  }
+ // ------------------------------------------------------------- materiales sin registro
+ // ledens.material_expenses rows with no financial record: 006's backfill and
+ // sync trigger skip a material whose total is NULL, zero or has more than two
+ // decimals (an imported line with a long unit price), so it counts nowhere — not
+ // in any list nor in profitability — and its bank movement stays pending. The
+ // source row is never changed. A record is created with the total rounded to
+ // cents, only when it cannot count twice:
+ //  * NULL / zero total: left out;
+ //  * linked to a bank movement: only if the movement (and its reconciled
+ //    documents) has no active record, and the movement's unregistered materials
+ //    add up to the payment; without a document of its own each becomes the
+ //    provisional payment (026/029 replace it with the invoice's concepts);
+ //  * linked only to a document: only if the document has no active record;
+ //  * neither: registered.
+ // apply=false only reports the plan.
+ async registerOrphans(c=this.pool,{bankMovementId=null,ids=null,apply=false,limit=2000}={}){
+  if(this.user.role!=='admin')throw new FinError(403,'Registrar materiales requiere administrador');
+  if(ids&&(!Array.isArray(ids)||ids.length>500||ids.some(x=>!uuid(x))))throw new FinError(400,'Lista de materiales no válida');
+  const rows=(await c.query(`SELECT me.id,me.total::text total,round(-me.total,2)::text gross,me.description,me.occurred_on::text fecha,me.bank_movement_id,me.document_id,me.project_id,
+    CASE WHEN me.total IS NULL THEN 'sin_importe' WHEN me.total=0 THEN 'importe_cero' WHEN me.total<>round(me.total,2) THEN 'mas_de_2_decimales' ELSE 'sin_registro' END motivo,
+    b.total_amount::text pago,b.description concepto_pago,d.numerodocumento,
+    (me.bank_movement_id IS NOT NULL AND EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.source_valid AND r.status<>'excluded' AND (r.bank_movement_id=me.bank_movement_id
+      OR r.document_id IN(SELECT document_id FROM ledens.bank_document_allocations WHERE bank_movement_id=me.bank_movement_id AND state='Confirmado')))) movimiento_con_registros,
+    (me.document_id IS NOT NULL AND EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=me.document_id AND r.source_valid AND r.status<>'excluded')) documento_con_registros
+   FROM ledens.material_expenses me LEFT JOIN ledens.bank_movements b ON b.id=me.bank_movement_id LEFT JOIN ledens.documents d ON d.id=me.document_id
+   WHERE NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.material_id=me.id)
+    AND ($1::uuid IS NULL OR me.bank_movement_id=$1) AND ($2::uuid[] IS NULL OR me.id=ANY($2::uuid[]))
+   ORDER BY me.occurred_on DESC NULLS LAST,me.id LIMIT ${Math.min(5000,Math.max(1,Number(limit)||2000))}`,[bankMovementId,ids])).rows;
+  // The movement's unregistered materials must add up to the payment.
+  const sums=new Map();
+  for(const r of rows)if(r.bank_movement_id&&!['sin_importe','importe_cero'].includes(r.motivo))sums.set(r.bank_movement_id,(sums.get(r.bank_movement_id)||0n)+(cents(r.gross)??0n));
+  const filas=rows.map(r=>{
+   const f={...r,accion:'registrar',motivo_accion:null,provisional:false};
+   const omit=m=>Object.assign(f,{accion:'omitir',motivo_accion:m});
+   if(r.motivo==='sin_importe')return omit('el material no tiene importe');
+   if(r.motivo==='importe_cero'||cents(r.gross)===0n)return omit('el importe es cero');
+   if(r.bank_movement_id){
+    if(r.movimiento_con_registros)return omit('su movimiento ya tiene registros: contaría dos veces');
+    const sum=sums.get(r.bank_movement_id),pago=cents(r.pago);
+    if(pago===null||sum!==-pago)return omit(`los materiales sin registro de su movimiento suman ${decimal(sum??0n)} € y el pago ${decimal(pago===null?0n:(pago<0n?-pago:pago))} €`);
+    f.provisional=!r.document_id;
+   }else if(r.documento_con_registros)return omit('su documento ya tiene conceptos: contaría dos veces');
+   return f;
+  });
+  const resumen={total:filas.length,registrar:filas.filter(x=>x.accion==='registrar').length,omitir:filas.filter(x=>x.accion==='omitir').length,
+   por_motivo:Object.fromEntries([...new Set(filas.map(x=>x.motivo))].map(m=>[m,filas.filter(x=>x.motivo===m).length]))};
+  if(!apply)return {resumen,filas};
+  const run=async t=>{
+   for(const f of filas.filter(x=>x.accion==='registrar')){
+    const rec=(await t.query(`INSERT INTO ledens.financial_records(material_id,document_id,bank_movement_id,occurred_on,description,category,gross_amount)
+     VALUES($1,$2,$3,$4,$5,'materials',$6) RETURNING *`,[f.id,f.document_id,f.bank_movement_id,f.fecha,f.description,f.gross])).rows[0];
+    if(f.project_id)await t.query('INSERT INTO ledens.project_financial_allocations(record_id,project_id,allocated_amount) VALUES($1,$2,$3)',[rec.id,f.project_id,rec.gross_amount]);
+    if(f.provisional)await t.query('INSERT INTO ledens.provisional_material_payments(material_id,bank_movement_id,created_by) VALUES($1,$2,$3) ON CONFLICT(material_id) DO UPDATE SET replaced_at=NULL,replaced_by_document_id=NULL',[f.id,f.bank_movement_id,this.user.id]);
+    await this.finance.audit(t,rec,this.user,'source_registered',`Material importado sin registro contable (${f.motivo}): registrado con ${f.gross} €${f.provisional?' como pago de materiales provisional':''}`,rec);
+    f.record_id=rec.id;
+   }
+  };
+  if(c===this.pool)await this.finance.transaction(run);else await run(c);
+  return {resumen,filas};
+ }
  // Read-only diagnosis of one movement (admins): everything Concepto de
  // movimientos decides from, including excluded records and their last events,
  // so a movement that cannot be classified can be explained without database
@@ -566,7 +626,9 @@ export class FinanzasService {
   const provisionales=bank?await one(`SELECT material_id,created_at,replaced_at,replaced_by_document_id,carried_project_id FROM ledens.provisional_material_payments WHERE bank_movement_id=$1`):[];
   const lote=(await one('SELECT id,role,total_amount::text total FROM ledens.worker_payment_batches WHERE bank_movement_id=$1 OR cash_movement_id=$1'))[0]||null;
   const transferencia=bank&&await hasTransfers(this.pool)?(await one('SELECT marked_at,reason FROM ledens.internal_transfers WHERE bank_movement_id=$1'))[0]||null:null;
-  return {movimiento:bank||cash,origen:bank?'banco':'efectivo',fila,documentos,registros,provisionales,lote,transferencia};
+  const materiales=bank?await one(`SELECT me.id,me.total::text total,me.document_id,me.project_id,
+    EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.material_id=me.id) con_registro FROM ledens.material_expenses me WHERE me.bank_movement_id=$1 ORDER BY me.id`):[];
+  return {movimiento:bank||cash,origen:bank?'banco':'efectivo',fila,documentos,registros,materiales,provisionales,lote,transferencia};
  }
  // Sidebar badge of «Concepto de movimientos»: movements still pending of classification.
  async movementsPending(){
@@ -794,14 +856,14 @@ export class FinanzasService {
    // Its record is created the usual way (006's sync trigger, by touching the row)
    // and it becomes the provisional payment, so 026/029 replace it with the
    // invoice's concepts instead of counting the cost twice.
-   const orphan=provisional?prev.find(x=>!x.record_id&&cents(x.total)===cents(b.total_amount)):null;
-   if(orphan){
-    await c.query('UPDATE ledens.material_expenses SET total=total WHERE id=$1',[orphan.material_id]);
-    const rec=(await c.query('SELECT * FROM ledens.financial_records WHERE material_id=$1',[orphan.material_id])).rows[0];
-    if(!rec)throw new FinError(503,'No se pudo registrar el material del movimiento en la contabilidad');
-    await c.query('INSERT INTO ledens.provisional_material_payments(material_id,bank_movement_id,created_by) VALUES($1,$2,$3) ON CONFLICT(material_id) DO UPDATE SET replaced_at=NULL,replaced_by_document_id=NULL',[orphan.material_id,b.id,this.user.id]);
-    await this.finance.audit(c,rec,this.user,'provisional_restored','Material del movimiento sin registro contable: registrado y convertido en pago de materiales provisional',rec);
-    return {materialId:orphan.material_id,recordId:rec.id,provisional:true,restored:true};
+   // Materials of the movement with no financial record at all (registerOrphans):
+   // registered the safe way, as the provisional payment, when they add up to it.
+   if(provisional&&prev.some(x=>!x.record_id)){
+    const res=await this.registerOrphans(c,{bankMovementId:b.id,apply:true});
+    const done=res.filas.filter(x=>x.accion==='registrar');
+    if(done.length)return {materialId:done[0].id,recordId:done[0].record_id,provisional:true,restored:true,registrados:done.length};
+    const omit=res.filas.find(x=>x.accion==='omitir');
+    if(omit&&!prev.some(x=>x.record_id))throw new FinError(409,`El material de este movimiento no tiene registro contable y no se puede registrar: ${omit.motivo_accion}`);
    }
    const p=provisional?prev.find(x=>x.record_id&&x.last_action!=='purchase_source_replaced'&&cents(x.total)===cents(b.total_amount)):null;
    if(p){

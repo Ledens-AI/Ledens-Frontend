@@ -231,3 +231,45 @@ test('the read-only diagnosis of a movement shows its documents, records with th
  await assert.rejects(new FinanzasService(pool,jefe).movementDiagnosis(b),{status:403});
  await assert.rejects(asAdmin().movementDiagnosis('nada'),{status:404});
 });
+
+test('materials with no financial record are found and registered only when they cannot count twice',async()=>{
+ const q=(sql,p)=>db.query(sql,p);
+ const mov=async(amount,description)=>(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES($1,$2,$2,'2026-09-27',$3,'EUR','COMPLETED') RETURNING id`,['MOV-'+description,amount,description])).rows[0].id;
+ // The trigger leaves no record for a total with more than two decimals, zero or NULL.
+ const mat=async(total,{bank=null,doc=null,project=null}={})=>(await q(`INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id,document_id,project_id)
+  VALUES('ud','Línea importada',1,$1,$1,'2026-09-27',$2,$3,$4) RETURNING id`,[total,bank,doc,project])).rows[0].id;
+ const lineas=await mov(-10,'Pago dos líneas');const l1=await mat(-3.3333,{bank:lineas}),l2=await mat(-6.6667,{bank:lineas});
+ const sinImporte=await mat(null);
+ const docConceptos=(await q(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento) VALUES(-5,'Pagar','2026-09-27','F-CONCEPTOS') RETURNING id`)).rows[0].id;
+ const il=(await q("INSERT INTO ledens.invoice_lines(document_id,line_number,description) VALUES($1,1,'Línea') RETURNING id",[docConceptos])).rows[0].id;
+ await q(`INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,gross_amount,currency) VALUES($1,$2,'2026-09-27','Línea',5,'EUR')`,[il,docConceptos]);
+ const dup=await mat(-5.004,{doc:docConceptos});
+ const conRegistros=await mov(-8,'Pago ya registrado');await q("INSERT INTO ledens.material_expenses(und,description,quantity,unit_price,total,occurred_on,bank_movement_id) VALUES('ud','Registrado',1,-8,-8,'2026-09-27',$1)",[conRegistros]);
+ const dupMov=await mat(-8.001,{bank:conRegistros});
+ const descuadre=await mov(-20,'Pago descuadrado');const d1=await mat(-4.555,{bank:descuadre});
+ const suelto=await mat(-2.345);
+ const plan=await asAdmin().registerOrphans();
+ const accion=id=>plan.filas.find(f=>f.id===id);
+ assert.deepEqual([l1,l2,suelto].map(id=>accion(id).accion),['registrar','registrar','registrar']);
+ assert.deepEqual([accion(l1).provisional,accion(l1).gross,accion(l2).gross],[true,'3.33','6.67']);
+ assert.match(accion(sinImporte).motivo_accion,/no tiene importe/);
+ assert.match(accion(dup).motivo_accion,/su documento ya tiene conceptos/);
+ assert.match(accion(dupMov).motivo_accion,/su movimiento ya tiene registros/);
+ assert.match(accion(d1).motivo_accion,/suman 4\.56 € y el pago 20\.00 €/);
+ assert.equal((await q('SELECT count(*)::int n FROM ledens.financial_records WHERE material_id=ANY($1::uuid[])',[[l1,l2,suelto]])).rows[0].n,0,'the plan changes nothing');
+ assert.equal((await row(lineas)).clase,'pendiente');
+ await assert.rejects(new FinanzasService(pool,jefe).registerOrphans(),{status:403});
+ // Applied: records rounded to cents, provisional for the payment, audited; the source rows are untouched.
+ const res=await asAdmin().registerOrphans(undefined,{ids:[l1,l2,suelto,dup],apply:true});
+ assert.deepEqual([res.resumen.registrar,res.resumen.omitir],[3,1]);
+ assert.deepEqual((await q('SELECT gross_amount::text g,category FROM ledens.financial_records WHERE material_id=ANY($1::uuid[]) ORDER BY gross_amount',[[l1,l2,suelto]])).rows,
+  [{g:'2.35',category:'materials'},{g:'3.33',category:'materials'},{g:'6.67',category:'materials'}]);
+ assert.equal((await q('SELECT total::text t FROM ledens.material_expenses WHERE id=$1',[l1])).rows[0].t,'-3.3333');
+ assert.equal((await q('SELECT count(*)::int n FROM ledens.provisional_material_payments WHERE material_id=ANY($1::uuid[])',[[l1,l2]])).rows[0].n,2);
+ assert.deepEqual([(await row(lineas)).clase,(await row(lineas)).origen],['materiales','provisional']);
+ assert.equal((await q("SELECT count(*)::int n FROM ledens.finance_events e JOIN ledens.financial_records r ON r.id=e.record_id WHERE r.material_id=ANY($1::uuid[]) AND e.action='source_registered'",[[l1,l2,suelto]])).rows[0].n,3);
+ assert.equal((await asAdmin().registerOrphans(undefined,{ids:[l1,l2,suelto]})).filas.length,0,'nothing left to register');
+ // The diagnosis lists the movement's materials and whether they have a record.
+ assert.deepEqual((await asAdmin().movementDiagnosis(descuadre)).materiales.map(m=>m.con_registro),[false]);
+});
