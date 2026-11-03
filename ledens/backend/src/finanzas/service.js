@@ -259,6 +259,8 @@ export class FinanzasService {
    const open=new Set((await this.query('SELECT material_id FROM ledens.provisional_material_payments WHERE material_id=ANY($1::uuid[]) AND replaced_at IS NULL',[mats])).rows.map(r=>r.material_id));
    for(const r of rows)if(r.type==='material')r.provisional=open.has(r.id);
   }
+  // Any material can be segregated into its invoice's lines; the action says why not otherwise.
+  if(this.user.role==='admin')for(const r of rows)if(r.type==='material')r.segregable=true;
   const workers=rows.filter(r=>r.type==='trabajador').map(r=>r.id);
   if(workers.length&&await this.hasWorkPeriods()){
    const per=new Map((await this.query('SELECT worker_payment_id id,period,starts_on::text starts_on FROM ledens.worker_payment_periods WHERE worker_payment_id=ANY($1::uuid[])',[workers])).rows.map(r=>[r.id,r]));
@@ -822,27 +824,49 @@ export class FinanzasService {
    return {id,clase,via:'material',...await this.materialPaymentOne(c,b)};
   });
  }
- // «Segregar conceptos» in Materiales pendiente de asignación: a provisional
- // material (a bank payment classified as Pago de materiales) is replaced by the
- // concepts of the invoice the Bridge reconciled with its movement (026). When
- // that invoice has no concepts, segregating fails with its number, and the
- // admin can attach the document with the detail of its products (below).
+ // «Segregar» in Materiales pendiente de asignación: a material (a provisional
+ // payment, or any other material paid by a bank movement) is replaced by the
+ // concepts of the invoice the Bridge reconciled with its movement (026), which
+ // inherit its class and obra. It fails when the material has no document yet,
+ // and when a document has no concepts (an anticipo, or a reading without lines):
+ // then the admin can attach the document with the detail of its products (below).
  async segregateMaterial(materialId){
   if(this.user.role!=='admin')throw new FinError(403,'Segregar conceptos requiere administrador');
   if(!uuid(materialId))throw new FinError(404,'Material no encontrado');
   return this.finance.transaction(async c=>{
+   const m=(await c.query(`SELECT r.status,r.source_valid,r.document_id,r.gross_amount::text gross,
+     coalesce(r.bank_movement_id,me.bank_movement_id) bank_movement_id,bm.total_amount::text movement_total
+     FROM ledens.material_expenses me JOIN ledens.financial_records r ON r.material_id=me.id
+     LEFT JOIN ledens.bank_movements bm ON bm.id=coalesce(r.bank_movement_id,me.bank_movement_id)
+     WHERE me.id=$1 FOR UPDATE OF r`,[materialId])).rows[0];
+   if(!m)throw new FinError(404,'Material no encontrado');
    const p=(await c.query('SELECT * FROM ledens.provisional_material_payments WHERE material_id=$1 FOR UPDATE',[materialId])).rows[0];
-   if(!p||p.replaced_at)throw new FinError(409,'No es un pago de materiales provisional: no hay conceptos de factura que segregar');
+   if(p?.replaced_at||m.status==='excluded'||!m.source_valid)throw new FinError(409,'Este material ya no cuenta: sus conceptos ya se han segregado o se ha descartado');
+   const movement=p?.bank_movement_id||m.bank_movement_id||null;
    const docs=(await c.query(`SELECT d.id,d.numerodocumento,d.total::text total,
+     EXISTS(SELECT 1 FROM ledens.bank_document_allocations a WHERE a.document_id=d.id AND a.bank_movement_id=$1::uuid AND a.state='Confirmado') conciliado,
      EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded') conceptos
-     FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id
-     WHERE a.bank_movement_id=$1 AND a.state='Confirmado' ORDER BY d.numerodocumento,d.id`,[p.bank_movement_id])).rows;
-   if(!docs.length)throw new FinError(409,'El movimiento de este pago no tiene ninguna factura conciliada: concíliala en el Bridge para segregar sus conceptos');
+     FROM ledens.documents d WHERE d.id=$2::uuid OR d.id IN(SELECT a.document_id FROM ledens.bank_document_allocations a WHERE a.bank_movement_id=$1::uuid AND a.state='Confirmado')
+     ORDER BY d.numerodocumento,d.id`,[movement,m.document_id||null])).rows;
+   if(!docs.length)throw new FinError(409,movement
+    ?'Este material aún no tiene documento asignado: concilia su movimiento con la factura en el Bridge para segregar sus líneas'
+    :'Este material aún no tiene documento asignado ni movimiento bancario: no hay líneas de factura que segregar');
    const bare=docs.filter(d=>!d.conceptos);
-   if(bare.length)throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta o adjunta el documento con el detalle de sus productos para segregar sus conceptos`,
-    {movimiento_id:p.bank_movement_id,sin_conceptos:bare.map(({conceptos,...d})=>d)});
+   if(bare.length)throw new FinError(409,`El documento ${bare[0].numerodocumento||'conciliado'} no tiene conceptos registrados (es un anticipo o su lectura no encontró líneas): no hay líneas que segregar. Si tiene productos, adjunta el documento con su detalle`,
+    {movimiento_id:movement,sin_conceptos:bare.filter(d=>d.conciliado).map(({conceptos,conciliado,...d})=>d)});
+   const loose=docs.find(d=>!d.conciliado);
+   if(loose)throw new FinError(409,`El documento ${loose.numerodocumento||'del material'} no está conciliado con el movimiento del pago: concílialo en el Bridge para segregar sus líneas`);
+   if(!p){
+    // Not provisional yet: it becomes the provisional payment of its movement, so
+    // 026/029 replace it exactly as they replace one classified in Concepto de movimientos.
+    const abs=v=>{const n=cents(v);return n<0n?-n:n;};
+    if(!m.movement_total||abs(m.gross)!==abs(m.movement_total))throw new FinError(409,`El importe del material (${decimal(abs(m.gross))} €) no coincide con el del movimiento (${decimal(abs(m.movement_total||0))} €): asígnalo o corrígelo a mano`);
+    await c.query('INSERT INTO ledens.provisional_material_payments(material_id,bank_movement_id,created_by) VALUES($1,$2,$3)',[materialId,movement,this.user.id]);
+   }
    // Normally done by 026's triggers already; this covers a document whose records came first.
-   await c.query('SELECT ledens.replace_provisional_materials($1)',[p.bank_movement_id]);
+   await c.query('SELECT ledens.replace_provisional_materials($1)',[movement]);
+   if(!(await c.query('SELECT replaced_at FROM ledens.provisional_material_payments WHERE material_id=$1',[materialId])).rows[0]?.replaced_at)
+    throw new FinError(409,'No se han podido segregar las líneas de la factura; revisa la conciliación del movimiento en el Bridge');
    return {material_id:materialId,segregado:true,documentos:docs.map(d=>d.numerodocumento)};
   });
  }

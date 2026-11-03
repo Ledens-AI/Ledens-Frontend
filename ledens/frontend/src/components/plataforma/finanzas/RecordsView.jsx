@@ -423,7 +423,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
                       </td>}
                       <td>{busy[k] ? <span className="fin-muted">Guardando…</span> : st ? <Badge bg="#FBF1DE" fg="#7A4E0E">Sin guardar</Badge> : <Badge {...ESTADO[r.estado]}>{ESTADO[r.estado].label}</Badge>}</td>
                       {readOnly ? null : <td className="fin-nowrap">
-                        {r.provisional ? <button type="button" className="fin-iconbtn" aria-label="Segregar conceptos de la factura" title="Segregar conceptos de la factura" onClick={() => setDialog({ kind: 'segregar', row: r })}><i className="ri-scissors-cut-line"></i></button> : null}
+                        {r.segregable || r.provisional ? <button type="button" className="fin-btn is-ghost is-small" title="Segregar en las líneas de la factura" onClick={() => setDialog({ kind: 'segregar', row: r })}><i className="ri-scissors-cut-line"></i>Segregar</button> : null}
                         <button type="button" className="fin-iconbtn" aria-label="Ver detalle y editar" title="Ver detalle y editar" onClick={() => setOpen(r)}><i className="ri-side-bar-line"></i></button></td>}
                     </tr>
                   );

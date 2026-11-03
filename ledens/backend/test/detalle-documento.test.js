@@ -141,6 +141,38 @@ test('«Segregar conceptos» reports the invoice without concepts, with what the
  await assert.rejects(new FinanzasService(pool,jefe).segregateMaterial(material),{status:403});
 });
 
+test('«Segregar» works on any material: an error without document or with an anticipo, its invoice lines otherwise',async()=>{
+ const q=(sql,p)=>db.query(sql,p);
+ const material=async(total,bank,desc)=>{const m=(await q('INSERT INTO ledens.material_expenses(bank_movement_id,und,description,quantity,unit_price,total,occurred_on) VALUES($1,$5,$2,1,$3,$3,$4) RETURNING id',[bank,desc,total,'2026-11-03','ud'])).rows[0].id;
+  return m;};
+ const movement=async(src,total)=>(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state) VALUES($1,$2,$2,'2026-11-03','OBRAMAT','EUR','COMPLETED') RETURNING id`,[src,total])).rows[0].id;
+ const reconcile=async(b,n,total)=>{const d=(await q(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento) VALUES($1,'Pagar','2026-11-03',$2) RETURNING id`,[total,n])).rows[0].id;
+  await q("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state,reconciled_on) VALUES($1,$2,$3,'Confirmado','2026-11-03')",[b,d,total]);return d;};
+ // Without a movement or a reconciled invoice: no document yet.
+ const suelto=await material(-20.98,null,'OBRAMAT');
+ assert.equal((await pending()).find(x=>x.id===suelto).segregable,true);
+ await assert.rejects(asAdmin().segregateMaterial(suelto),{status:409,message:/aún no tiene documento asignado/});
+ const sinFactura=await material(-30,await movement('MOV-sin-factura',-30),'OBRAMAT');
+ await assert.rejects(asAdmin().segregateMaterial(sinFactura),{status:409,message:/aún no tiene documento asignado: concilia su movimiento/});
+ // An anticipo: its document has no concepts.
+ const bAnt=await movement('MOV-anticipo',-50);await reconcile(bAnt,'ANT-1',-50);
+ await assert.rejects(asAdmin().segregateMaterial(await material(-50,bAnt,'Anticipo OBRAMAT')),{status:409,message:/ANT-1 no tiene conceptos registrados \(es un anticipo/});
+ // An invoice with its lines: the material is replaced by them, which inherit its class.
+ const b=await movement('MOV-lineas',-20.98),d=await reconcile(b,'FAC-OBRA',-20.98);
+ for(const [i,g] of [[1,12.5],[2,8.48]]){const l=(await q("INSERT INTO ledens.invoice_lines(document_id,line_number,description) VALUES($1,$2,'Producto') RETURNING id",[d,i])).rows[0].id;
+  await q("INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,gross_amount,currency) VALUES($1,$2,'2026-11-03','Producto',$3,'EUR')",[l,d,g]);}
+ const m=await material(-20.98,b,'OBRAMAT');
+ assert.deepEqual(await asAdmin().segregateMaterial(m),{material_id:m,segregado:true,documentos:['FAC-OBRA']});
+ assert.equal((await q('SELECT status FROM ledens.financial_records WHERE material_id=$1',[m])).rows[0].status,'excluded');
+ assert.deepEqual((await q("SELECT category FROM ledens.financial_records WHERE document_id=$1 AND source_valid AND status<>'excluded'",[d])).rows.map(x=>x.category),['materials','materials']);
+ await assert.rejects(asAdmin().segregateMaterial(m),{status:409,message:/ya no cuenta/});
+ // A material that is not the whole payment is not segregated automatically.
+ const b2=await movement('MOV-parcial',-40),d2=await reconcile(b2,'FAC-PARCIAL',-40);
+ const l2=(await q("INSERT INTO ledens.invoice_lines(document_id,line_number,description) VALUES($1,1,'Producto') RETURNING id",[d2])).rows[0].id;
+ await q("INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,gross_amount,currency) VALUES($1,$2,'2026-11-03','Producto',40,'EUR')",[l2,d2]);
+ await assert.rejects(asAdmin().segregateMaterial(await material(-10,b2,'Parte')),{status:409,message:/no coincide con el del movimiento/});
+});
+
 test('a detail that does not add up to the document stores nothing',async()=>{
  await assert.rejects(attach(reading([10,20],30)),{status:422,message:/suman 30\.00 € .* 40\.00 €/});
  assert.deepEqual(await records(),[]);
@@ -173,5 +205,5 @@ test('a detail that adds up becomes the invoice concepts and replaces the provis
  const ev=(await db.query("SELECT actor_id,detail FROM ledens.bridge_events WHERE document_id=$1 AND action='detail_attached'",[doc])).rows;
  assert.equal(ev.length,1);assert.equal(ev[0].actor_id,admin.id);assert.equal(ev[0].detail.lineas,2);assert.match(ev[0].detail.attachment_sha256,/^[0-9a-f]{64}$/);
  await assert.rejects(attach(reading([40],40)),{status:409,message:/ya tiene conceptos/});
- await assert.rejects(asAdmin().segregateMaterial(material),{status:409,message:/No es un pago de materiales provisional/});
+ await assert.rejects(asAdmin().segregateMaterial(material),{status:409,message:/ya no cuenta/});
 });

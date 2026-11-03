@@ -31,16 +31,16 @@ function DetailUpload({ movementId, doc, onRead }) {
   );
 }
 
-/* «Segregar conceptos» (Materiales pendiente de asignación, admins): a provisional
- * material payment is replaced by the concepts of the invoice reconciled with its
- * bank movement. When that invoice has no concepts, the error says so and offers
- * to attach the document with the detail of its products. */
+/* «Segregar» (Materiales pendiente de asignación, admins): a material is replaced
+ * by the lines of the invoice reconciled with its bank movement. Without a document
+ * yet, or with one without concepts (an anticipo), the error says so; for the
+ * latter it offers to attach the document with the detail of its products. */
 export default function SegregarConceptos({ row, onClose, onDone }) {
   const [state, setState] = useState({});
   const segregate = () => {
     setState({ loading: true });
     api.segregateMaterial(row.id).then(
-      (res) => setState({ done: `Conceptos segregados de ${res.documentos.join(', ')}.` }),
+      (res) => setState({ done: `Líneas segregadas de${res.documentos.join(', ')}.` }),
       (e) => setState({ error: e.message, movementId: e.data?.movimiento_id, missing: e.data?.sin_conceptos || [] }),
     );
   };
@@ -50,13 +50,13 @@ export default function SegregarConceptos({ row, onClose, onDone }) {
     : `Se han registrado ${res.lineas} conceptos de la factura.` });
   const finish = () => (state.done ? onDone() : onClose());
   return (
-    <Dialog title="Segregar conceptos de la factura" onClose={finish}
+    <Dialog title="Segregar en las líneas de la factura" onClose={finish}
       actions={<>
         <button type="button" className={state.done ? 'fin-btn is-primary' : 'fin-btn is-ghost'} disabled={state.loading} onClick={finish}>{state.done ? 'Entendido' : started ? 'Cerrar' : 'Cancelar'}</button>
-        {started ? null : <button type="button" className="fin-btn is-primary" onClick={segregate}>Segregar conceptos</button>}
+        {started ? null : <button type="button" className="fin-btn is-primary" onClick={segregate}>Segregar</button>}
       </>}>
       <p>{fecha(row.fecha)} · {row.tercero || row.concepto || '—'} · {eur(row.importe)}</p>
-      <p className="fin-muted fin-small">Pago de materiales provisional: se sustituye por los conceptos de la factura conciliada con su movimiento, que heredan su clasificación y su obra.</p>
+      <p className="fin-muted fin-small">El material se sustituye por cada una de las líneas de la factura conciliada con su movimiento, que heredan su clasificación y su obra. Necesita un documento asignado con conceptos: un anticipo no tiene líneas que segregar.</p>
       {state.loading ? <div className="fin-loading">Segregando…</div> : null}
       {state.done ? <p role="status"><i className="ri-checkbox-circle-line"></i> {state.done}</p> : null}
       {state.error ? <p className="fin-error-inline" role="alert">{state.error}</p> : null}
