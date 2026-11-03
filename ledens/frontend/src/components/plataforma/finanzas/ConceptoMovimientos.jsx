@@ -27,13 +27,23 @@ const EFECTO = {
 // («Regla Obramat»). The backend enforces all of it too.
 const refundable = (r) => r.tipo === 'banco';
 // A movement with another account of the company can also be a transfer between accounts.
-const choices = (r) => [...baseChoices(r), ...(r.propia && r.tipo === 'banco' && r.registros === 0 ? ['transferencia'] : [])];
+const choices = (r) => [...baseChoices(r), ...(r.propia && r.tipo === 'banco' && r.registros === 0 && !r.lote ? ['transferencia'] : [])];
 const baseChoices = (r) => (r.obramat
   ? (r.sentido === 'cobro' ? (refundable(r) ? ['reembolso_proveedor'] : []) : ['materiales'])
   : r.sentido === 'cobro' ? ['clientes', ...(refundable(r) ? ['reembolso_proveedor'] : [])] : ['materiales', 'trabajadores']);
-// A registered supplier refund is a material, and an Obramat advance is materials
-// as is: neither is reclassified from here.
-const canClassify = (r) => !r.lote && r.clase !== 'reembolso_proveedor' && r.origen !== 'compra_obramat' && choices(r).some((c) => c !== r.clase);
+// Every movement can change class; only an Obramat advance is materials as is (its
+// cost enters with the delivery invoice). Changing it undoes what the old class
+// registered from the movement (backend undoMovementFlow).
+const canClassify = (r) => r.origen !== 'compra_obramat' && choices(r).some((c) => c !== r.clase);
+// The new class replaces a flow of the old one: the movement then enters as if nothing were registered.
+const undoes = (r, c) => r.lote || r.clase === 'reembolso_proveedor' || (r.origen === 'provisional' && c === 'trabajadores')
+  || (r.clase === 'clientes' && r.origen === 'registro' && c === 'reembolso_proveedor');
+const DESHACER = {
+  trabajadores: 'Se deshace el envío a «Pago a trabajadores»: las líneas pendientes salen de «Pendiente de trabajador» y los pagos ya guardados (trabajador y obra) dejan de contar; quedan en su historial.',
+  materiales: 'Se deshace el pago de materiales provisional (y la obra que tuviera); queda en su historial y se recupera si vuelves a clasificarlo como pago de materiales.',
+  reembolso_proveedor: 'Se deshace el reembolso de proveedor (y la obra que tuviera); queda en su historial y se recupera si vuelves a clasificarlo como reembolso.',
+  clientes: 'Se deshace el cobro de cliente (y la obra que tuviera); queda en su historial y se recupera si vuelves a clasificarlo como cobro de clientes.',
+};
 // With records, what each class does to them.
 const CON_REGISTROS = (row, c) => (c === 'reembolso_proveedor'
   ? `Se registrará como material en negativo, que descuenta coste al asignarlo a una obra.${row.documentos ? ` Los conceptos del abono (${row.documentos}) se excluyen para no contarlo dos veces; tienen que estar sin clasificar, sin obra y sumar lo mismo que el cobro.` : ''}`
@@ -46,6 +56,7 @@ function Classify({ row, onClose, onDone }) {
   // Changing what is already classified needs a reason; a first classification does not.
   const needsReason = row.conocidas.length > 0 || row.clase === 'transferencia';
   const withRecords = row.registros > 0;
+  const undoing = (c) => undoes(row, c) && DESHACER[row.clase];
   const save = async () => {
     setSaving(true); setError('');
     try { onDone(await api.classifyMovement(row.id, { clase, version: row.version, reason: reason.trim() || undefined })); }
@@ -71,7 +82,7 @@ function Classify({ row, onClose, onDone }) {
             <label key={c} className="fin-choice">
               <input type="radio" name="clase-movimiento" checked={clase === c} onChange={() => setClase(c)} />
               <span><strong>{CLASE_MOV[c].label}</strong><br />
-                <span className="fin-muted fin-small">{withRecords ? CON_REGISTROS(row, c) : EFECTO[c]}</span></span>
+                <span className="fin-muted fin-small">{undoing(c) ? `${DESHACER[row.clase]} ${EFECTO[c]}` : withRecords ? CON_REGISTROS(row, c) : EFECTO[c]}</span></span>
             </label>
           ))}
         </fieldset>

@@ -764,11 +764,14 @@ export class FinanzasService {
    const ids=(await c.query(`SELECT DISTINCT r.id FROM ledens.financial_records r WHERE r.source_valid AND r.status<>'excluded' AND (
      r.bank_movement_id=$1 OR r.document_id IN(SELECT document_id FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado')
      OR r.material_id=$2 OR r.customer_payment_id=$3)`,[id,k?.material_id||null,k?.customer_payment_id||null])).rows.map(r=>r.id);
-   const records=(await c.query('SELECT * FROM ledens.financial_records WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE',[ids])).rows;
+   let records=(await c.query('SELECT * FROM ledens.financial_records WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE',[ids])).rows;
    const current=createHash('md5').update(records.map(r=>r.id+':'+r.version).join(',')).digest('hex');
    if(current!==version)throw new FinError(409,'El movimiento ha cambiado. Actualiza la lista.');
-   if((await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1 OR cash_movement_id=$1',[id])).rows.length)
-    throw new FinError(409,clase==='trabajadores'?'Ya está en pagos a trabajadores':'Está en Pendiente de trabajador: devuélvelo a conciliación desde esa pantalla para cambiarlo');
+   if(clase==='reembolso_proveedor'&&!b)throw new FinError(409,'Un reembolso de proveedor en efectivo todavía no se puede registrar');
+   const batch=(await c.query('SELECT id,cash_movement_id FROM ledens.worker_payment_batches WHERE bank_movement_id=$1 OR cash_movement_id=$1 FOR UPDATE',[id])).rows[0];
+   if(batch&&clase==='trabajadores')throw new FinError(409,'Ya está en pagos a trabajadores');
+   const undone=await this.undoMovementFlow(c,id,{bankId:b?.id||null,batch,clase,amount,records,why});
+   records=records.filter(r=>!undone.has(r.id));
    // A reconciled document without concepts never blocks the classification here:
    // with nothing registered the movement enters through its usual flow (a
    // provisional material that waits for every invoice, 029; a worker batch; a
@@ -780,7 +783,6 @@ export class FinanzasService {
    // keeps them: those records carry the sign of revenue, so turning them into
    // materials would add cost instead of lowering it.
    if(clase==='reembolso_proveedor'){
-    if(!b)throw new FinError(409,'Un reembolso de proveedor en efectivo todavía no se puede registrar');
     // A credit note reconciled with the refund, with its concepts unclassified:
     // its lines carry the sign of revenue, so they are excluded (never deleted,
     // audited) and the refund is registered once, from the movement, as a
@@ -824,6 +826,47 @@ export class FinanzasService {
    if(clase==='clientes')return {id,clase,via:'cobro-cliente',...await this.customerPaymentOne(c,id,null,{allowReconciled:true})};
    return {id,clase,via:'material',...await this.materialPaymentOne(c,b)};
   });
+ }
+ // Changing the class of a movement undoes what it registered through the flow of
+ // its old class: its «Pago a trabajadores» batch (lines already saved with their
+ // worker and obra too), its provisional material payment, a supplier refund or a
+ // client receipt registered from it. Their records are excluded, never deleted,
+ // and audited with the obra they had, so the movement enters the flow of its new
+ // class; classifying it back restores the provisional, the refund or the receipt.
+ // Returns the ids of the records excluded.
+ async undoMovementFlow(c,id,{bankId,batch,clase,amount,records,why}){
+  const undo=[];
+  if(batch){
+   const saved=(await c.query(`SELECT r.* FROM ledens.worker_payment_splits s JOIN ledens.financial_records r ON r.worker_payment_id=s.worker_payment_id
+    WHERE s.batch_id=$1 AND r.status<>'excluded' ORDER BY r.id FOR UPDATE OF r`,[batch.id])).rows;
+   for(const r of saved)undo.push([r,'worker_payment_undone','Pago a trabajador deshecho al reclasificar el movimiento']);
+  }
+  const provisional=clase==='trabajadores'?(await c.query(`SELECT pm.material_id FROM ledens.provisional_material_payments pm
+   WHERE pm.bank_movement_id=$1 AND pm.replaced_at IS NULL FOR UPDATE`,[bankId])).rows.map(x=>x.material_id):[];
+  for(const r of records){
+   if(r.material_id&&provisional.includes(r.material_id))undo.push([r,'provisional_undone','Pago de materiales provisional deshecho al reclasificar el movimiento']);
+   else if(amount>0n&&clase!=='reembolso_proveedor'&&r.material_id&&!r.document_id&&bankId&&r.bank_movement_id===bankId&&cents(r.gross_amount)<0n)
+    undo.push([r,'refund_undone','Reembolso de proveedor deshecho al reclasificar el movimiento']);
+   else if(clase==='reembolso_proveedor'&&r.customer_payment_id&&bankId&&r.bank_movement_id===bankId)
+    undo.push([r,'customer_payment_undone','Cobro de cliente deshecho al reclasificar el movimiento']);
+  }
+  // Undoing what was already classified needs its reason, like any other change.
+  if((batch||undo.length)&&why.length<5)throw new FinError(400,'Indica el motivo del cambio (al menos cinco caracteres)');
+  for(const [r,action,text] of undo){
+   const allocations=(await c.query(`SELECT a.project_id,p.name project_name,a.allocated_amount::text allocated_amount FROM ledens.project_financial_allocations a
+    LEFT JOIN ledens.projects p ON p.id=a.project_id WHERE a.record_id=$1 ORDER BY a.project_id`,[r.id])).rows;
+   await c.query('DELETE FROM ledens.project_financial_allocations WHERE record_id=$1',[r.id]);
+   const after=(await c.query("UPDATE ledens.financial_records SET status='excluded',source_valid=false,version=version+1,updated_at=now() WHERE id=$1 RETURNING *",[r.id])).rows[0];
+   await this.finance.audit(c,{...r,allocations},this.user,action,`${text}: ${why}`,{...after,allocations:[]});
+  }
+  // A provisional undone is no longer waiting for its invoice (026/029 would hand
+  // its class to the invoice's lines); restoring it creates its row again.
+  if(provisional.length)await c.query('DELETE FROM ledens.provisional_material_payments WHERE material_id=ANY($1::uuid[])',[provisional]);
+  if(batch){
+   await c.query("UPDATE ledens.cash_movements SET assigned_to=NULL,assigned_by=NULL,assigned_at=NULL WHERE id=$1",[batch.cash_movement_id]);
+   await c.query('DELETE FROM ledens.worker_payment_batches WHERE id=$1',[batch.id]);
+  }
+  return new Set(undo.map(([r])=>r.id));
  }
  // «Segregar» in Materiales pendiente de asignación: a material (a provisional
  // payment, or any other material paid by a bank movement) is replaced by the
@@ -976,6 +1019,14 @@ export class FinanzasService {
     const omit=res.filas.find(x=>x.accion==='omitir');
     if(omit&&!prev.some(x=>x.record_id))throw new FinError(409,`El material de este movimiento no tiene registro contable y no se puede registrar: ${omit.motivo_accion}`);
    }
+   // A supplier refund undone when the receipt changed class (undoMovementFlow) comes back as it was.
+   const u=!provisional?prev.find(x=>x.record_id&&x.last_action==='refund_undone'&&cents(x.total)===cents(b.total_amount)):null;
+   if(u){
+    const before=(await c.query('SELECT * FROM ledens.financial_records WHERE id=$1 FOR UPDATE',[u.record_id])).rows[0];
+    const after=(await c.query("UPDATE ledens.financial_records SET status='pending',source_valid=true,category='materials',version=version+1,updated_at=now() WHERE id=$1 RETURNING *",[u.record_id])).rows[0];
+    await this.finance.audit(c,before,this.user,'refund_restored','Reembolso de proveedor restaurado al clasificar de nuevo el movimiento',after);
+    return {materialId:u.material_id,recordId:u.record_id,provisional:false,restored:true};
+   }
    const p=provisional?prev.find(x=>x.record_id&&x.last_action!=='purchase_source_replaced'&&cents(x.total)===cents(b.total_amount)):null;
    if(p){
     const before=(await c.query('SELECT * FROM ledens.financial_records WHERE id=$1 FOR UPDATE',[p.record_id])).rows[0];
@@ -1033,7 +1084,9 @@ export class FinanzasService {
   const total=cents(m.total_amount);
   if(total===null||total>=0n)throw new FinError(409,'Solo se segregan pagos salientes (importe negativo, con céntimos exactos)');
   if((await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1',[id])).rows.length)throw new FinError(409,'Ya está en Pendiente de trabajador');
-  if((await c.query('SELECT 1 FROM ledens.worker_payments WHERE bank_movement_id=$1 LIMIT 1',[id])).rows.length)throw new FinError(409,'Ya tiene pagos a trabajadores registrados');
+  // Worker payments undone when the movement changed class (excluded) no longer count.
+  if((await c.query(`SELECT 1 FROM ledens.worker_payments w WHERE w.bank_movement_id=$1
+   AND NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.worker_payment_id=w.id AND r.status='excluded') LIMIT 1`,[id])).rows.length)throw new FinError(409,'Ya tiene pagos a trabajadores registrados');
   if(!allowReconciled&&(await c.query("SELECT 1 FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado' LIMIT 1",[id])).rows.length)throw new FinError(409,'Ya está conciliado con un documento');
   const plan=splitWorkerPayment(-total);
   const b=(await c.query(`INSERT INTO ledens.worker_payment_batches(bank_movement_id,role,unit_amount,total_amount,occurred_on,created_by)
@@ -1071,8 +1124,20 @@ export class FinanzasService {
   if(m.currency&&m.currency!=='EUR')throw new FinError(409,'Solo movimientos en euros');
   const total=cents(m.total_amount);
   if(total===null||total<=0n)throw new FinError(409,'Solo se registran cobros (importe positivo)');
-  if((await c.query('SELECT 1 FROM ledens.customer_payments WHERE bank_movement_id=$1 LIMIT 1',[id])).rows.length)throw new FinError(409,'Ya está registrado como pago de cliente');
+  const prev=(await c.query(`SELECT cp.id,cp.total::text total,r.id record_id,r.status,r.source_valid,
+    (SELECT e.action FROM ledens.finance_events e WHERE e.record_id=r.id ORDER BY e.id DESC LIMIT 1) last_action
+   FROM ledens.customer_payments cp LEFT JOIN ledens.financial_records r ON r.customer_payment_id=cp.id WHERE cp.bank_movement_id=$1 ORDER BY cp.id`,[id])).rows;
+  // A client receipt undone when the movement changed class (undoMovementFlow) comes back as it was.
+  const undone=prev.find(x=>x.record_id&&x.last_action==='customer_payment_undone'&&cents(x.total)===total);
+  if(prev.length&&(!undone||prev.some(x=>x.record_id&&x.source_valid&&x.status!=='excluded')))throw new FinError(409,'Ya está registrado como pago de cliente');
   if((await c.query('SELECT 1 FROM ledens.worker_payment_batches WHERE bank_movement_id=$1',[id])).rows.length)throw new FinError(409,'Está en Pendiente de trabajador');
+  if(undone){
+   const before=(await c.query('SELECT * FROM ledens.financial_records WHERE id=$1 FOR UPDATE',[undone.record_id])).rows[0];
+   const after=(await c.query("UPDATE ledens.financial_records SET status='pending',source_valid=true,version=version+1,updated_at=now() WHERE id=$1 RETURNING *",[undone.record_id])).rows[0];
+   await this.finance.audit(c,before,this.user,'customer_payment_restored','Cobro de cliente restaurado al clasificar de nuevo el movimiento',after);
+   if(projectId)await this.finance.replace(c,this.user,{record_id:after.id,version:after.version,allocations:[{project_id:projectId,amount:after.gross_amount}]},`Cobro de cliente del movimiento ${m.source_id}`);
+   return {customerPaymentId:undone.id,recordId:after.id,restored:true};
+  }
   if(!allowReconciled&&(await c.query("SELECT 1 FROM ledens.bank_document_allocations WHERE bank_movement_id=$1 AND state='Confirmado' LIMIT 1",[id])).rows.length)throw new FinError(409,'Ya está conciliado con un documento');
   // The client is the ordering party; failing that, a reconciled document's or the obra's.
   const cliente=m.payer?.trim()||m.beneficiary_name?.trim()||(await c.query(`SELECT d.tercero FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id
