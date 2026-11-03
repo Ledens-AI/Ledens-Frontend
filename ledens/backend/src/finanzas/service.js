@@ -619,9 +619,23 @@ export class FinanzasService {
    WHERE NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.material_id=me.id)
     AND ($1::uuid IS NULL OR me.bank_movement_id=$1) AND ($2::uuid[] IS NULL OR me.id=ANY($2::uuid[]))
    ORDER BY me.occurred_on DESC NULLS LAST,me.id LIMIT ${Math.min(5000,Math.max(1,Number(limit)||2000))}`,[bankMovementId,ids])).rows;
-  // The movement's unregistered materials must add up to the payment.
-  const sums=new Map();
-  for(const r of rows)if(r.bank_movement_id&&!['sin_importe','importe_cero'].includes(r.motivo))sums.set(r.bank_movement_id,(sums.get(r.bank_movement_id)||0n)+(cents(r.gross)??0n));
+  // The movement's unregistered materials must add up to the payment. Rounding
+  // each line with more than two decimals to cents may leave the sum up to one
+  // cent per such line off the payment (932,22 € for a 932,20 € payment): that
+  // difference is taken from the movement's largest line, so the records add up
+  // exactly, and the adjustment is audited. Anything bigger stays out.
+  const sums=new Map(),rounded=new Map(),largest=new Map();
+  for(const r of rows)if(r.bank_movement_id&&!['sin_importe','importe_cero'].includes(r.motivo)){
+   const m=r.bank_movement_id,g=cents(r.gross)??0n;
+   sums.set(m,(sums.get(m)||0n)+g);
+   if(r.motivo==='mas_de_2_decimales')rounded.set(m,(rounded.get(m)||0n)+1n);
+   const l=largest.get(m);if(!l||(g<0n?-g:g)>(cents(l.gross)<0n?-cents(l.gross):cents(l.gross)))largest.set(m,r);
+  }
+  const adjust=new Map();
+  for(const r of rows)if(r.bank_movement_id&&!adjust.has(r.bank_movement_id)&&cents(r.pago)!==null){
+   const m=r.bank_movement_id,diff=sums.get(m)+cents(r.pago);
+   if(diff!==0n&&(diff<0n?-diff:diff)<=(rounded.get(m)||0n)){adjust.set(m,diff);sums.set(m,-cents(r.pago));}
+  }
   const filas=rows.map(r=>{
    const f={...r,accion:'registrar',motivo_accion:null,provisional:false};
    const omit=m=>Object.assign(f,{accion:'omitir',motivo_accion:m});
@@ -632,6 +646,8 @@ export class FinanzasService {
     const sum=sums.get(r.bank_movement_id),pago=cents(r.pago);
     if(pago===null||sum!==-pago)return omit(`los materiales sin registro de su movimiento suman ${decimal(sum??0n)} € y el pago ${decimal(pago===null?0n:(pago<0n?-pago:pago))} €`);
     f.provisional=!r.document_id;
+    const diff=adjust.get(r.bank_movement_id);
+    if(diff&&largest.get(r.bank_movement_id)===r){f.ajuste_redondeo=decimal(-diff);f.gross=decimal(cents(r.gross)-diff);}
    }else if(r.documento_con_registros)return omit('su documento ya tiene conceptos: contaría dos veces');
    return f;
   });
@@ -644,7 +660,7 @@ export class FinanzasService {
      VALUES($1,$2,$3,$4,$5,'materials',$6) RETURNING *`,[f.id,f.document_id,f.bank_movement_id,f.fecha,f.description,f.gross])).rows[0];
     if(f.project_id)await t.query('INSERT INTO ledens.project_financial_allocations(record_id,project_id,allocated_amount) VALUES($1,$2,$3)',[rec.id,f.project_id,rec.gross_amount]);
     if(f.provisional)await t.query('INSERT INTO ledens.provisional_material_payments(material_id,bank_movement_id,created_by) VALUES($1,$2,$3) ON CONFLICT(material_id) DO UPDATE SET replaced_at=NULL,replaced_by_document_id=NULL',[f.id,f.bank_movement_id,this.user.id]);
-    await this.finance.audit(t,rec,this.user,'source_registered',`Material importado sin registro contable (${f.motivo}): registrado con ${f.gross} €${f.provisional?' como pago de materiales provisional':''}`,rec);
+    await this.finance.audit(t,rec,this.user,'source_registered',`Material importado sin registro contable (${f.motivo}): registrado con ${f.gross} €${f.ajuste_redondeo?` (ajuste de redondeo ${f.ajuste_redondeo} € para cuadrar con el pago)`:''}${f.provisional?' como pago de materiales provisional':''}`,rec);
     f.record_id=rec.id;
    }
   };
