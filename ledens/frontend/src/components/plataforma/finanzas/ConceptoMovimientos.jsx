@@ -13,7 +13,7 @@ export const CLASE_MOV = {
   transferencia: { label: 'Transferencia entre cuentas', bg: '#EEF0F3', fg: '#4A5160', icon: 'ri-arrow-left-right-line' },
   mixto: { label: 'Varias clases', bg: '#F2F2EF', fg: '#3A3A38', icon: 'ri-shuffle-line' },
 };
-const ORIGEN = { bridge: 'Deducido del Bridge con documentos', trabajadores: 'En Pendiente de trabajador', registro: 'Registro contable del movimiento', provisional: 'Provisional hasta conciliar su factura', compra_obramat: 'Compra de Obramat con anticipo: el coste entra con la factura de entrega', transferencia: 'Entre cuentas de la sociedad: ni coste ni ingreso', ninguno: 'Sin documento conciliado' };
+const ORIGEN = { bridge: 'Deducido del Bridge con documentos', trabajadores: 'En Pendiente de trabajador', registro: 'Registro contable del movimiento', provisional: 'Provisional hasta conciliar su factura', compra_obramat: 'Compra de Obramat con anticipo: el coste entra con la factura de entrega', devolucion_anticipo: 'Devolución de un anticipo: ya descontada de las líneas del anticipo', transferencia: 'Entre cuentas de la sociedad: ni coste ni ingreso', ninguno: 'Sin documento conciliado' };
 // What a manual class does when the movement has nothing registered yet.
 const EFECTO = {
   materiales: 'Se registrará como pago de materiales provisional y aparecerá en «Materiales pendiente de asignación» para elegir la obra. Cuando el Bridge concilie su factura, la factura lo sustituirá con esta clasificación y esta obra.',
@@ -34,7 +34,7 @@ const baseChoices = (r) => (r.obramat
 // Every movement can change class; only an Obramat advance is materials as is (its
 // cost enters with the delivery invoice). Changing it undoes what the old class
 // registered from the movement (backend undoMovementFlow).
-const canClassify = (r) => r.origen !== 'compra_obramat' && choices(r).some((c) => c !== r.clase);
+const canClassify = (r) => !['compra_obramat', 'devolucion_anticipo'].includes(r.origen) && choices(r).some((c) => c !== r.clase);
 // The new class replaces a flow of the old one: the movement then enters as if nothing were registered.
 const undoes = (r, c) => r.lote || r.clase === 'reembolso_proveedor' || (r.origen === 'provisional' && c === 'trabajadores')
   || (r.clase === 'clientes' && r.origen === 'registro' && c === 'reembolso_proveedor');
