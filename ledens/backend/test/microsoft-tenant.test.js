@@ -7,12 +7,12 @@ import { trustedOrganizationEmail, trustedConsumerEmail, idTokenClaims, fetchPro
 const TENANT = '89aa3c28-3056-4509-bfc5-5c16f8f0737a';
 const jwt = (claims) => ['e30', Buffer.from(JSON.stringify(claims)).toString('base64url'), 'sig'].join('.');
 const claims = (over = {}) => ({ tid: TENANT, aud: 'test-client-id', iss: `https://login.microsoftonline.com/${TENANT}/v2.0`, preferred_username: 'ana.anzola@ledens.es', ...over });
-let server, saved;
+let server, saved, body;
 before(async () => {
   saved = { ...process.env };
   process.env.MICROSOFT_CLIENT_ID = 'test-client-id';
   delete process.env.MICROSOFT_TRUSTED_TENANT_IDS; delete process.env.MICROSOFT_TRUSTED_DOMAINS;
-  server = http.createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ sub: 'ms-1', email: 'Ana.Anzola@ledens.es', name: 'Ana' })); });
+  server = http.createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(body ?? { sub: 'ms-1', email: 'Ana.Anzola@ledens.es', name: 'Ana' })); });
   server.listen(0); await once(server, 'listening');
   process.env.MICROSOFT_USERINFO_URL = `http://127.0.0.1:${server.address().port}/userinfo`;
 });
@@ -55,4 +55,19 @@ test('a personal account is verified only on a Microsoft mail domain it signs in
   assert.equal(trustedConsumerEmail(personal({ aud: 'other-app' }), 'grijnierse@hotmail.com'), false, 'a token for another app');
   process.env.MICROSOFT_CONSUMER_DOMAINS = '';
   try { assert.equal(trustedConsumerEmail(personal(), 'grijnierse@hotmail.com'), false, 'switched off'); } finally { delete process.env.MICROSOFT_CONSUMER_DOMAINS; }
+});
+
+test('a work account without a mailbox takes its email from the id_token', async () => {
+  // Graph's userinfo has no email when the Entra user has no mail attribute.
+  body = { sub: 'ms-1', name: 'Ana Anzola' };
+  try {
+    const p = await fetchProfile('t', { idToken: jwt(claims()) });
+    assert.equal(p.email, 'ana.anzola@ledens.es');
+    assert.equal(p.emailVerified, true);
+    const other = await fetchProfile('t', { idToken: jwt(claims({ tid: 'f0000000-0000-0000-0000-000000000000', iss: 'https://login.microsoftonline.com/f0000000-0000-0000-0000-000000000000/v2.0', preferred_username: 'x@example.com' })) });
+    assert.equal(other.email, 'x@example.com');
+    assert.equal(other.emailVerified, false, 'another tenant stays unverified');
+    await assert.rejects(fetchProfile('t', { idToken: jwt(claims({ preferred_username: '+34600000000' })) }), /missing sub or email/, 'a phone number is not an email');
+    await assert.rejects(fetchProfile('t'), /missing sub or email/);
+  } finally { body = undefined; }
 });
