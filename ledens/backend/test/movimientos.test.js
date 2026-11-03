@@ -76,7 +76,8 @@ test('a movement without documents enters through the usual flow for its class',
  assert.equal((await row(m.cobro.id)).clase,'clientes');
  assert.equal((await classify(m.nomina.id,'trabajadores')).via,'pendiente-trabajador');
  assert.equal((await row(m.nomina.id)).clase,'trabajadores');
- await assert.rejects(classify(m.nomina.id,'materiales'),{status:409,message:/Pendiente de trabajador/});
+ await assert.rejects(classify(m.nomina.id,'materiales'),{status:400,message:/motivo/},'undoing Pago a trabajadores needs a reason');
+ await assert.rejects(classify(m.nomina.id,'trabajadores','Otra vez'),{status:409,message:/Ya está en pagos a trabajadores/});
  assert.equal((await classify(m.cash.id,'materiales')).via,'efectivo');
  assert.equal((await row(m.cash.id)).clase,'materiales');
  assert.equal((await list()).resumen.pendiente,1);
@@ -158,9 +159,9 @@ test('a bank receipt with nothing registered can be a supplier refund: a negativ
  await assert.rejects(approve(extraRec,'-10'),{message:'bank_amount_exceeded'});
  assert.equal((await list({clase:'reembolso_proveedor'})).total,1);
  assert.equal((await list()).resumen.reembolso_proveedor,1);
- await assert.rejects(classify(b,'clientes','Era un cliente'),{status:409,message:/reembolso de proveedor/});
+ await assert.rejects(classify(b,'clientes'),{status:400,message:/motivo/},'undoing a refund needs a reason');
  await assert.rejects(classify(m.bare.id,'reembolso_proveedor'),{status:409,message:/Un pago/});
- await assert.rejects(classify(m.cobro.id,'reembolso_proveedor','Era una devolución'),{status:409,message:/registros/});
+ await assert.rejects(classify(m.cobro.id,'reembolso_proveedor'),{status:400,message:/motivo/},'undoing a client receipt needs a reason');
  const cash=(await db.query("INSERT INTO ledens.cash_movements(kind,amount,occurred_on,concept) VALUES('cobro',20,'2026-10-13','Devolución en tienda') RETURNING id")).rows[0].id;
  await assert.rejects(classify(cash,'reembolso_proveedor'),{status:409,message:/efectivo/});
 });
@@ -278,4 +279,64 @@ test('materials with no financial record are found and registered only when they
  assert.equal((await asAdmin().registerOrphans(undefined,{ids:[l1,l2,suelto]})).filas.length,0,'nothing left to register');
  // The diagnosis lists the movement's materials and whether they have a record.
  assert.deepEqual((await asAdmin().movementDiagnosis(descuadre)).materiales.map(m=>m.con_registro),[false]);
+});
+
+test('every movement can change class: what its old class registered is undone, audited, and recovered when classified back',async()=>{
+ const q=(sql,p)=>db.query(sql,p);
+ const bankRow=async(amount,description)=>(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES($1,$2,$2,'2026-10-20',$3,'EUR','COMPLETED') RETURNING id`,['MOV-'+description,amount,description])).rows[0].id;
+ const project=(await q("INSERT INTO ledens.projects(name,project_id) VALUES('Obra Deshacer','P-DESHACER') RETURNING id")).rows[0].id;
+ const emp=(await q("INSERT INTO ledens.employees(name,activo) VALUES('Trabajador Deshacer',true) RETURNING id")).rows[0].id;
+ const active=async(b)=>(await q(`SELECT r.category,r.gross_amount::text gross,(SELECT project_id FROM ledens.project_financial_allocations a WHERE a.record_id=r.id) project
+  FROM ledens.financial_records r WHERE r.bank_movement_id=$1 AND r.source_valid AND r.status<>'excluded' ORDER BY r.gross_amount`,[b])).rows;
+ const events=async(action)=>(await q('SELECT reason,before_value FROM ledens.finance_events WHERE action=$1 ORDER BY id',[action])).rows;
+
+ // 1) Sent to Pago a trabajadores and one line saved with its worker and obra: it can become materials.
+ const nomina=await bankRow(-160,'Pago trabajador equivocado');
+ await classify(nomina,'trabajadores');
+ const lines=(await q('SELECT s.id FROM ledens.worker_payment_splits s JOIN ledens.worker_payment_batches b ON b.id=s.batch_id WHERE b.bank_movement_id=$1 ORDER BY s.line_number',[nomina])).rows;
+ assert.equal(lines.length,3);
+ assert.equal((await asAdmin().saveWorkerSplits({items:[{splitId:lines[0].id,employeeId:emp,projectId:project}]})).ok,1);
+ assert.deepEqual([(await row(nomina)).clase,(await row(nomina)).lote,(await row(nomina)).registros],['trabajadores',true,1]);
+ await assert.rejects(classify(nomina,'materiales'),{status:400,message:/motivo/});
+ const res=await classify(nomina,'materiales','Era un pago a la ferretería');
+ assert.equal(res.via,'material');
+ assert.deepEqual([(await row(nomina)).clase,(await row(nomina)).lote,(await row(nomina)).origen],['materiales',false,'provisional']);
+ assert.deepEqual(await active(nomina),[{category:'materials',gross:'160.00',project:null}],'only the provisional material counts: the saved worker payment no longer does');
+ assert.equal((await q('SELECT count(*)::int n FROM ledens.worker_payment_batches WHERE bank_movement_id=$1',[nomina])).rows[0].n,0,'its lines left Pendiente de trabajador');
+ const undone=(await events('worker_payment_undone')).at(-1);
+ assert.match(undone.reason,/Era un pago a la ferretería/);
+ assert.equal(undone.before_value.allocations[0].project_id,project,'the history keeps the obra it had');
+ assert.equal((await q("SELECT count(*)::int n FROM ledens.financial_records r JOIN ledens.worker_payments w ON w.id=r.worker_payment_id WHERE w.bank_movement_id=$1 AND r.status='excluded'",[nomina])).rows[0].n,1,'excluded, never deleted');
+
+ // 2) And back to Pago a trabajadores: the provisional is undone and a new batch is created.
+ assert.equal((await classify(nomina,'trabajadores','Sí era el trabajador')).via,'pendiente-trabajador');
+ assert.deepEqual([(await row(nomina)).clase,(await row(nomina)).lote],['trabajadores',true]);
+ assert.deepEqual(await active(nomina),[]);
+ assert.equal((await q('SELECT count(*)::int n FROM ledens.provisional_material_payments WHERE bank_movement_id=$1',[nomina])).rows[0].n,0,'no provisional left for 026/029 to replace');
+ // ...and to materials again: the same provisional material comes back.
+ const again=await classify(nomina,'materiales','Al final era material');
+ assert.deepEqual([again.materialId,again.restored],[res.materialId,true]);
+ assert.equal((await row(nomina)).origen,'provisional');
+
+ // 3) A cash payment sent to Pago a trabajadores becomes materials too.
+ const cash=(await q("INSERT INTO ledens.cash_movements(kind,amount,occurred_on,concept) VALUES('pago',70,'2026-10-20','Efectivo trabajador') RETURNING id")).rows[0].id;
+ await classify(cash,'trabajadores');
+ assert.equal((await row(cash)).lote,true);
+ assert.equal((await classify(cash,'materiales','Eran tornillos')).via,'efectivo');
+ assert.deepEqual([(await row(cash)).clase,(await row(cash)).lote],['materiales',false]);
+
+ // 4) A registered supplier refund becomes a client receipt, and back.
+ const abono=await bankRow(35,'Devolución o cobro');
+ const refund=await classify(abono,'reembolso_proveedor');
+ assert.equal((await classify(abono,'clientes','Era el cliente')).via,'cobro-cliente');
+ assert.deepEqual(await active(abono),[{category:'advance',gross:'35.00',project:null}]);
+ assert.equal((await row(abono)).clase,'clientes');
+ const back=await classify(abono,'reembolso_proveedor','Era la devolución');
+ assert.deepEqual([back.materialId,back.restored],[refund.materialId,true]);
+ assert.deepEqual(await active(abono),[{category:'materials',gross:'-35.00',project:null}]);
+ const receipt=await classify(abono,'clientes','Era el cliente al final');
+ assert.equal(receipt.restored,true,'the client receipt comes back too');
+ assert.equal((await q('SELECT count(*)::int n FROM ledens.customer_payments WHERE bank_movement_id=$1',[abono])).rows[0].n,1);
+ assert.equal((await row(abono)).clase,'clientes');
 });
