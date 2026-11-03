@@ -207,3 +207,25 @@ test('a detail that adds up becomes the invoice concepts and replaces the provis
  await assert.rejects(attach(reading([40],40)),{status:409,message:/ya tiene conceptos/});
  await assert.rejects(asAdmin().segregateMaterial(material),{status:409,message:/ya no cuenta/});
 });
+
+test('an Obramat factura de entrega is read from its PDF: its products, without the «YA PAGADO» line, segregate the anticipo payment',async()=>{
+ const q=(sql,p)=>db.query(sql,p);
+ const b=(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES('MOV-obramat',-60,-60,'2026-10-31','OBRAMAT','EUR','COMPLETED') RETURNING id`)).rows[0].id;
+ const d=(await q(`INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento,tercero) VALUES(-60,'Pagar','2026-10-20','008-0010-000001','OBRAMAT') RETURNING id`)).rows[0].id;
+ await q("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state,reconciled_on) VALUES($1,$2,-60,'Confirmado','2026-10-31')",[b,d]);
+ const m=(await asAdmin().classifyMovement({id:b,clase:'materiales',version:(await asAdmin().movements({pageSize:100})).rows.find(x=>x.id===b).version})).materialId;
+ // What readObramatPdf returns for a delivery: the goods, and the settlement line apart.
+ const line=(n,desc,gross,net)=>({line_number:n,description:desc,product_code:'1000000'+n,quantity:1,gross_amount:gross,net_amount:net,vat_amount:(Number(gross)-Number(net)).toFixed(2),evidence:{origin:'native-pdf-obramat-v1'}});
+ const delivery={kind:'delivery',document_number:'008-0010-000002',order_reference:'303468',lines:[line(1,'Puerta',  '36.30','30.00'),line(2,'Tirador','23.70','19.59')],
+  settlement_lines:[{line_number:3,description:'YA PAGADO DEL PEDIDO 303468',gross_amount:'-60.00'}]};
+ const attachNative=data=>asAdmin().attachDocumentDetail({id:b,documentId:d,content:PDF,ocr:null,readNative:async()=>({data})});
+ await assert.rejects(attachNative({...delivery,kind:'advance'}),{status:422,message:/es el anticipo del pedido 303468.*factura de entrega/});
+ const res=await attachNative(delivery);
+ assert.deepEqual([res.lineas,res.segregado],[2,true]);
+ assert.deepEqual((await q("SELECT gross_amount::text g,category FROM ledens.financial_records WHERE document_id=$1 AND source_valid AND status<>'excluded' ORDER BY gross_amount",[d])).rows,
+  [{g:'23.70',category:'materials'},{g:'36.30',category:'materials'}]);
+ assert.equal((await q('SELECT status FROM ledens.financial_records WHERE material_id=$1',[m])).rows[0].status,'excluded');
+ const ev=(await q("SELECT detail FROM ledens.bridge_events WHERE document_id=$1 AND action='detail_attached'",[d])).rows[0].detail;
+ assert.deepEqual([ev.source,ev.delivery_document,ev.order_reference],['native-pdf-obramat-v1','008-0010-000002','303468']);
+});
