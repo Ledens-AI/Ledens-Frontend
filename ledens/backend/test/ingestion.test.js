@@ -6,7 +6,7 @@ import { PDFDocument, StandardFonts } from 'pdf-lib';
 import express from 'express';
 import { createHash } from 'node:crypto';
 import { invoiceQuarter, validateInvoice } from '../src/ingestion/validation.js';
-import { extractInvoice, trustedOperation, partyNameEvidence, payslipPeriodEnd, payslipNet, validSpanishTaxId } from '../src/ingestion/ocr.js';
+import { extractInvoice, trustedOperation, partyNameEvidence, payslipPeriodEnd, payslipNet, validSpanishTaxId, soleDateConfidence } from '../src/ingestion/ocr.js';
 import { IngestionService } from '../src/ingestion/service.js';
 import { createIngestionRouter } from '../src/routes/ingestion.js';
 
@@ -154,6 +154,21 @@ test('a photo with no tax id fields is ours to pay when the OCR text prints our 
   // Our tax id as the issuer, before any buyer label: not a purchase. A poorly read id keeps it in review.
   assert.equal(extractInvoice(photo('EMISOR\nB19753805\nRECEPTOR\nOTRA S.L.\nA79209854')).direction,null);
   assert.ok(extractInvoice(photo('RECEPTOR\nB19753805\nA79209854',.4)).directionConfidence<.5);
+});
+
+test('a low-confidence OCR date is confirmed when it is the only full date printed, by the words that read it',async()=>{
+  const {archiveIssue}=await import('../src/ingestion/completeness.js');
+  const ticket=(content,date='2026-11-03')=>{const m=/\d{2}-\d{2}-\d{4}/.exec(content);return {analyzeResult:{content,documents:[{fields:{InvoiceDate:{valueDate:date,confidence:.439},
+    VendorName:{valueString:'EESSA ES. TORREMOLINOS',confidence:.93},VendorTaxId:{valueString:'CIF:A80393812',confidence:.93},
+    CustomerTaxId:{valueString:'B19753805',confidence:.64},InvoiceTotal:{valueCurrency:{amount:80,currencyCode:'EUR'},confidence:.82}}}],
+    pages:[{words:m?[{content:m[0],confidence:.994,span:{offset:m.index,length:10}}]:[]}]}};};
+  const r=extractInvoice(ticket('FACTURA : 0010554444\nTOTAL € 80.00\nCliente:\nNIF B19753805\n03-11-2026 06:38:25 2815 NATI'));
+  assert.deepEqual([r.date,r.confidence,r.total,r.direction,r.corroborated.date],['2026-11-03',.994,-80,'Pagar','sole_date_in_ocr_text']);
+  assert.equal(archiveIssue({document_on:r.date,total:r.total,tipo:r.direction,invoice_currency:r.currency,date_confidence:r.confidence,total_confidence:r.totalConfidence,direction_confidence:r.directionConfidence}),null);
+  // Another date printed, or the OCR picked a date that is not the printed one: still in review.
+  assert.equal(extractInvoice(ticket('03-11-2026 06:38\nVencimiento 03/12/2026')).reason,'invoice_date_requires_review');
+  assert.equal(extractInvoice(ticket('03-11-2026 06:38','2026-11-30')).reason,'invoice_date_requires_review');
+  assert.equal(soleDateConfidence(ticket('03-11-2026 y 2026-11-03'),'2026-11-03'),.994,'the same date in two formats is one date');
 });
 
 test('supplier corroboration uses only high-confidence words inside the vendor field and a verified vendor NIF',()=>{

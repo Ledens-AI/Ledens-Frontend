@@ -110,6 +110,22 @@ export function payslipNet(text) {
 }
 // The text without separators, to look a tax id up in it («B-84406289» → B84406289).
 const compact = (text) => normalize(text).replace(/\s/g, '');
+// Tickets often print their date only in an unlabelled timestamp line («03-11-2026
+// 06:38:25 …»), so the OCR reads the right date with low confidence. When that date
+// is the only full date printed (dd-mm-yyyy, dd/mm/yyyy, dd.mm.yyyy or yyyy-mm-dd),
+// it cannot be another one: its confidence is the lowest of the OCR words that read
+// it. Two different dates (invoice and due date, say): null, it stays in review.
+export function soleDateConfidence(result, iso) {
+  const content = String(result.analyzeResult?.content || '');
+  const dates = [...content.matchAll(/\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\b|\b(\d{4})-(\d{2})-(\d{2})\b/g)].map((m) => ({
+    at: m.index, length: m[0].length,
+    iso: m[1] ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : `${m[4]}-${m[5]}-${m[6]}`,
+  })).filter((d) => invoiceQuarter(d.iso));
+  if (!iso || new Set(dates.map((d) => d.iso)).size !== 1 || dates[0].iso !== iso) return null;
+  const words = (result.analyzeResult.pages || []).flatMap((p) => p.words || [])
+    .filter((w) => w.span && dates.some((d) => w.span.offset < d.at + d.length && w.span.offset + w.span.length > d.at));
+  return words.length ? Math.min(...words.map((w) => w.confidence)) : null;
+}
 
 export function trustedOperation(url, endpoint) {
   const value = new URL(url);
@@ -162,7 +178,9 @@ export function extractInvoice(result, {businessTaxId=process.env.BRIDGE_BUSINES
   if(f.InvoiceTotal?.valueCurrency?.amount===0&&/YA PAGADO DEL PEDIDO/i.test(result.analyzeResult?.content||''))return {reason:'purchase_zero_requires_native_or_review'};
   const periodEnd = payslipPeriodEnd(`${result.analyzeResult?.content || ''}\n${pdfText}`);
   const date = periodEnd || f.InvoiceDate?.valueDate;
-  const confidence = periodEnd ? TEXT_CONFIDENCE : f.InvoiceDate?.confidence || 0;
+  const fieldConfidence = f.InvoiceDate?.confidence || 0;
+  const soleDate = !periodEnd && fieldConfidence < INVOICE_MIN_CONFIDENCE ? soleDateConfidence(result, date) : null;
+  const confidence = periodEnd ? TEXT_CONFIDENCE : soleDate !== null && soleDate > fieldConfidence ? soleDate : fieldConfidence;
   const quarter = invoiceQuarter(date);
   if (!quarter || confidence < INVOICE_MIN_CONFIDENCE || confidence > 1) return {reason:'invoice_date_requires_review'};
   const text = name => typeof f[name]?.valueString === 'string' ? f[name].valueString.slice(0,1000) : null;
@@ -209,7 +227,7 @@ export function extractInvoice(result, {businessTaxId=process.env.BRIDGE_BUSINES
   // Total: the OCR's, confirmed by the text; or the text's when the OCR has none.
   const textTotal=pdfText?textTotals(pdfText):[];
   let total=money('InvoiceTotal'),totalConfidence=f.InvoiceTotal?.confidence||0,currency=f.InvoiceTotal?.valueCurrency?.currencyCode||null;
-  const corroborated=periodEnd?{date:'payslip_period_end'}:{};
+  const corroborated=periodEnd?{date:'payslip_period_end'}:confidence!==fieldConfidence?{date:'sole_date_in_ocr_text'}:{};
   if(total!==null&&textTotal.includes(Math.round(Math.abs(total)*100))){if(totalConfidence<TEXT_CONFIDENCE){totalConfidence=TEXT_CONFIDENCE;corroborated.total='ocr_total_in_text';}}
   else if(total===null&&textTotal.length===1){total=textTotal[0]/100;totalConfidence=TEXT_CONFIDENCE;corroborated.total='text_total';
     if(!currency&&/€|\bEUR\b/i.test(pdfText))currency='EUR';}
