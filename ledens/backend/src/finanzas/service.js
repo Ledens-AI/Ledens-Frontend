@@ -1,10 +1,12 @@
-import {hasPurchases} from '../finance/purchases.js';
+import {hasPurchases,registerPurchaseDocument,PurchaseReviewError} from '../finance/purchases.js';
 import {readObramatPdf} from '../ingestion/obramat.js';
 // Spanish UI facade: never writes source project_id or a parallel money ledger.
 import {createHash} from 'node:crypto';
 import {FinanceService,FinanceError,uuid} from '../finance/service.js';
 import {cents,decimal,bankFingerprint} from '../bridge/rules.js';
 import {extractLines,storeInvoiceLines} from '../finance/ingestion.js';
+import {extractInvoice} from '../ingestion/ocr.js';
+import {pageTexts} from '../ingestion/validation.js';
 export class FinError extends FinanceError {constructor(status,message,extra){super(status,message);this.extra=extra;}}
 export const isUuid=uuid;
 export const TYPES={material:{label:'Material'},trabajador:{label:'Trabajador'},cliente:{label:'Cliente'},concepto:{label:'Concepto de factura'}};
@@ -141,6 +143,7 @@ const movementsSql=purchases=>`WITH links AS(SELECT bank_movement_id,document_id
    (t.customer_payment_id IS NOT NULL OR EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=t.id)) cobro_cliente,
    (t.search_text ~* ${OBRAMAT_TEXT} OR coalesce(d.obramat_doc,false)) obramat,
    coalesce(d.solo_compras,false) solo_compras,
+   coalesce(d.devolucion_anticipo,false) devolucion_anticipo,
    t.marked_transfer transferencia,
    -- Active records of the movement itself (an imported worker payment or material,
    -- a provisional, a refund, a client receipt): they classify it, whatever its
@@ -150,7 +153,9 @@ const movementsSql=purchases=>`WITH links AS(SELECT bank_movement_id,document_id
   FROM ledens.treasury_movements t LEFT JOIN LATERAL(SELECT string_agg(DISTINCT coalesce(dd.numerodocumento,'Sin número'),', ') documentos,count(*)::int n,
     bool_or(NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=dd.id AND r.source_valid AND r.status<>'excluded')) sin_registros,
     bool_or(${isObramatDoc('dd')}) obramat_doc,
-    ${purchases?"bool_and(EXISTS(SELECT 1 FROM ledens.purchase_documents pd WHERE pd.document_id=dd.id AND pd.kind IN ('advance','advance_refund')))":'false'} solo_compras
+    ${purchases?"bool_and(EXISTS(SELECT 1 FROM ledens.purchase_documents pd WHERE pd.document_id=dd.id AND pd.kind IN ('advance','advance_refund')))":'false'} solo_compras,
+    -- The devolución of an anticipo registered by «Segregar»: the anticipo's lines already discount it.
+    bool_and(EXISTS(SELECT 1 FROM ledens.bridge_events be WHERE be.document_id=dd.id AND be.action='order_refund_registered')) devolucion_anticipo
    FROM links l JOIN ledens.documents dd ON dd.id=l.document_id WHERE l.bank_movement_id=t.id) d ON true
   WHERE t.validable AND t.amount<>0),
  cls AS(SELECT m.*,coalesce(a.n,0) registros,coalesce(a.version,md5('')) version,
@@ -160,15 +165,21 @@ const movementsSql=purchases=>`WITH links AS(SELECT bank_movement_id,document_id
   -- concepts are reported when a record is assigned to an obra.
   ('x'=ANY(coalesce(a.clases,'{}'::text[]))) desconocido
   FROM movs m LEFT JOIN agg a ON a.mov=m.id),
- fin AS(SELECT c.*,CASE WHEN c.transferencia THEN 'transferencia' WHEN c.obramat AND c.solo_compras THEN 'materiales' WHEN c.desconocido OR cardinality(c.conocidas)=0 THEN 'pendiente'
+ fin AS(SELECT c.*,CASE WHEN c.transferencia THEN 'transferencia' WHEN (c.obramat AND c.solo_compras) OR c.devolucion_anticipo THEN 'materiales' WHEN c.desconocido OR cardinality(c.conocidas)=0 THEN 'pendiente'
    WHEN cardinality(c.conocidas)=1 THEN CASE WHEN c.conocidas[1]='materiales' AND c.importe>0 THEN 'reembolso_proveedor' ELSE c.conocidas[1] END ELSE 'mixto' END clase,
   CASE WHEN c.importe<0 THEN 'pago' ELSE 'cobro' END sentido FROM cls c)`;
 // One row of «Concepto de movimientos» (list and single movement).
 const MOVEMENT_COLUMNS=' SELECT id,tipo,origin,fecha::text fecha,tercero,concepto,referencia,importe::text importe,documentos,clase,conocidas,sentido,version,registros,lote,obramat,propia,'+
- "CASE WHEN transferencia THEN 'transferencia' WHEN obramat AND solo_compras THEN 'compra_obramat' WHEN provisional THEN 'provisional' WHEN reembolso THEN 'registro' WHEN n_docs>0 THEN 'bridge' WHEN lote THEN 'trabajadores' WHEN registros>0 THEN 'registro' ELSE 'ninguno' END origen";
+ "CASE WHEN transferencia THEN 'transferencia' WHEN obramat AND solo_compras THEN 'compra_obramat' WHEN devolucion_anticipo THEN 'devolucion_anticipo' WHEN provisional THEN 'provisional' WHEN reembolso THEN 'registro' WHEN n_docs>0 THEN 'bridge' WHEN lote THEN 'trabajadores' WHEN registros>0 THEN 'registro' ELSE 'ninguno' END origen";
 // «Adjuntar detalle»: the product detail of a reconciled document without
 // concepts is read with the invoice OCR (Document Intelligence, F0: 4 MB).
 export const DETAIL_MAX_BYTES=4*1024*1024;
+// «Segregar» with the documents of an anticipo: the anticipo, its devoluciones and invoices.
+export const ORDER_MAX_FILES=6;
+// A document number or tax id compared without spaces, dashes or case.
+const number=s=>String(s||'').replace(/[^0-9A-Z]/gi,'').toUpperCase();
+// The first word of a supplier's name (4+ letters), looked for in a bank movement's texts.
+const supplierWord=s=>(String(s||'').match(/[A-Za-zÀ-ÿ]{4,}/)||[''])[0];
 const DETAIL_TYPES=[['application/pdf',b=>b.subarray(0,5).toString()==='%PDF-'],['image/png',b=>b.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))],
  ['image/jpeg',b=>b[0]===255&&b[1]===216&&b[2]===255]];
 // A supplier refund record: a material registered from a bank receipt (negative cost, no document).
@@ -878,15 +889,7 @@ export class FinanzasService {
   if(this.user.role!=='admin')throw new FinError(403,'Segregar conceptos requiere administrador');
   if(!uuid(materialId))throw new FinError(404,'Material no encontrado');
   return this.finance.transaction(async c=>{
-   const m=(await c.query(`SELECT r.status,r.source_valid,r.document_id,r.gross_amount::text gross,
-     coalesce(r.bank_movement_id,me.bank_movement_id) bank_movement_id,bm.total_amount::text movement_total
-     FROM ledens.material_expenses me JOIN ledens.financial_records r ON r.material_id=me.id
-     LEFT JOIN ledens.bank_movements bm ON bm.id=coalesce(r.bank_movement_id,me.bank_movement_id)
-     WHERE me.id=$1 FOR UPDATE OF r`,[materialId])).rows[0];
-   if(!m)throw new FinError(404,'Material no encontrado');
-   const p=(await c.query('SELECT * FROM ledens.provisional_material_payments WHERE material_id=$1 FOR UPDATE',[materialId])).rows[0];
-   if(p?.replaced_at||m.status==='excluded'||!m.source_valid)throw new FinError(409,'Este material ya no cuenta: sus conceptos ya se han segregado o se ha descartado');
-   const movement=p?.bank_movement_id||m.bank_movement_id||null;
+   const {m,p,movement}=await this.segregable(c,materialId);
    const docs=(await c.query(`SELECT d.id,d.numerodocumento,d.total::text total,
      EXISTS(SELECT 1 FROM ledens.bank_document_allocations a WHERE a.document_id=d.id AND a.bank_movement_id=$1::uuid AND a.state='Confirmado') conciliado,
      EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded') conceptos
@@ -900,19 +903,243 @@ export class FinanzasService {
     {movimiento_id:movement,sin_conceptos:bare.filter(d=>d.conciliado).map(({conceptos,conciliado,...d})=>d)});
    const loose=docs.find(d=>!d.conciliado);
    if(loose)throw new FinError(409,`El documento ${loose.numerodocumento||'del material'} no está conciliado con el movimiento del pago: concílialo en el Bridge para segregar sus líneas`);
-   if(!p){
-    // Not provisional yet: it becomes the provisional payment of its movement, so
-    // 026/029 replace it exactly as they replace one classified in Concepto de movimientos.
-    const abs=v=>{const n=cents(v);return n<0n?-n:n;};
-    if(!m.movement_total||abs(m.gross)!==abs(m.movement_total))throw new FinError(409,`El importe del material (${decimal(abs(m.gross))} €) no coincide con el del movimiento (${decimal(abs(m.movement_total||0))} €): asígnalo o corrígelo a mano`);
-    await c.query('INSERT INTO ledens.provisional_material_payments(material_id,bank_movement_id,created_by) VALUES($1,$2,$3)',[materialId,movement,this.user.id]);
-   }
-   // Normally done by 026's triggers already; this covers a document whose records came first.
-   await c.query('SELECT ledens.replace_provisional_materials($1)',[movement]);
-   if(!(await c.query('SELECT replaced_at FROM ledens.provisional_material_payments WHERE material_id=$1',[materialId])).rows[0]?.replaced_at)
-    throw new FinError(409,'No se han podido segregar las líneas de la factura; revisa la conciliación del movimiento en el Bridge');
+   await this.replaceMaterial(c,materialId,{m,p,movement});
    return {material_id:materialId,segregado:true,documentos:docs.map(d=>d.numerodocumento)};
   });
+ }
+ // The material to segregate, locked, with its provisional row and its bank movement.
+ async segregable(c,materialId){
+  const m=(await c.query(`SELECT r.status,r.source_valid,r.document_id,r.gross_amount::text gross,
+    coalesce(r.bank_movement_id,me.bank_movement_id) bank_movement_id,bm.total_amount::text movement_total
+    FROM ledens.material_expenses me JOIN ledens.financial_records r ON r.material_id=me.id
+    LEFT JOIN ledens.bank_movements bm ON bm.id=coalesce(r.bank_movement_id,me.bank_movement_id)
+    WHERE me.id=$1 FOR UPDATE OF r`,[materialId])).rows[0];
+  if(!m)throw new FinError(404,'Material no encontrado');
+  const p=(await c.query('SELECT * FROM ledens.provisional_material_payments WHERE material_id=$1 FOR UPDATE',[materialId])).rows[0];
+  if(p?.replaced_at||m.status==='excluded'||!m.source_valid)throw new FinError(409,'Este material ya no cuenta: sus conceptos ya se han segregado o se ha descartado');
+  return {m,p,movement:p?.bank_movement_id||m.bank_movement_id||null};
+ }
+ // The material is replaced by the concepts of the documents reconciled with its movement.
+ async replaceMaterial(c,materialId,{m,p,movement}){
+  if(!p){
+   // Not provisional yet: it becomes the provisional payment of its movement, so
+   // 026/029 replace it exactly as they replace one classified in Concepto de movimientos.
+   const abs=v=>{const n=cents(v);return n<0n?-n:n;};
+   if(!m.movement_total||abs(m.gross)!==abs(m.movement_total))throw new FinError(409,`El importe del material (${decimal(abs(m.gross))} €) no coincide con el del movimiento (${decimal(abs(m.movement_total||0))} €): asígnalo o corrígelo a mano`);
+   await c.query('INSERT INTO ledens.provisional_material_payments(material_id,bank_movement_id,created_by) VALUES($1,$2,$3)',[materialId,movement,this.user.id]);
+  }
+  // Normally done by 026's triggers already; this covers a document whose records came first.
+  await c.query('SELECT ledens.replace_provisional_materials($1)',[movement]);
+  if(!(await c.query('SELECT replaced_at FROM ledens.provisional_material_payments WHERE material_id=$1',[materialId])).rows[0]?.replaced_at)
+   throw new FinError(409,'No se han podido segregar las líneas de la factura; revisa la conciliación del movimiento en el Bridge');
+ }
+ // «Segregar» with the documents of an anticipo, from any supplier. The anticipo
+ // reconciled with the payment has no concepts: its products come in one or more
+ // invoices (facturas de entrega), and part of it may come back in a devolución (a
+ // credit note, or an invoice the supplier pays us). The admin attaches them
+ // together. An Obramat PDF is read from its own text (readObramatPdf) and must be of
+ // the same order as the other Obramat ones; any other document with the invoice OCR
+ // (prebuilt-invoice: total, number, supplier, date and lines). What a document is
+ // comes from what it says: the anticipo itself (its number), a devolución (money
+ // to us: a receipt, or a negative invoice), or an invoice with products (money from
+ // us; its positive lines are the products, its negative ones the anticipo it deducts,
+ // and they must add up to its total). Every document is of the anticipo's supplier
+ // (tax id, when both are known), and they must add up to it:
+ // anticipo = productos de las facturas + devoluciones.
+ // The products become the anticipo's concepts, and each devolución one more concept
+ // that is excluded at once (it is not a cost: its money comes back in its own
+ // movement). The devolución is registered as its own document (an Obramat one through
+ // 014; any other as a plain receipt, bridge_events 'order_refund_registered') and
+ // reconciled with its bank receipt: one of that amount in the payment's account,
+ // from the payment's date to 60 days after the devolución, with no other link or
+ // assigned record (an unassigned «Reembolso de proveedor» on it is excluded: the
+ // devolución already lowers the cost). Several such receipts: the admin picks one
+ // (refundMovements, {número de la devolución: movimiento}); none: it waits for the Bridge.
+ // The documents are read outside the transaction; everything else runs in one, so
+ // any error registers nothing.
+ async segregateOrder({materialId,files,refundMovements={},ocr=null,readNative=readObramatPdf,timeoutMs=40000,pollMs=1500}={}){
+  if(this.user.role!=='admin')throw new FinError(403,'Segregar conceptos requiere administrador');
+  if(!uuid(materialId))throw new FinError(404,'Material no encontrado');
+  if(!Array.isArray(files)||!files.length)throw new FinError(400,'Adjunta los documentos del anticipo');
+  if(files.length>ORDER_MAX_FILES)throw new FinError(413,`Adjunta como máximo ${ORDER_MAX_FILES} documentos`);
+  const read=[];
+  for(const [i,content] of files.entries()){
+   const name=`El archivo ${i+1}`;
+   if(!Buffer.isBuffer(content)||!content.length)throw new FinError(400,`${name} está vacío`);
+   if(content.length>DETAIL_MAX_BYTES)throw new FinError(413,`${name} supera 4 MB, el máximo que admite el lector`);
+   const type=DETAIL_TYPES.find(([,ok])=>ok(content))?.[0];
+   if(!type)throw new FinError(415,`${name}: formato no admitido, adjunta un PDF, JPG o PNG`);
+   const native=type==='application/pdf'?(await readNative(content).catch(()=>null))?.data:null;
+   if(native){read.push({...native,name,source:'native-pdf-obramat-v1',tax_id:native.issuer_tax_id,vendor:'OBRAMAT',
+    amount:native.kind==='advance_refund'?-cents(native.nominal_gross):native.kind==='advance'?cents(native.nominal_gross):cents(native.applied_gross)});continue;}
+   if(!ocr)throw new FinError(503,'La lectura de documentos no está configurada');
+   const result=await this.ocrResult(content,type,ocr,{timeoutMs,pollMs});
+   const info=extractInvoice(result,{pdfText:type==='application/pdf'?(await pageTexts(content,3).catch(()=>[])).join('\n'):''});
+   if(info.reason||info.total==null||!info.direction)throw new FinError(422,`${name}: no se ha podido leer su total y si es un pago o un cobro; adjunta una copia más legible`);
+   if(info.currency&&info.currency!=='EUR')throw new FinError(422,`${name} no está en euros`);
+   const signed=cents(String(info.total));
+   const hash=createHash('sha256').update(content).digest('hex');
+   const lines=extractLines(result).map(l=>({...l,evidence:{...l.evidence,attached_detail:true,attachment_sha256:hash}}));
+   read.push({name,source:'azure-di',document_number:info.number||null,tax_id:info.taxId||null,vendor:info.vendor||null,issued_on:info.date,
+    signed,amount:signed<0n?-signed:signed,kind:signed>0n?'advance_refund':'delivery',lines,hash});
+  }
+  const orders=[...new Set(read.filter(d=>d.source!=='azure-di').map(d=>d.order_reference))];
+  if(orders.length>1)throw new FinError(422,`Los documentos de Obramat son de pedidos distintos (${orders.join(', ')}): adjunta solo los del pedido del anticipo`);
+  const order=orders[0]||null;
+  const numbered=read.filter(d=>d.document_number).map(d=>number(d.document_number));
+  if(new Set(numbered).size<numbered.length)throw new FinError(422,'Has adjuntado dos veces el mismo documento');
+  return this.finance.transaction(async c=>{
+   const {m,p,movement}=await this.segregable(c,materialId);
+   if(!movement)throw new FinError(409,'Este material no tiene movimiento bancario: no hay anticipo que segregar');
+   const docs=(await c.query(`SELECT d.id,d.numerodocumento,d.total::text total,d.tipo,d.tercero,d.niftercero,
+     EXISTS(SELECT 1 FROM ledens.bank_document_allocations a WHERE a.document_id=d.id AND a.bank_movement_id=$1 AND a.state='Confirmado') conciliado,
+     EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded') conceptos
+     FROM ledens.documents d WHERE d.id=$2::uuid OR d.id IN(SELECT a.document_id FROM ledens.bank_document_allocations a WHERE a.bank_movement_id=$1 AND a.state='Confirmado')
+     ORDER BY d.numerodocumento,d.id`,[movement,m.document_id||null])).rows;
+   if(!docs.length)throw new FinError(409,'Este material aún no tiene documento asignado: concilia su movimiento con la factura del anticipo en el Bridge');
+   if(docs.length>1)throw new FinError(409,`El pago está conciliado con varios documentos (${docs.map(d=>d.numerodocumento||'sin número').join(', ')}): con varios documentos solo se segrega un pago conciliado únicamente con su anticipo`);
+   const a=docs[0],supplier=number(a.niftercero);
+   if(!a.conciliado)throw new FinError(409,`El documento ${a.numerodocumento||'del material'} no está conciliado con el movimiento del pago: concílialo en el Bridge`);
+   if(a.conceptos)throw new FinError(409,`El documento ${a.numerodocumento||'conciliado'} ya tiene conceptos: segrégalo sin adjuntar documentos`);
+   if(a.tipo!=='Pagar')throw new FinError(409,`El documento ${a.numerodocumento||'conciliado'} no es un pago: revisa su ingesta`);
+   const total=cents(a.total)<0n?-cents(a.total):cents(a.total);
+   // The anticipo itself, attached as a copy: it proves nothing new, but must be it.
+   for(const d of read)if(d.document_number&&a.numerodocumento&&number(d.document_number)===number(a.numerodocumento))d.kind='anticipo';
+   for(const d of read.filter(d=>d.kind==='advance'))throw new FinError(422,`${d.name} es el anticipo ${d.document_number}, y el pago está conciliado con ${a.numerodocumento||'otro documento'}`);
+   for(const d of read.filter(d=>d.kind==='anticipo'))if(d.amount!==total)throw new FinError(422,`${d.name} es el anticipo ${a.numerodocumento} por ${decimal(d.amount)} €, y el documento conciliado es de ${decimal(total)} €: revisa su ingesta`);
+   const other=read.find(d=>supplier&&number(d.tax_id)&&number(d.tax_id)!==supplier);
+   if(other)throw new FinError(422,`${other.name} es de otro proveedor (${other.vendor||other.tax_id}) que el anticipo ${a.numerodocumento||''} (${a.tercero||a.niftercero})`);
+   const purchases=await hasPurchases(c);
+   const known=purchases&&order?(await c.query('SELECT * FROM ledens.purchase_documents WHERE issuer_tax_id=$1 AND buyer_tax_id=$2 AND order_reference=$3 AND currency=$4',
+    [OBRAMAT_TAX_ID,read.find(d=>d.order_reference).buyer_tax_id,order,'EUR'])).rows:[];
+   const registered=known.find(d=>d.document_id===a.id);
+   if(order&&purchases&&!registered&&(await c.query('SELECT 1 FROM ledens.purchase_documents WHERE document_id=$1',[a.id])).rows.length)
+    throw new FinError(422,`El anticipo ${a.numerodocumento} es de otro pedido de Obramat que los documentos adjuntos`);
+   // An invoice: its positive lines are the products, its negative ones the anticipo it
+   // deducts; all of them add up to its total, or the reading is not to be trusted.
+   const deliveries=read.filter(d=>d.kind==='delivery');
+   for(const d of deliveries.filter(d=>d.source==='azure-di')){
+    const amounts=d.lines.map(l=>cents(l.gross_amount));
+    if(!d.lines.length||amounts.some(n=>n===null))throw new FinError(422,`${d.name}${d.document_number?' ('+d.document_number+')':''}: no se han podido leer los importes de cada producto`);
+    const sum=amounts.reduce((s,n)=>s+n,0n);
+    if(sum!==d.amount)throw new FinError(422,`${d.name}${d.document_number?' ('+d.document_number+')':''}: sus productos suman ${decimal(sum)} € y su total es ${decimal(d.amount)} €, así que no se puede saber qué parte paga el anticipo`);
+    d.lines=d.lines.filter(l=>cents(l.gross_amount)>0n);
+    d.amount=d.lines.reduce((s,l)=>s+cents(l.gross_amount),0n);
+   }
+   if(!deliveries.length)throw new FinError(422,'Falta la factura con los productos del anticipo');
+   // Products registered elsewhere (an invoice ingested on its own) would count twice.
+   const twice=(await c.query(`SELECT d.numerodocumento FROM ledens.documents d WHERE d.id<>$1
+     AND upper(regexp_replace(coalesce(d.numerodocumento,''),'[^0-9A-Za-z]','','g'))=ANY($2::text[])
+     AND ($3='' OR upper(regexp_replace(coalesce(d.niftercero,''),'[^0-9A-Za-z]','','g')) IN ('',$3))
+     AND EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded')`,
+    [a.id,deliveries.filter(d=>d.document_number).map(d=>number(d.document_number)),supplier])).rows;
+   if(twice.length)throw new FinError(409,`La factura ${twice[0].numerodocumento} ya está registrada con sus productos: segregarla aquí los contaría dos veces`);
+   const refunds=[...read.filter(d=>d.kind==='advance_refund'),
+    ...known.filter(d=>d.kind==='advance_refund'&&!read.some(x=>x.document_number===d.document_number)).map(d=>({...d,amount:-cents(d.nominal_gross),known:true}))];
+   if(refunds.some(r=>r.source==='native-pdf-obramat-v1')&&!purchases)throw new FinError(503,'El registro de compras de Obramat no está disponible: no se puede registrar la devolución');
+   const goods=deliveries.reduce((s,d)=>s+d.amount,0n),back=refunds.reduce((s,r)=>s+r.amount,0n);
+   if(goods+back!==total)throw new FinError(422,`El anticipo ${a.numerodocumento||''} es de ${decimal(total)} €, y los productos de las facturas (${decimal(goods)} €) más las devoluciones (${decimal(back)} €) suman ${decimal(goods+back)} €: ${goods+back<total?'falta algún documento':'sobra algún documento'}. No se ha registrado nada.`);
+   let n=0;const lines=[];
+   for(const d of deliveries)for(const l of d.lines)lines.push({...l,line_number:++n,currency:'EUR',confidence:l.confidence??1,
+    evidence:{...l.evidence,attached_detail:true,...(order?{order_reference:order}:{}),delivery_document:d.document_number,delivery_line:l.line_number}});
+   const refundLines=refunds.map(r=>({line_number:++n,description:`Devolución del anticipo · ${r.document_number||'sin número'}`,quantity:1,gross_amount:decimal(r.amount),currency:'EUR',confidence:1,
+    evidence:{origin:r.source||'native-pdf-obramat-v1',line_kind:'advance_refund',...(order?{order_reference:order}:{}),refund_document:r.document_number||null}}));
+   const reason=`Documentos del anticipo ${a.numerodocumento||''} adjuntados en Segregar`;
+   let stored;
+   try{stored=await storeInvoiceLines(c,a.id,[...lines,...refundLines],{currency:'EUR',direction:a.tipo,actorId:this.user.id,reason});}
+   catch(e){throw new FinError(409,`El documento ${a.numerodocumento} tiene líneas que hay que revisar antes de segregarlo (${e.message})`);}
+   if(!stored?.balanced)throw new FinError(422,`Las líneas leídas no cuadran con el anticipo ${a.numerodocumento}: no se ha registrado nada`);
+   // A devolución is part of the anticipo, but not a cost: its money comes back.
+   const excluded=(await c.query(`UPDATE ledens.financial_records f SET status='excluded',source_valid=false,version=f.version+1,updated_at=now()
+     FROM ledens.invoice_lines l WHERE l.id=f.invoice_line_id AND l.document_id=$1 AND l.line_number=ANY($2::int[]) RETURNING f.*`,[a.id,refundLines.map(l=>l.line_number)])).rows;
+   for(const r of excluded)await c.query('INSERT INTO ledens.finance_events(record_id,actor_id,action,reason,before_value,after_value) VALUES($1,$2,$3,$4,$5,$6)',
+    [r.id,this.user.id,'advance_refund_line','Devolución del anticipo: el proveedor devuelve su importe, no es coste',JSON.stringify({...r,status:'pending',source_valid:true}),JSON.stringify(r)]);
+   const pay=(await c.query('SELECT bank_account_id,completed_on FROM ledens.bank_movements WHERE id=$1',[movement])).rows[0];
+   const used=new Set(),ambiguous=[],devoluciones=[];
+   for(const r of refunds){
+    const label=r.document_number||`del ${r.name.slice(3)}`;
+    const id=r.known?r.document_id:await this.registerRefund(c,r,a,order);
+    const amount=decimal(r.amount);
+    const linked=(await c.query(`SELECT b.id,b.source_id,b.completed_on::text fecha FROM ledens.bank_document_allocations x JOIN ledens.bank_movements b ON b.id=x.bank_movement_id
+      WHERE x.document_id=$1 AND x.state='Confirmado' ORDER BY b.completed_on LIMIT 1`,[id])).rows[0];
+    if(linked){devoluciones.push({documento:label,importe:amount,movimiento:linked,vinculado:false});continue;}
+    const candidates=(await c.query(`SELECT b.id,b.source_id,b.completed_on::text fecha,coalesce(b.beneficiary_name,b.payer) tercero,coalesce(nullif(b.description,''),b.reference) concepto,
+      ($5<>'' AND concat_ws(' ',b.beneficiary_name,b.payer,b.description,b.reference) ILIKE '%'||$5||'%') proveedor
+     FROM ledens.bank_movements b WHERE b.total_amount=$1::numeric AND coalesce(b.currency,'EUR')='EUR' AND coalesce(b.state,'COMPLETED')='COMPLETED'
+      AND b.bank_account_id IS NOT DISTINCT FROM $2::uuid AND b.completed_on>=$3::date AND b.completed_on<=coalesce($4::date,$3::date)+60 AND NOT coalesce(b.is_internal_transfer,false)
+      AND NOT EXISTS(SELECT 1 FROM ledens.bank_document_allocations x WHERE x.bank_movement_id=b.id)
+      AND NOT EXISTS(SELECT 1 FROM ledens.internal_transfers it WHERE it.bank_movement_id=b.id)
+      AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=b.id)
+      AND NOT EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=b.id)
+      AND NOT EXISTS(SELECT 1 FROM ledens.financial_records f WHERE f.bank_movement_id=b.id AND f.source_valid AND f.status<>'excluded'
+       AND (f.material_id IS NULL OR EXISTS(SELECT 1 FROM ledens.project_financial_allocations pa WHERE pa.record_id=f.id)))
+     ORDER BY b.completed_on,b.id LIMIT 20`,[amount,pay.bank_account_id,pay.completed_on,r.issued_on||null,supplierWord(a.tercero||r.vendor)])).rows.filter(b=>!used.has(b.id));
+    const chosen=refundMovements[label];
+    let q=null;
+    if(chosen){q=candidates.find(b=>b.id===chosen);if(!q)throw new FinError(409,`El movimiento elegido para la devolución ${label} ya no está disponible: vuelve a segregar`);}
+    else if(candidates.length===1)q=candidates[0];
+    else if(candidates.filter(b=>b.proveedor).length===1)q=candidates.find(b=>b.proveedor);
+    else if(candidates.length){ambiguous.push({documento:label,importe:amount,candidatos:candidates.map(({proveedor,...b})=>b)});continue;}
+    if(!q){devoluciones.push({documento:label,importe:amount,movimiento:null});continue;}
+    used.add(q.id);
+    await c.query(`INSERT INTO ledens.bank_document_allocations(document_id,bank_movement_id,allocated_amount,state,reconciled_on,observaciones)
+     VALUES($1,$2,$3,'Confirmado',CURRENT_DATE,$4)`,[id,q.id,amount,`SEGREGAR_ANTICIPO: devolución del anticipo ${a.numerodocumento||''}`]);
+    await c.query("UPDATE ledens.documents SET estadopagocobro='Cobrado' WHERE id=$1",[id]);
+    await c.query('INSERT INTO ledens.bridge_events(document_id,bank_movement_id,actor_id,action,detail) VALUES($1,$2,$3,$4,$5)',
+     [id,q.id,this.user.id,'order_refund_linked',JSON.stringify({...(order?{order_reference:order}:{}),amount,advance_document_id:a.id,source:r.source||'native-pdf-obramat-v1'})]);
+    // A receipt classified as «Reembolso de proveedor» would lower the cost a second time.
+    const refundRecords=(await c.query(`UPDATE ledens.financial_records SET status='excluded',source_valid=false,version=version+1,updated_at=now()
+      WHERE bank_movement_id=$1 AND material_id IS NOT NULL AND source_valid AND status<>'excluded' RETURNING *`,[q.id])).rows;
+    for(const x of refundRecords)await c.query('INSERT INTO ledens.finance_events(record_id,actor_id,action,reason,before_value,after_value) VALUES($1,$2,$3,$4,$5,$6)',
+     [x.id,this.user.id,'order_refund_linked',`Cobro conciliado con la devolución ${label} del anticipo ${a.numerodocumento||''}: ya la descuenta del anticipo`,JSON.stringify({...x,status:'pending',source_valid:true}),JSON.stringify(x)]);
+    devoluciones.push({documento:label,importe:amount,movimiento:{id:q.id,source_id:q.source_id,fecha:q.fecha},vinculado:true});
+   }
+   if(ambiguous.length)throw new FinError(409,`Hay varios cobros que pueden ser la devolución ${ambiguous[0].documento} (${ambiguous[0].importe} €): elige cuál es`,{devoluciones_ambiguas:ambiguous});
+   await this.replaceMaterial(c,materialId,{m,p,movement});
+   await c.query('INSERT INTO ledens.bridge_events(document_id,bank_movement_id,actor_id,action,detail) VALUES($1,$2,$3,$4,$5)',
+    [a.id,movement,this.user.id,'order_segregated',JSON.stringify({...(order?{order_reference:order}:{}),sources:[...new Set(read.map(d=>d.source))],
+     deliveries:deliveries.map(d=>d.document_number),refunds:refunds.map(r=>r.document_number||null),attachments:read.filter(d=>d.hash).map(d=>d.hash),
+     lineas:lines.length,goods:decimal(goods),refunded:decimal(back)})]);
+   return {material_id:materialId,segregado:true,documentos:[a.numerodocumento],pedido:order,lineas:lines.length,devoluciones};
+  });
+ }
+ // The devolución of an anticipo as its own document. Obramat's through 014 (its
+ // family of documents); any other as a plain receipt, an existing one of the same
+ // number and supplier reused: its own unassigned records are excluded (the
+ // devolución already lowers the cost through the anticipo's lines), assigned ones
+ // need a review first.
+ async registerRefund(c,r,a,order){
+  const same=`upper(regexp_replace(coalesce(d.numerodocumento,''),'[^0-9A-Za-z]','','g'))=$1`;
+  if(r.source==='native-pdf-obramat-v1'){
+   const id=(await c.query(`SELECT d.id FROM ledens.documents d WHERE ${isObramatDoc('d')} AND ${same} ORDER BY d.id LIMIT 1`,[number(r.document_number)])).rows[0]?.id
+    ||(await c.query(`INSERT INTO ledens.documents(registered_on,review_state,observaciones) VALUES(CURRENT_DATE,'pendiente_revision',$1) RETURNING id`,[`Devolución del anticipo del pedido ${order}, adjuntada en Segregar`])).rows[0].id;
+   // Only what readObramatPdf returned: the fields added here are not part of its evidence.
+   const {name,source,tax_id,vendor,amount,...parsed}=r;
+   try{await registerPurchaseDocument(c,id,parsed,{actorId:this.user.id});}
+   catch(e){if(e instanceof PurchaseReviewError)throw new FinError(409,`La devolución ${r.document_number} no se ha podido registrar (${e.message}): revísala en el Bridge`);throw e;}
+   return id;
+  }
+  let id=r.document_number?(await c.query(`SELECT d.id FROM ledens.documents d WHERE d.id<>$2 AND ${same}
+    AND ($3='' OR upper(regexp_replace(coalesce(d.niftercero,''),'[^0-9A-Za-z]','','g')) IN ('',$3)) ORDER BY d.id LIMIT 1`,[number(r.document_number),a.id,number(a.niftercero)])).rows[0]?.id:null;
+  const label=r.document_number||'sin número';
+  if(id){
+   const d=(await c.query('SELECT total::text total FROM ledens.documents WHERE id=$1',[id])).rows[0];
+   if(cents(d.total)!==r.amount&&cents(d.total)!==-r.amount)throw new FinError(409,`La devolución ${label} ya está registrada con otro importe (${d.total} €): revísala antes de segregar`);
+   const own=(await c.query("SELECT f.*,EXISTS(SELECT 1 FROM ledens.project_financial_allocations pa WHERE pa.record_id=f.id) assigned FROM ledens.financial_records f WHERE f.document_id=$1 AND f.source_valid AND f.status<>'excluded' FOR UPDATE OF f",[id])).rows;
+   if(own.some(x=>x.assigned))throw new FinError(409,`La devolución ${label} ya está registrada con conceptos asignados a una obra: revísala antes de segregar`);
+   for(const {assigned,...x} of own){
+    await c.query("UPDATE ledens.financial_records SET status='excluded',source_valid=false,version=version+1,updated_at=now() WHERE id=$1",[x.id]);
+    await c.query('INSERT INTO ledens.finance_events(record_id,actor_id,action,reason,before_value,after_value) VALUES($1,$2,$3,$4,$5,$6)',
+     [x.id,this.user.id,'advance_refund_line',`Devolución del anticipo ${a.numerodocumento||''}: ya la descuentan las líneas del anticipo`,JSON.stringify(x),JSON.stringify({...x,status:'excluded',source_valid:false})]);
+   }
+  }else{
+   id=(await c.query(`INSERT INTO ledens.documents(registered_on,review_state,tipo,total,numerodocumento,document_on,tercero,niftercero,observaciones)
+     VALUES(CURRENT_DATE,'pendiente_revision','Cobrar',$1,$2,$3,$4,$5,$6) RETURNING id`,
+    [decimal(r.amount),r.document_number,r.issued_on,a.tercero||r.vendor,a.niftercero||r.tax_id,`Devolución del anticipo ${a.numerodocumento||''}, adjuntada en Segregar`])).rows[0].id;
+  }
+  await c.query('INSERT INTO ledens.bridge_events(document_id,actor_id,action,detail) VALUES($1,$2,$3,$4)',
+   [id,this.user.id,'order_refund_registered',JSON.stringify({advance_document_id:a.id,amount:decimal(r.amount),source:r.source,attachment_sha256:r.hash||null})]);
+  return id;
  }
  // «Adjuntar detalle»: a document the Bridge reconciled with this bank movement
  // has no concepts (its OCR found no lines). The admin attaches the document with the detail
@@ -971,6 +1198,12 @@ export class FinanzasService {
  }
  // The OCR of an attached detail runs outside any transaction: no row stays locked while it reads.
  async readDetailLines(content,type,ocr,{timeoutMs,pollMs,hash}){
+  const result=await this.ocrResult(content,type,ocr,{timeoutMs,pollMs});
+  const lines=extractLines(result).map(l=>({...l,evidence:{...l.evidence,attached_detail:true,attachment_sha256:hash}}));
+  if(!lines.length)throw new FinError(422,'No se han encontrado productos en el documento adjunto');
+  return lines;
+ }
+ async ocrResult(content,type,ocr,{timeoutMs,pollMs}){
   let result;
   try{
    const url=await ocr.start(content,type),until=Date.now()+timeoutMs;
@@ -978,9 +1211,7 @@ export class FinanzasService {
     if(Date.now()>until)throw new FinError(504,'El lector tarda más de lo normal; inténtalo de nuevo en un momento');await sleep(pollMs);}
   }catch(e){if(e instanceof FinError)throw e;throw new FinError(e.transient===false?422:503,e.transient===false?'El lector no ha podido procesar el archivo':'El lector de documentos no está disponible; inténtalo de nuevo en un momento');}
   if(result.status!=='succeeded')throw new FinError(422,'El lector no ha podido leer el documento');
-  const lines=extractLines(result).map(l=>({...l,evidence:{...l.evidence,attached_detail:true,attachment_sha256:hash}}));
-  if(!lines.length)throw new FinError(422,'No se han encontrado productos en el documento adjunto');
-  return lines;
+  return result;
  }
  // A bank payment with no document classified as materials: a material expense
  // tied to the movement, signed like the import (a cost is negative there). It is
