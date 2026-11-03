@@ -120,14 +120,24 @@ export async function fetchProfile(accessToken, { idToken } = {}) {
   const res = await fetch(userinfoUrl(), { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) throw new Error(`microsoft userinfo fetch failed: ${res.status}`);
   const profile = await res.json();
-  const email = profile.email || profile.preferred_username;
-  if (!profile.sub || !email) throw new Error('microsoft userinfo: missing sub or email');
+  const claims = idTokenClaims(idToken);
+  // userinfo only carries `email` when the Entra user has a mail attribute (in
+  // practice, an Exchange mailbox): a work account without one (ana.anzola@ledens.es,
+  // Nov 2026) came back with no email at all and every login failed. The
+  // id_token always has preferred_username (the sign-in name, the UPN for work
+  // accounts). Whatever address is used here, only the checks above can make
+  // it verified; a phone number as sign-in name is not an email.
+  const isEmail = (v) => typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+  const email = [profile.email, profile.preferred_username, claims?.email, claims?.preferred_username].find(isEmail);
+  if (!profile.sub || !email) {
+    throw new Error(`microsoft userinfo: missing sub or email (userinfo keys: ${Object.keys(profile).join(',')}; id_token: ${claims ? 'yes' : 'no'})`);
+  }
   return {
     providerUserId: profile.sub,
     email,
     emailVerified: profile.email_verified === true || profile.email_verified === 'true'
-      || trustedOrganizationEmail(idTokenClaims(idToken), email)
-      || trustedConsumerEmail(idTokenClaims(idToken), email),
-    name: profile.name || email,
+      || trustedOrganizationEmail(claims, email)
+      || trustedConsumerEmail(claims, email),
+    name: profile.name || claims?.name || email,
   };
 }
