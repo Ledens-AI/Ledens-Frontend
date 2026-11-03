@@ -1,4 +1,5 @@
 import {hasPurchases} from '../finance/purchases.js';
+import {readObramatPdf} from '../ingestion/obramat.js';
 // Spanish UI facade: never writes source project_id or a parallel money ledger.
 import {createHash} from 'node:crypto';
 import {FinanceService,FinanceError,uuid} from '../finance/service.js';
@@ -876,7 +877,10 @@ export class FinanzasService {
  // they become the document's concepts, through the same storeInvoiceLines as the
  // ingestion, only when they add up exactly to the document's total. Nothing is
  // stored otherwise, and the file itself is not kept (only its hash, audited).
- async attachDocumentDetail({id,documentId,content,ocr,timeoutMs=40000,pollMs=1500}={}){
+ // An Obramat delivery invoice (factura de entrega) is read from its own PDF text
+ // instead (readObramatPdf): its products add up to the anticipo it settles, and its
+ // «YA PAGADO DEL PEDIDO» line, which brings its total to 0, is not a product.
+ async attachDocumentDetail({id,documentId,content,ocr,timeoutMs=40000,pollMs=1500,readNative=readObramatPdf}={}){
   if(this.user.role!=='admin')throw new FinError(403,'Adjuntar el detalle de un documento requiere administrador');
   if(!uuid(id))throw new FinError(404,'Movimiento no encontrado');
   if(!uuid(documentId))throw new FinError(404,'Documento no encontrado');
@@ -884,7 +888,9 @@ export class FinanzasService {
   if(content.length>DETAIL_MAX_BYTES)throw new FinError(413,'El documento supera 4 MB, el máximo que admite el lector');
   const type=DETAIL_TYPES.find(([,ok])=>ok(content))?.[0];
   if(!type)throw new FinError(415,'Formato no admitido: adjunta un PDF, JPG o PNG');
-  if(!ocr)throw new FinError(503,'La lectura de documentos no está configurada');
+  const native=type==='application/pdf'?(await readNative(content).catch(()=>null))?.data:null;
+  if(native&&native.kind!=='delivery')throw new FinError(422,`El documento adjunto es ${native.kind==='advance'?'el anticipo':'la devolución del anticipo'} del pedido ${native.order_reference} de Obramat: adjunta su factura de entrega, con los productos`);
+  if(!native&&!ocr)throw new FinError(503,'La lectura de documentos no está configurada');
   const check=async c=>{
    const d=(await c.query(`SELECT d.* FROM ledens.documents d JOIN ledens.bank_document_allocations a ON a.document_id=d.id
     WHERE d.id=$1 AND a.bank_movement_id=$2 AND a.state='Confirmado' LIMIT 1`,[documentId,id])).rows[0];
@@ -895,17 +901,9 @@ export class FinanzasService {
    return d;
   };
   await check(this.pool);
-  // The OCR runs outside the transaction: no row stays locked while it reads.
-  let result;
-  try{
-   const url=await ocr.start(content,type),until=Date.now()+timeoutMs;
-   for(;;){result=await ocr.poll(url);if(!['running','notStarted'].includes(result.status))break;
-    if(Date.now()>until)throw new FinError(504,'El lector tarda más de lo normal; inténtalo de nuevo en un momento');await sleep(pollMs);}
-  }catch(e){if(e instanceof FinError)throw e;throw new FinError(e.transient===false?422:503,e.transient===false?'El lector no ha podido procesar el archivo':'El lector de documentos no está disponible; inténtalo de nuevo en un momento');}
-  if(result.status!=='succeeded')throw new FinError(422,'El lector no ha podido leer el documento');
   const hash=createHash('sha256').update(content).digest('hex');
-  const lines=extractLines(result).map(l=>({...l,evidence:{...l.evidence,attached_detail:true,attachment_sha256:hash}}));
-  if(!lines.length)throw new FinError(422,'No se han encontrado productos en el documento adjunto');
+  const lines=native?native.lines.map(l=>({...l,currency:'EUR',confidence:1,evidence:{...l.evidence,attached_detail:true,attachment_sha256:hash,
+    delivery_document:native.document_number,order_reference:native.order_reference}})):await this.readDetailLines(content,type,ocr,{timeoutMs,pollMs,hash});
   return this.finance.transaction(async c=>{
    const d=await check(c);
    const r=await storeInvoiceLines(c,documentId,lines,{currency:'EUR',direction:d.tipo,actorId:this.user.id,reason:'Detalle de productos adjuntado en Concepto de movimientos'});
@@ -919,13 +917,27 @@ export class FinanzasService {
      :`Los productos leídos suman ${sum} € y el documento ${d.numerodocumento||''} ${total} €: no cuadran, así que no se ha registrado nada.`);
    }
    await c.query('INSERT INTO ledens.bridge_events(document_id,bank_movement_id,actor_id,action,detail) VALUES($1,$2,$3,$4,$5)',
-    [documentId,id,this.user.id,'detail_attached',JSON.stringify({lineas:r.line_count,attachment_sha256:hash,type})]);
+    [documentId,id,this.user.id,'detail_attached',JSON.stringify({lineas:r.line_count,attachment_sha256:hash,type,
+     ...(native?{source:'native-pdf-obramat-v1',delivery_document:native.document_number,order_reference:native.order_reference}:{})})]);
    return {document_id:documentId,lineas:r.line_count};
   }).then(async res=>{
    // 026's deferred trigger has replaced the provisional material by these concepts on commit.
    const open=(await this.query('SELECT count(*)::int n FROM ledens.provisional_material_payments WHERE bank_movement_id=$1 AND replaced_at IS NULL',[id])).rows[0].n;
    return {...res,segregado:open===0};
   });
+ }
+ // The OCR of an attached detail runs outside any transaction: no row stays locked while it reads.
+ async readDetailLines(content,type,ocr,{timeoutMs,pollMs,hash}){
+  let result;
+  try{
+   const url=await ocr.start(content,type),until=Date.now()+timeoutMs;
+   for(;;){result=await ocr.poll(url);if(!['running','notStarted'].includes(result.status))break;
+    if(Date.now()>until)throw new FinError(504,'El lector tarda más de lo normal; inténtalo de nuevo en un momento');await sleep(pollMs);}
+  }catch(e){if(e instanceof FinError)throw e;throw new FinError(e.transient===false?422:503,e.transient===false?'El lector no ha podido procesar el archivo':'El lector de documentos no está disponible; inténtalo de nuevo en un momento');}
+  if(result.status!=='succeeded')throw new FinError(422,'El lector no ha podido leer el documento');
+  const lines=extractLines(result).map(l=>({...l,evidence:{...l.evidence,attached_detail:true,attachment_sha256:hash}}));
+  if(!lines.length)throw new FinError(422,'No se han encontrado productos en el documento adjunto');
+  return lines;
  }
  // A bank payment with no document classified as materials: a material expense
  // tied to the movement, signed like the import (a cost is negative there). It is
