@@ -6,6 +6,7 @@ import RecordDrawer from './RecordDrawer.jsx';
 import { Kpi, Badge, Dialog, Empty, ErrorBox, Pager } from './ui.jsx';
 import SegregarConceptos from './SegregarConceptos.jsx';
 import PagosTrabajadoresChart from './PagosTrabajadoresChart.jsx';
+import PeriodoTrabajo, { periodText, suggestedPeriod } from './PeriodoTrabajo.jsx';
 
 const key = (r) => r.type + ':' + r.id;
 const EMPTY_FILTERS = { q: '', tipo: '', estado: '', proyecto: null, desde: '', hasta: '', min: '', max: '', trabajador: null, rol: '' };
@@ -19,8 +20,9 @@ const PERIODOS = [['semana', 'Semana'], ['mes', 'Mes'], ['anio', 'Año']];
 export default function RecordsView({ mode, summary, initialProject, onChanged, toast }) {
   const pending = mode === 'pendientes';
   const showQuantity = ['pendientes','material','concepto'].includes(mode);
-  // «Pagos a trabajadores» is a read-only view (filters only): new payments are
-  // prepared and saved in «Pendiente de trabajador».
+  // «Pagos a trabajadores» is read-only except for the periodo trabajado (the
+  // week, month or year each payment is for; one row or a selection at once):
+  // new payments are prepared and saved in «Pendiente de trabajador».
   const readOnly = mode === 'trabajador';
   const [filters, setFilters] = useState({ ...EMPTY_FILTERS, proyecto: initialProject || null });
   const [draftQ, setDraftQ] = useState('');
@@ -200,6 +202,32 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
     }
   };
 
+  // Periodo trabajado (Pagos a trabajadores): one row or the selection.
+  const openPeriod = (all) => {
+    // Only payments to workers have one (a reclassified invoice concept listed here has not).
+    const list = all.filter((r) => r.type === 'trabajador');
+    if (!list.length) { toast('Ninguno de los seleccionados es un pago a trabajador.'); return; }
+    const first = list.find((r) => r.periodo_trabajo);
+    const same = first && list.every((r) => r.periodo_trabajo === first.periodo_trabajo && r.periodo_inicio === first.periodo_inicio);
+    setDialog({ kind: 'periodo', rows: list, value: same ? { period: first.periodo_trabajo, startsOn: first.periodo_inicio } : suggestedPeriod(list[0]?.fecha), saving: false, error: '' });
+  };
+  const savePeriod = async (value) => {
+    const d = dialog;
+    setDialog({ ...d, saving: true, error: '' });
+    try {
+      const res = await api.setWorkPeriods({ ids: d.rows.map((r) => r.id), period: value?.period ?? null, startsOn: value?.startsOn ?? null });
+      const byId = new Map(res.results.map((x) => [x.id, x]));
+      setData((x) => x && ({ ...x, rows: x.rows.map((r) => (r.type === 'trabajador' && byId.has(r.id) ? { ...r, periodo_trabajo: byId.get(r.id).periodo_trabajo, periodo_inicio: byId.get(r.id).periodo_inicio } : r)) }));
+      setDialog(null);
+      if (d.rows.length > 1) setSelected(new Map());
+      // The chart groups by the periodo trabajado: fetch it again.
+      setReload((n) => n + 1);
+      toast(res.updated ? (res.updated === 1 ? 'Periodo trabajado guardado.' : `Periodo trabajado guardado en ${res.updated} pagos.`) : 'Sin cambios: ya tenía ese periodo.');
+    } catch (e) {
+      setDialog({ ...d, saving: false, error: e.message });
+    }
+  };
+
   const th = (label, by, cls) => (
     <th className={cls} aria-sort={sort.by === by ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}>
       {by ? (
@@ -300,6 +328,16 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
         </div>
       ) : null}
 
+      {readOnly && sel.length ? (
+        <div className="fin-bulkbar" role="region" aria-label="Acciones sobre la selección">
+          <strong>{sel.length} {sel.length === 1 ? 'pago seleccionado' : 'pagos seleccionados'}</strong>
+          <span className="fin-muted">{eur(sel.reduce((a, r) => a + Number(r.importe), 0))}</span>
+          <span className="fin-grow"></span>
+          <button type="button" className="fin-btn is-primary" onClick={() => openPeriod(sel)}><i className="ri-calendar-line"></i>Periodo trabajado</button>
+          <button type="button" className="fin-btn is-ghost" onClick={() => setSelected(new Map())}>Quitar selección</button>
+        </div>
+      ) : null}
+
       {!readOnly && sel.length ? (
         <div className="fin-bulkbar" role="region" aria-label="Acciones sobre la selección">
           <strong>{sel.length} {sel.length === 1 ? 'registro seleccionado' : 'registros seleccionados'}</strong>
@@ -320,8 +358,9 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
             <table className="fin-table">
               <thead>
                 <tr>
-                  {readOnly ? null : <th className="fin-col-check"><input type="checkbox" aria-label="Seleccionar todos los de esta página" checked={allOnPage} onChange={toggleAll} /></th>}
-                  {th('Fecha', 'fecha')}
+                  <th className="fin-col-check"><input type="checkbox" aria-label="Seleccionar todos los de esta página" checked={allOnPage} onChange={toggleAll} /></th>
+                  {th(readOnly ? 'Fecha de pago' : 'Fecha', 'fecha')}
+                  {readOnly ? <th>Periodo trabajado</th> : null}
                   <th>Nº de documento / línea</th>
                   {th(terceroLabel, 'tercero')}
                   {readOnly ? <th>Rol</th> : null}
@@ -340,8 +379,16 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
                   const st = staged.get(k);
                   return (
                     <tr key={k} className={(selected.has(k) ? 'is-selected' : '') + (st ? ' is-staged' : '')}>
-                      {readOnly ? null : <td className="fin-col-check"><input type="checkbox" aria-label="Seleccionar registro" checked={selected.has(k)} onChange={() => toggle(r)} /></td>}
+                      <td className="fin-col-check"><input type="checkbox" aria-label="Seleccionar registro" checked={selected.has(k)} onChange={() => toggle(r)} /></td>
                       <td className="fin-nowrap">{fecha(r.fecha)}</td>
+                      {readOnly ? (
+                        <td className="fin-nowrap">
+                          <span className="fin-periodo-cell">
+                            {r.periodo_trabajo ? periodText(r.periodo_trabajo, r.periodo_inicio) : <span className="fin-muted">{r.type === 'trabajador' ? 'Sin indicar' : '—'}</span>}
+                            {r.type === 'trabajador' ? <button type="button" className="fin-iconbtn" aria-label="Cambiar periodo trabajado" title="Cambiar periodo trabajado" onClick={() => openPeriod([r])}><i className="ri-pencil-line"></i></button> : null}
+                          </span>
+                        </td>
+                      ) : null}
                       <td className="fin-nowrap">{r.numerodocumento || (r.document_id ? 'Sin número' : <span className="fin-muted">Sin documento</span>)}{r.line_number&&r.line_number<10000?<div className="fin-muted">Línea {r.line_number}{r.product_code?' · Ref. '+r.product_code:''}</div>:null}</td>
                       <td className="fin-ellipsis" title={r.tercero || ''}>{r.tercero || <span className="fin-muted">—</span>}</td>
                       {readOnly ? <td className="fin-nowrap">{r.rol || <span className="fin-muted">—</span>}</td> : null}
@@ -447,6 +494,25 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
           <p>Los {sel.length} registros quedarán en estado <strong>Revisión</strong> hasta que alguien les asigne proyecto.</p>
           <label className="fin-field"><span>Nota para quien lo revise (opcional)</span>
             <textarea rows={2} maxLength={500} value={dialog.note} onChange={(e) => setDialog({ ...dialog, note: e.target.value })} /></label>
+          {dialog.error ? <div className="fin-error-inline">{dialog.error}</div> : null}
+        </Dialog>
+      ) : null}
+
+      {dialog?.kind === 'periodo' ? (
+        <Dialog title="Periodo trabajado" onClose={() => !dialog.saving && setDialog(null)}
+          actions={<>
+            <button type="button" className="fin-btn is-ghost" disabled={dialog.saving} onClick={() => setDialog(null)}>Cancelar</button>
+            {dialog.rows.some((r) => r.periodo_trabajo) ? <button type="button" className="fin-btn" disabled={dialog.saving} onClick={() => savePeriod(null)}>Quitar periodo</button> : null}
+            <button type="button" className="fin-btn is-primary" disabled={dialog.saving || !dialog.value} onClick={() => savePeriod(dialog.value)}>
+              {dialog.saving ? 'Guardando…' : dialog.rows.length === 1 ? 'Guardar' : `Guardar en ${dialog.rows.length} pagos`}
+            </button>
+          </>}>
+          {dialog.rows.length === 1
+            ? <p>Pago de <strong>{eur(dialog.rows[0].importe)}</strong> a <strong>{dialog.rows[0].tercero || 'sin trabajador'}</strong>, registrado el {fecha(dialog.rows[0].fecha)}.</p>
+            : <p>Se aplicará a <strong>{dialog.rows.length} pagos</strong> ({eur(dialog.rows.reduce((a, r) => a + Number(r.importe), 0))}).</p>}
+          <div className="fin-field"><span>¿Qué semana, mes o año se paga?</span>
+            <PeriodoTrabajo value={dialog.value} refDate={dialog.rows[0]?.fecha} disabled={dialog.saving} onChange={(v) => setDialog({ ...dialog, value: v })} /></div>
+          <p className="fin-muted fin-small">La gráfica cuenta el pago en este periodo en lugar de en la fecha de pago. La fecha de pago no cambia.</p>
           {dialog.error ? <div className="fin-error-inline">{dialog.error}</div> : null}
         </Dialog>
       ) : null}

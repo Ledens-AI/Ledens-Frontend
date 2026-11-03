@@ -97,3 +97,11 @@ La clasificación sale de `financial_records.category`: Materiales (`materials`/
   - **Control:** exige la versión vigente y un motivo, y queda en `finance_events` (`reclassified`) y en Logs de transacciones.
 - Las pestañas Materiales y Pagos a trabajadores siguen la categoría, así que un registro reclasificado cambia de pestaña.
 - La validación contable acepta la categoría reclasificada de un origen importado.
+
+## Periodo trabajado de los pagos a trabajadores (migración 031)
+
+Un pago a trabajador puede pagar una semana, un mes o un año distinto de su fecha (la semana se paga el viernes o el sábado y se registra el lunes). `ledens.worker_payment_periods` guarda, por cada `worker_payments.id`, `period` (`semana` / `mes` / `anio`) y `starts_on` (lunes, día 1 o 1 de enero; cualquier día se normaliza con `workPeriod`). Cuelga de `worker_payments` sin tocarla (es de la importación). La fecha del pago no cambia.
+
+- **Pendiente de trabajador:** cada línea y «Periodo trabajado para todos» proponen la semana de la fecha del pago menos dos días (lunes o martes → la semana anterior; de miércoles a domingo → esa semana) y se pueden cambiar o dejar «Sin indicar». `POST /pendiente-trabajador/guardar` acepta `period` y `startsOn` opcionales por línea y los guarda junto al pago.
+- **Pagos a trabajadores:** columna «Periodo trabajado» con el lápiz por fila, y la selección de filas con «Periodo trabajado» para varias a la vez. `PUT /api/finanzas/pagos-trabajadores/periodo` `{ ids, period, startsOn }` (hasta 100; `null` lo quita). Puede quien puede cambiar el proyecto del registro (`FinanceService.record(…, write)`); cada cambio queda en `finance_events` (`work_period`) y en Logs de transacciones.
+- **Gráfica:** cuenta cada pago en su periodo trabajado cuando lo tiene (`date_trunc` de `starts_on`) y si no en su fecha. Los filtros Desde/Hasta siguen siendo sobre la fecha del pago.

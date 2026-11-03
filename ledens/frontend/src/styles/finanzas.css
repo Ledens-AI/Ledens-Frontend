@@ -212,6 +212,11 @@
 .fin-batch-all { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
 .fin-table select { font: inherit; font-size: 14px; min-height: 38px; padding: 6px 8px; border: 1px solid #D9D9D9; border-radius: 8px; background: #fff; max-width: 260px; }
 
+/* Periodo trabajado (PeriodoTrabajo.jsx): kind + which one, side by side. */
+.fin-periodo { display: inline-flex; gap: 6px; flex-wrap: nowrap; }
+.fin-periodo select:first-child { width: auto; min-width: 88px; }
+.fin-periodo-cell { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+
 
 /* Proyectos: two-column form in a wider dialog. */
 .fin-dialog.is-wide { max-width: 760px; }

@@ -174,7 +174,7 @@ const DETAIL_TYPES=[['application/pdf',b=>b.subarray(0,5).toString()==='%PDF-'],
 const isRefund=r=>r.type==='material'&&!r.document_id&&Boolean(r.bank_movement_id)&&cents(r.importe)<0n;
 const hasTransfers=async c=>Boolean((await c.query("SELECT to_regclass('ledens.internal_transfers') name")).rows[0].name);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-const labels={reclassified:'Cambio de clasificación',replace_allocations:'Asignación a proyecto',recognition:'Validación contable',review_flag:'Revisión',source_changed:'Origen actualizado',document_changed:'Factura actualizada'};
+const labels={work_period:'Periodo trabajado',reclassified:'Cambio de clasificación',replace_allocations:'Asignación a proyecto',recognition:'Validación contable',review_flag:'Revisión',source_changed:'Origen actualizado',document_changed:'Factura actualizada'};
 const requestFor=(seed,key)=>{const h=createHash('sha256').update(seed+'|'+key).digest('hex').slice(0,32);return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;};
 // Pago a trabajadores: how a paid amount (absolute, in cents) is split.
 // Above 450 € → Oficial lines of 100 €; 450 € or less → Ayudante lines of 60 €.
@@ -187,6 +187,21 @@ export function splitWorkerPayment(total){
  const lines=Array.from({length:Number(total/unit)},()=>unit);if(total%unit)lines.push(total%unit);
  if(lines.length>WORKER_SPLIT.maxLines)throw new FinError(409,`Importe demasiado alto para segregar automáticamente (más de ${WORKER_SPLIT.maxLines} pagos)`);
  return {role,unit,lines};
+}
+// Periodo trabajado of a worker payment (031): the week, month or year it pays
+// for. `startsOn` is any day inside it ("YYYY-MM-DD"); it is stored as the first
+// day (Monday, 1st of the month, 1 January). null / '' clears it.
+export const WORK_PERIODS=['semana','mes','anio'];
+export function workPeriod(period,startsOn){
+ if((period===null||period===undefined||period==='')&&(startsOn===null||startsOn===undefined||startsOn===''))return null;
+ if(!WORK_PERIODS.includes(period))throw new FinError(400,'Periodo trabajado no válido: semana, mes o año');
+ const m=typeof startsOn==='string'&&startsOn.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+ const d=m&&new Date(Date.UTC(Number(m[1]),Number(m[2])-1,Number(m[3])));
+ if(!d||d.toISOString().slice(0,10)!==startsOn||Number(m[1])<2000||Number(m[1])>2100)throw new FinError(400,'Fecha del periodo trabajado no válida');
+ if(period==='semana')d.setUTCDate(d.getUTCDate()-((d.getUTCDay()+6)%7));
+ else if(period==='mes')d.setUTCDate(1);
+ else d.setUTCMonth(0,1);
+ return {period,startsOn:d.toISOString().slice(0,10)};
 }
 export function safeDocumentUrl(raw){try{const u=new URL(raw);return u.protocol==='https:'&&/(^|\.)sharepoint\.com$/i.test(u.hostname)?u.href:null;}catch{return null;}}
 export class FinanzasService {
@@ -221,8 +236,12 @@ export class FinanzasService {
  async workerPaymentSeries(f={}){
   const unit=PERIODS[f.periodo||'semana'];if(!unit)throw new FinError(400,'Periodo no válido');
   const {params,where}=this.filters({...f,type:'trabajador'});
-  const series=(await this.query(`${BASE} SELECT date_trunc('${unit}',l.fecha)::date::text periodo,coalesce(l.tercero,'') trabajador,
-   sum(l.importe)::text importe,count(*)::int pagos FROM listed l ${where} GROUP BY 1,2 ORDER BY 1,2`,params)).rows;
+  // A payment counts in the period it pays for (031) when it has one, else on its date.
+  const periods=await this.hasWorkPeriods();
+  const day=periods?'coalesce(wpp.starts_on,l.fecha)':'l.fecha';
+  const join=periods?"LEFT JOIN ledens.worker_payment_periods wpp ON wpp.worker_payment_id=l.id AND l.type='trabajador'":'';
+  const series=(await this.query(`${BASE} SELECT date_trunc('${unit}',${day}::timestamp)::date::text periodo,coalesce(l.tercero,'') trabajador,
+   sum(l.importe)::text importe,count(*)::int pagos FROM listed l ${join} ${where} GROUP BY 1,2 ORDER BY 1,2`,params)).rows;
   const all=this.filters({type:'trabajador'});
   const trabajadores=(await this.query(`${BASE} SELECT coalesce(l.tercero,'') nombre,array_remove(array_agg(DISTINCT l.rol),NULL) roles,
    sum(l.importe)::text total FROM listed l ${all.where} GROUP BY 1 ORDER BY sum(abs(l.importe)) DESC,1`,all.params)).rows;
@@ -240,7 +259,47 @@ export class FinanzasService {
    const open=new Set((await this.query('SELECT material_id FROM ledens.provisional_material_payments WHERE material_id=ANY($1::uuid[]) AND replaced_at IS NULL',[mats])).rows.map(r=>r.material_id));
    for(const r of rows)if(r.type==='material')r.provisional=open.has(r.id);
   }
+  const workers=rows.filter(r=>r.type==='trabajador').map(r=>r.id);
+  if(workers.length&&await this.hasWorkPeriods()){
+   const per=new Map((await this.query('SELECT worker_payment_id id,period,starts_on::text starts_on FROM ledens.worker_payment_periods WHERE worker_payment_id=ANY($1::uuid[])',[workers])).rows.map(r=>[r.id,r]));
+   for(const r of rows)if(r.type==='trabajador'){const p=per.get(r.id);r.periodo_trabajo=p?.period??null;r.periodo_inicio=p?.starts_on??null;}
+  }
   return {rows,total:t.n,totalImporte:t.importe,page,pageSize};
+ }
+ async hasWorkPeriods(c=this.pool){
+  if(this._workPeriods===undefined)this._workPeriods=Boolean((await c.query("SELECT to_regclass('ledens.worker_payment_periods') name")).rows[0].name);
+  return this._workPeriods;
+ }
+ // «Pagos a trabajadores»: set (or clear) the periodo trabajado of saved
+ // payments. Whoever may change the record's project may change its period;
+ // each change is a finance_events row of the record.
+ async setWorkPeriods({ids,period,startsOn}={}){
+  this.params();
+  if(!Array.isArray(ids)||!ids.length||ids.length>100||ids.some(id=>!uuid(id)))throw new FinError(400,'Elige entre 1 y 100 pagos');
+  const v=workPeriod(period,startsOn);
+  if(!(await this.hasWorkPeriods()))throw new FinError(503,'El periodo trabajado aún no está disponible');
+  return this.finance.transaction(async c=>{
+   const out=[];
+   for(const id of [...new Set(ids)]){
+    const rec=(await c.query('SELECT id FROM ledens.financial_records WHERE worker_payment_id=$1',[id])).rows[0];
+    if(!rec)throw new FinError(404,'Pago a trabajador no encontrado');
+    const r=await this.finance.record(c,rec.id,this.user,true);
+    const before=(await c.query('SELECT period,starts_on::text starts_on FROM ledens.worker_payment_periods WHERE worker_payment_id=$1 FOR UPDATE',[id])).rows[0]||null;
+    const changed=!(before?.period===v?.period&&before?.starts_on===v?.startsOn);
+    if(changed){
+     if(v)await this.savePeriod(c,id,v);
+     else await c.query('DELETE FROM ledens.worker_payment_periods WHERE worker_payment_id=$1',[id]);
+     await this.finance.audit(c,r,this.user,'work_period','Periodo trabajado',{periodo:v?{period:v.period,starts_on:v.startsOn}:null,anterior:before});
+    }
+    out.push({id,changed,periodo_trabajo:v?.period??null,periodo_inicio:v?.startsOn??null});
+   }
+   return {results:out,updated:out.filter(x=>x.changed).length};
+  });
+ }
+ async savePeriod(c,workerPaymentId,v){
+  await c.query(`INSERT INTO ledens.worker_payment_periods(worker_payment_id,period,starts_on,updated_by) VALUES($1,$2,$3,$4)
+   ON CONFLICT (worker_payment_id) DO UPDATE SET period=EXCLUDED.period,starts_on=EXCLUDED.starts_on,updated_by=EXCLUDED.updated_by,updated_at=now()`,
+   [workerPaymentId,v.period,v.startsOn,this.user.id]);
  }
  async pendingSummary(){
   const rows=(await this.query(`${BASE} SELECT type,count(*)::int total,count(*) FILTER(WHERE sin_proyecto)::int pendientes,
@@ -1124,6 +1183,9 @@ export class FinanzasService {
   await this.workerQueueAccess();
   if(!Array.isArray(items)||!items.length||items.length>100||items.some(it=>!uuid(it?.splitId)||!uuid(it?.employeeId)||!uuid(it?.projectId)))
    throw new FinError(400,'Cada pago necesita trabajador y proyecto (máximo 100 por vez)');
+  // Optional periodo trabajado per line, checked before anything is written.
+  const periods=items.map(it=>workPeriod(it.period,it.startsOn));
+  if(periods.some(Boolean)&&!(await this.hasWorkPeriods()))throw new FinError(503,'El periodo trabajado aún no está disponible');
   return this.finance.transaction(async c=>{
    const results=[];
    for(const [i,it] of items.entries()){
@@ -1142,6 +1204,7 @@ export class FinanzasService {
      if(!rec)throw new FinError(503,'No se pudo registrar el pago en la contabilidad');
      await this.finance.replace(c,this.user,{record_id:rec.id,version:rec.version,allocations:[{project_id:it.projectId,amount:rec.gross_amount}]},
       `Pago a ${s.role==='oficial'?'oficial':'ayudante'} segregado ${s.cash_movement_id?'de un pago en efectivo':'del movimiento '+s.source_id}`);
+     if(periods[i])await this.savePeriod(c,w.id,periods[i]);
      await c.query('UPDATE ledens.worker_payment_splits SET worker_payment_id=$2,saved_by=$3,saved_at=now() WHERE id=$1',[s.id,w.id,this.user.id]);
      await c.query(`RELEASE SAVEPOINT s${i}`);results.push({splitId:it.splitId,ok:true,workerPaymentId:w.id});
     }catch(err){await c.query(`ROLLBACK TO SAVEPOINT s${i}`);if(!(err instanceof FinanceError))throw err;results.push({splitId:it.splitId,ok:false,error:err.message});}
