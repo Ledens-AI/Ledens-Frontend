@@ -249,6 +249,8 @@ test('materials with no financial record are found and registered only when they
  const dupMov=await mat(-8.001,{bank:conRegistros});
  const descuadre=await mov(-20,'Pago descuadrado');const d1=await mat(-4.555,{bank:descuadre});
  const suelto=await mat(-2.345);
+ // Three lines rounded up by a cent between them: the largest takes the difference.
+ const redondeo=await mov(-10,'Pago con redondeo');const r1=await mat(-3.335,{bank:redondeo}),r2=await mat(-3.335,{bank:redondeo}),r3=await mat(-3.3349,{bank:redondeo});
  const plan=await asAdmin().registerOrphans();
  const accion=id=>plan.filas.find(f=>f.id===id);
  assert.deepEqual([l1,l2,suelto].map(id=>accion(id).accion),['registrar','registrar','registrar']);
@@ -257,6 +259,10 @@ test('materials with no financial record are found and registered only when they
  assert.match(accion(dup).motivo_accion,/su documento ya tiene conceptos/);
  assert.match(accion(dupMov).motivo_accion,/su movimiento ya tiene registros/);
  assert.match(accion(d1).motivo_accion,/suman 4\.56 € y el pago 20\.00 €/);
+ assert.deepEqual([r1,r2,r3].map(id=>accion(id).accion),['registrar','registrar','registrar']);
+ assert.deepEqual([r1,r2,r3].map(id=>accion(id).gross).sort(),['3.33','3.33','3.34'],'they add up to the payment');
+ assert.equal([r1,r2,r3].filter(id=>accion(id).ajuste_redondeo).length,1);
+ assert.equal([r1,r2,r3].map(id=>accion(id)).find(f=>f.ajuste_redondeo).ajuste_redondeo,'-0.01');
  assert.equal((await q('SELECT count(*)::int n FROM ledens.financial_records WHERE material_id=ANY($1::uuid[])',[[l1,l2,suelto]])).rows[0].n,0,'the plan changes nothing');
  assert.equal((await row(lineas)).clase,'pendiente');
  await assert.rejects(new FinanzasService(pool,jefe).registerOrphans(),{status:403});
