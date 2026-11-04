@@ -132,6 +132,13 @@ const net = (priceIncl, vat) => (priceIncl == null ? null : String(round(priceIn
 
 // lines: flattened partidas, in the order they will be matched (matchLines
 // returns one result per line, same order).
+// A presupuesto_partidas row always needs a quantity greater than zero
+// (service.js's own rule, true for every source: manual entry, PDF import,
+// this agent) — so a line with no usable measurement can never be saved as
+// one. It is left out of the chapters entirely and only described in
+// warnings; the jefe adds it by hand, with the real quantity, once it is
+// known (and a proposal for a new partida, if nothing in the base covers it,
+// follows naturally once that line exists).
 function buildItems(capitulos, matches, catalog, vat) {
   let n = 0;
   const warnings = [];
@@ -145,14 +152,18 @@ function buildItems(capitulos, matches, catalog, vat) {
         continue;
       }
       const pending = p.cantidad == null || p.estado === 'pendiente_medicion';
-      if (pending) warnings.push(`Falta medición para «${p.nombre}» (capítulo ${cap.nombre}): ${p.motivoPendiente || 'no se ha podido determinar la cantidad con la documentación disponible.'}`);
+      if (pending) {
+        const sinBase = m && !m.baseCode ? ' Ninguna partida de la base cubre este trabajo: al añadirlo con su medición real, se propondrá una partida nueva.' : '';
+        warnings.push(`Falta medición para «${p.nombre}» (capítulo ${cap.nombre}): ${p.motivoPendiente || 'no se ha podido determinar la cantidad con la documentación disponible.'}${sinBase}`);
+        continue;
+      }
       const base = m?.baseCode ? catalog.byCode.get(m.baseCode.toUpperCase()) : null;
       const unit = base ? unitLabel(base.unit) : p.unidad;
       items.push({
         code: '', name: p.nombre.slice(0, 300), description: (p.descripcion || '').slice(0, 4000), unit,
-        quantity: pending ? '0' : String(round(Number(p.cantidad), 3)),
+        quantity: String(round(Number(p.cantidad), 3)),
         unitPrice: net(base?.priceIncl, vat) ?? '0',
-        kind: KIND[p.estado] || 'confirmada', check: pending,
+        kind: KIND[p.estado] || 'confirmada',
         suppliedBy: p.suministra || null, sourceFile: p.archivoProcedencia || null,
         ...(m ? { baseCode: m.baseCode, baseName: m.baseName, annotations: m.annotations, translation: m.translation, proposal: m.proposal } : {}),
       });
