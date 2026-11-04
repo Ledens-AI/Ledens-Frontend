@@ -6,13 +6,14 @@ import { Dialog } from './ui.jsx';
 const MAX_DETAIL = 4 * 1024 * 1024; // what the invoice reader (F0) accepts
 const MAX_FILES = 6; // documents of one anticipo (backend ORDER_MAX_FILES)
 
-/* One reconciled document without concepts. One file: the detail of its products,
+/* One document without concepts (reconciled with the material's movement, or the
+ * document of a «Documento pendiente de desglose»). One file: the detail of its products,
  * read on the server; its lines become the document's concepts only when they add
  * up to its total. Several (an anticipo, from any supplier): the anticipo, its
  * devoluciones and the invoices with its products, which must add up to it
  * (anticipo = productos + devoluciones); each devolución is reconciled with its receipt in the same account,
  * and when several receipts fit the admin picks one. */
-function DetailUpload({ materialId, movementId, doc, onRead }) {
+function DetailUpload({ target, movementId, doc, onRead }) {
   const [files, setFiles] = useState([]), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [ambiguous, setAmbiguous] = useState([]), [choices, setChoices] = useState({});
   const pick = (e) => {
@@ -25,7 +26,7 @@ function DetailUpload({ materialId, movementId, doc, onRead }) {
   const read = async () => {
     setBusy(true); setError('');
     try {
-      onRead(files.length === 1 ? await api.attachDocumentDetail(movementId, doc.id, files[0]) : await api.segregateOrder(materialId, files, choices));
+      onRead(files.length === 1 ? await api.attachDocumentDetail(movementId || null, doc.id, files[0]) : await api.segregateOrder(target, files, choices));
     } catch (e) {
       const options = e.data?.devoluciones_ambiguas || [];
       setAmbiguous(options);
@@ -68,9 +69,12 @@ const devolucion = (d) => d.movimiento
  * by the lines of the invoice reconciled with its bank movement. Without a document
  * yet, or with one without concepts (an anticipo), the error says so; for the
  * latter it offers to attach the document with the detail of its products, or the
- * documents of the anticipo (devoluciones and invoices). */
+ * documents of the anticipo (devoluciones and invoices). A «Documento pendiente de
+ * desglose» (a document read without lines) asks for them at once: its lines
+ * replace it and inherit its class and obra. */
 export default function SegregarConceptos({ row, onClose, onDone }) {
-  const [state, setState] = useState({});
+  const envelope = row.type === 'concepto';
+  const [state, setState] = useState(() => (envelope ? { missing: [{ id: row.document_id, numerodocumento: row.numerodocumento, total: row.importe }] } : {}));
   const segregate = () => {
     setState({ loading: true });
     api.segregateMaterial(row.id).then(
@@ -78,12 +82,13 @@ export default function SegregarConceptos({ row, onClose, onDone }) {
       (e) => setState({ error: e.message, movementId: e.data?.movimiento_id, missing: e.data?.sin_conceptos || [] }),
     );
   };
-  const started = state.loading || state.done || state.error;
+  const started = envelope || state.loading || state.done || state.error;
+  const replaced = envelope ? 'al documento pendiente de desglose' : 'al pago provisional';
   const onRead = (res) => setState({
     done: res.devoluciones
-      ? `Se han registrado ${res.lineas} productos${res.pedido ? ` del pedido ${res.pedido}` : ''} y han sustituido al pago provisional.`
+      ? `Se han registrado ${res.lineas} productos${res.pedido ? ` del pedido ${res.pedido}` : ''} y han sustituido ${replaced}.`
       : res.segregado
-        ? `Se han registrado ${res.lineas} conceptos de la factura y han sustituido al pago provisional.`
+        ? `Se han registrado ${res.lineas} conceptos de la factura y han sustituido ${replaced}.`
         : `Se han registrado ${res.lineas} conceptos de la factura.`,
     notes: (res.devoluciones || []).map(devolucion),
   });
@@ -95,15 +100,17 @@ export default function SegregarConceptos({ row, onClose, onDone }) {
         {started ? null : <button type="button" className="fin-btn is-primary" onClick={segregate}>Segregar</button>}
       </>}>
       <p>{fecha(row.fecha)} · {row.tercero || row.concepto || '—'} · {eur(row.importe)}</p>
-      <p className="fin-muted fin-small">El material se sustituye por cada una de las líneas de la factura conciliada con su movimiento, que heredan su clasificación y su obra. Necesita un documento asignado con conceptos: un anticipo no tiene líneas que segregar.</p>
+      <p className="fin-muted fin-small">{envelope
+        ? 'El documento se leyó sin sus líneas. Se sustituye por cada una de las líneas de los documentos que adjuntes, que heredan su clasificación y su obra.'
+        : 'El material se sustituye por cada una de las líneas de la factura conciliada con su movimiento, que heredan su clasificación y su obra. Necesita un documento asignado con conceptos: un anticipo no tiene líneas que segregar.'}</p>
       {state.loading ? <div className="fin-loading">Segregando…</div> : null}
       {state.done ? <p role="status"><i className="ri-checkbox-circle-line"></i> {state.done}</p> : null}
       {state.notes?.map((n) => <p key={n} className="fin-small">{n}</p>)}
       {state.error && !state.done ? <p className="fin-error-inline" role="alert">{state.error}</p> : null}
-      {!state.done && state.missing?.length && state.movementId ? (
+      {!state.done && state.missing?.length && (envelope || state.movementId) ? (
         <div className="fin-stack">
           <p className="fin-muted fin-small">Adjunta el documento con el detalle de los productos (albarán, ticket o copia de la factura). Si es un anticipo, adjunta a la vez sus devoluciones y las facturas con sus productos (y, si quieres, el propio anticipo), de cualquier proveedor. Tienen que cuadrar: anticipo = productos + devoluciones; cada devolución se concilia con su cobro en la misma cuenta.</p>
-          {state.missing.map((d) => <DetailUpload key={d.id} materialId={row.id} movementId={state.movementId} doc={d} onRead={onRead} />)}
+          {state.missing.map((d) => <DetailUpload key={d.id} target={envelope ? { documentId: row.document_id } : { materialId: row.id }} movementId={state.movementId} doc={d} onRead={onRead} />)}
         </div>
       ) : null}
     </Dialog>

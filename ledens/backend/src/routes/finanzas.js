@@ -182,19 +182,33 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
   // Obramat PDFs read from their text, any other with the invoice OCR): the files one after another as the body, their sizes in X-Archivos-Tamanos ("123,456");
   // X-Devoluciones (URI-encoded JSON {número de la devolución: movimiento}) picks the
   // receipt of a devolución when several fit (409 devoluciones_ambiguas).
-  router.post('/materiales/:materialId/segregar-pedido', detailLimit, express.raw({ type: () => true, limit: ORDER_MAX_FILES * DETAIL_MAX_BYTES }),
-    traced('imputacion', 'Segregar con los documentos del anticipo', { entity: (req) => ({ type: 'material', id: req.params.materialId }), summary: (b) => ({ message: `Anticipo ${(b.documentos || []).join(', ')} sustituido por ${b.lineas} productos${b.pedido ? ' del pedido ' + b.pedido : ''}`, detail: { pedido: b.pedido, lineas: b.lineas, devoluciones: b.devoluciones } }) })(async (req, res) => {
-      const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-      const sizes = String(req.get('x-archivos-tamanos') || '').split(',').filter(Boolean).map(Number);
-      if (!sizes.length || sizes.length > ORDER_MAX_FILES || sizes.some((n) => !Number.isInteger(n) || n <= 0) || sizes.reduce((a, n) => a + n, 0) !== body.length)
-        throw new FinError(400, 'No se han recibido bien los documentos adjuntos; vuelve a adjuntarlos');
-      let refundMovements = {};
-      try { refundMovements = JSON.parse(decodeURIComponent(req.get('x-devoluciones') || '%7B%7D')); } catch { throw new FinError(400, 'Elección de devoluciones no válida'); }
-      if (!refundMovements || typeof refundMovements !== 'object' || Array.isArray(refundMovements) || Object.values(refundMovements).some((v) => !isUuid(v)))
-        throw new FinError(400, 'Elección de devoluciones no válida');
-      let at = 0;
-      const files = sizes.map((n) => body.subarray(at, at += n));
-      res.json(await svc(req).segregateOrder({ materialId: req.params.materialId, files, refundMovements, ocr: readerOf() }));
+  const orderFiles = (req) => {
+    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const sizes = String(req.get('x-archivos-tamanos') || '').split(',').filter(Boolean).map(Number);
+    if (!sizes.length || sizes.length > ORDER_MAX_FILES || sizes.some((n) => !Number.isInteger(n) || n <= 0) || sizes.reduce((a, n) => a + n, 0) !== body.length)
+      throw new FinError(400, 'No se han recibido bien los documentos adjuntos; vuelve a adjuntarlos');
+    let refundMovements = {};
+    try { refundMovements = JSON.parse(decodeURIComponent(req.get('x-devoluciones') || '%7B%7D')); } catch { throw new FinError(400, 'Elección de devoluciones no válida'); }
+    if (!refundMovements || typeof refundMovements !== 'object' || Array.isArray(refundMovements) || Object.values(refundMovements).some((v) => !isUuid(v)))
+      throw new FinError(400, 'Elección de devoluciones no válida');
+    let at = 0;
+    return { files: sizes.map((n) => body.subarray(at, at += n)), refundMovements, ocr: readerOf() };
+  };
+  const orderSummary = (b) => ({ message: `Anticipo ${(b.documentos || []).join(', ')} sustituido por ${b.lineas} productos${b.pedido ? ' del pedido ' + b.pedido : ''}`, detail: { pedido: b.pedido, lineas: b.lineas, devoluciones: b.devoluciones } });
+  const orderUpload = express.raw({ type: () => true, limit: ORDER_MAX_FILES * DETAIL_MAX_BYTES });
+  router.post('/materiales/:materialId/segregar-pedido', detailLimit, orderUpload,
+    traced('imputacion', 'Segregar con los documentos del anticipo', { entity: (req) => ({ type: 'material', id: req.params.materialId }), summary: orderSummary })(async (req, res) => {
+      res.json(await svc(req).segregateOrder({ materialId: req.params.materialId, ...orderFiles(req) }));
+    }));
+  // The same from a «Documento pendiente de desglose» (a document read without lines):
+  // its detail (one file) or the documents of its anticipo (several).
+  router.post('/documentos/:documentId/segregar-pedido', detailLimit, orderUpload,
+    traced('imputacion', 'Segregar con los documentos del anticipo', { entity: (req) => ({ type: 'documento', id: req.params.documentId }), summary: orderSummary })(async (req, res) => {
+      res.json(await svc(req).segregateOrder({ documentId: req.params.documentId, ...orderFiles(req) }));
+    }));
+  router.post('/documentos/:documentId/detalle', detailLimit, express.raw({ type: () => true, limit: DETAIL_MAX_BYTES }),
+    traced('imputacion', 'Detalle de productos adjuntado', { entity: (req) => ({ type: 'documento', id: req.params.documentId }), summary: (b) => ({ message: `${b.lineas} conceptos registrados desde el detalle adjunto`, detail: { lineas: b.lineas } }) })(async (req, res) => {
+      res.json(await svc(req).attachDocumentDetail({ id: null, documentId: req.params.documentId, content: Buffer.isBuffer(req.body) ? req.body : null, ocr: readerOf() }));
     }));
 
   router.get('/conciliacion', handle(async (req, res) => {

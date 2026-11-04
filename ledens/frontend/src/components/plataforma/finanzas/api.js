@@ -70,10 +70,12 @@ export const api = {
   // «Segregar conceptos» (Materiales pendiente de asignación): a provisional material payment.
   segregateMaterial: (materialId) => request('POST', `/api/finanzas/materiales/${materialId}/segregar`, {}),
   // «Adjuntar detalle»: the file with the product detail of a reconciled document without concepts.
-  attachDocumentDetail: (id, documentId, file) => request('POST', `/api/finanzas/movimientos/${id}/documentos/${documentId}/detalle`, file),
+  // Without a movement: the document of a «Documento pendiente de desglose».
+  attachDocumentDetail: (id, documentId, file) => request('POST', id ? `/api/finanzas/movimientos/${id}/documentos/${documentId}/detalle` : `/api/finanzas/documentos/${documentId}/detalle`, file),
   // «Segregar» with the documents of an anticipo (the anticipo, its devoluciones, its invoices), one after another;
+  // target: { materialId } or { documentId } (a «Documento pendiente de desglose»);
   // devoluciones: {número de la devolución: movimiento} when several receipts fit.
-  segregateOrder: (materialId, files, devoluciones = {}) => request('POST', `/api/finanzas/materiales/${materialId}/segregar-pedido`,
+  segregateOrder: (target, files, devoluciones = {}) => request('POST', target.documentId ? `/api/finanzas/documentos/${target.documentId}/segregar-pedido` : `/api/finanzas/materiales/${target.materialId}/segregar-pedido`,
     new Blob(files, { type: 'application/octet-stream' }),
     { 'X-Archivos-Tamanos': files.map((f) => f.size).join(','), 'X-Devoluciones': encodeURIComponent(JSON.stringify(devoluciones)) }),
   reconciliation: (f) => request('GET', '/api/finanzas/conciliacion' + qs(f)),
