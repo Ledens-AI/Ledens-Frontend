@@ -156,11 +156,15 @@ const TXT = {
   },
 };
 
+// A budget text (chapter or line name, description, notes) in the screen's
+// language: the backend adds `<field>En` when asked in English.
+const trEs = (o, k) => o?.[k];
+const trEn = (o, k) => o?.[`${k}En`] || o?.[k];
 function build(lang) {
   if (lang === 'en') {
-    return { lang, t: TXT.en, ...EN_FMT, PHASE: relabel(PHASE_ES, LABELS_EN.phase), VSTATUS: LABELS_EN.vstatus, KIND: relabel(KIND_ES, LABELS_EN.kind) };
+    return { lang, t: TXT.en, ...EN_FMT, tr: trEn, PHASE: relabel(PHASE_ES, LABELS_EN.phase), VSTATUS: LABELS_EN.vstatus, KIND: relabel(KIND_ES, LABELS_EN.kind) };
   }
-  return { lang, t: TXT.es, ...ES_FMT, PHASE: PHASE_ES, VSTATUS: VSTATUS_ES, KIND: KIND_ES };
+  return { lang, t: TXT.es, ...ES_FMT, tr: trEs, PHASE: PHASE_ES, VSTATUS: VSTATUS_ES, KIND: KIND_ES };
 }
 
 export function useObrasI18n() {

@@ -6,6 +6,7 @@ import { viewAs } from '../auth/viewAs.js';
 import { PresupuestosService, PresupuestoError } from '../presupuestos/service.js';
 import { pdfDraft, LayoutOcr } from '../presupuestos/pdf.js';
 import { translatorFromEnv } from '../presupuestos/translate.js';
+import { translateDoc } from '../presupuestos/traducciones.js';
 import { PropuestasService } from '../presupuestos/propuestas.js';
 
 // Presupuestos para clientes y obras en curso (/api/presupuestos). Every role
@@ -28,8 +29,12 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   });
 
   const svc = (req) => new PresupuestosService(pool || getPool(), req.user);
+  const translate = translator !== undefined ? translator : translatorFromEnv();
+  // The screen's language (X-Ledens-Lang): a presupuesto read in English also
+  // carries its chapters, lines and notes in English (presupuestos/traducciones.js).
+  const inLang = (req, doc) => (doc?.version?.chapters ? translateDoc(pool || getPool(), translate, doc, req.get('x-ledens-lang')) : doc);
   const handle = (fn) => async (req, res, next) => {
-    try { res.json(await fn(req)); } catch (e) {
+    try { res.json(await inLang(req, await fn(req))); } catch (e) {
       if (e instanceof PresupuestoError) return res.status(e.status).json({ error: e.message });
       next(e);
     }
@@ -37,7 +42,6 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
 
   router.get('/', handle(async (req) => ({ presupuestos: await svc(req).list() })));
   // A budget PDF read into chapters and lines (text layer, else OCR). Saves nothing.
-  const translate = translator !== undefined ? translator : translatorFromEnv();
   const layout = ocr !== undefined ? ocr : process.env.DI_ENDPOINT && process.env.DI_KEY ? new LayoutOcr(process.env.DI_ENDPOINT, process.env.DI_KEY) : null;
   router.post('/pdf', rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false }),
     express.raw({ type: () => true, limit: 20 * 1024 * 1024 }), handle((req) => pdfDraft(req.user, req.body, { ocr: layout, db: pool || getPool(), translator: translate })));
