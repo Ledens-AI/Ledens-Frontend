@@ -8,6 +8,7 @@ import { pdfDraft, LayoutOcr } from '../presupuestos/pdf.js';
 import { translatorFromEnv } from '../presupuestos/translate.js';
 import { translateDoc } from '../presupuestos/traducciones.js';
 import { PropuestasService } from '../presupuestos/propuestas.js';
+import { agenteDraft, agenteFromEnv } from '../presupuestos/agente.js';
 
 // Presupuestos para clientes y obras en curso (/api/presupuestos). Every role
 // reaches it; what each one sees and may do is decided per row in
@@ -15,7 +16,7 @@ import { PropuestasService } from '../presupuestos/propuestas.js';
 // `authenticate`/`pool` replace the session lookup and the database in tests.
 // `ocr` replaces Azure Document Intelligence (DI_ENDPOINT/DI_KEY) and `translator`
 // Azure Translator (AZURE_TRANSLATOR_*) in tests; null turns them off.
-export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, translator, origin = process.env.CORS_ORIGIN } = {}) {
+export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, translator, anthropic, origin = process.env.CORS_ORIGIN } = {}) {
   const router = Router();
   router.use((_req, res, next) => {
     if (!pool && !isDbConfigured()) return res.status(503).json({ error: 'Presupuestos no disponibles todavía' });
@@ -45,6 +46,17 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   const layout = ocr !== undefined ? ocr : process.env.DI_ENDPOINT && process.env.DI_KEY ? new LayoutOcr(process.env.DI_ENDPOINT, process.env.DI_KEY) : null;
   router.post('/pdf', rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false }),
     express.raw({ type: () => true, limit: 20 * 1024 * 1024 }), handle((req) => pdfDraft(req.user, req.body, { ocr: layout, db: pool || getPool(), translator: translate })));
+  // A draft generated from the notes/photos/plans of a client visit, matched
+  // against the base de partidas the same way a PDF import is. Saves nothing.
+  // Body is read raw (any content-type) and parsed here, same trick as /pdf,
+  // so the much larger size limit does not go through the app's 64kb JSON cap.
+  const agent = anthropic !== undefined ? anthropic : agenteFromEnv();
+  router.post('/agente', rateLimit({ windowMs: 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false }),
+    express.raw({ type: () => true, limit: 20 * 1024 * 1024 }), handle((req) => {
+      let body;
+      try { body = JSON.parse(req.body.toString('utf8')); } catch { throw new PresupuestoError(400, 'Cuerpo no válido'); }
+      return agenteDraft(req.user, body, { db: pool || getPool(), translator: translate, anthropic: agent });
+    }));
   router.get('/opciones', handle((req) => svc(req).options()));
   // Proposed new partidas for the base (admins decide).
   const propuestas = (req) => new PropuestasService(pool || getPool(), req.user);

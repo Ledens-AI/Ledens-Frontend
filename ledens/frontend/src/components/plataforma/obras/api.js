@@ -53,6 +53,21 @@ export const api = {
     if (!r.ok) throw new ApiError(r.status, data.error || (r.status === 413 ? 'El PDF es demasiado grande (máximo 20 MB).' : 'No se pudo leer el PDF.'), data);
     return data;
   },
+  // A draft from the notes/photos/plans of a client visit (backend:
+  // presupuestos/agente.js). Saves nothing. Sent as `application/octet-stream`,
+  // not `application/json`, so the app's global 64kb JSON body limit never
+  // sees it — same trick as readPdf, read raw server-side and parsed there.
+  readAgente: async ({ notes, files }) => {
+    let r;
+    try {
+      r = await fetch(`${base}/agente`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', ...viewAsHeaders() }, body: JSON.stringify({ notes, files }) });
+    } catch {
+      throw new ApiError(0, 'Error de conexión. Comprueba tu red e inténtalo de nuevo.');
+    }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new ApiError(r.status, data.error || (r.status === 413 ? 'Los archivos superan el tamaño máximo (20 MB en total).' : 'No se ha podido generar el borrador.'), data);
+    return data;
+  },
   // Proposed new partidas for the base (admins; backend: presupuestos/propuestas.js).
   propuestas: (estado) => request('GET', `${base}/propuestas?estado=${encodeURIComponent(estado || 'pending')}`),
   aprobarPropuesta: (id, body) => request('POST', `${base}/propuestas/${id}/aprobar`, body),

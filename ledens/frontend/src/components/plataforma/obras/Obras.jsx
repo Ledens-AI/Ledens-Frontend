@@ -21,6 +21,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
   const [open, setOpen] = useState(null); // { id, tab }
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [agentando, setAgentando] = useState(false);
   const [filter, setFilter] = useState('todos');
 
   const countRef = React.useRef(onCount);
@@ -30,10 +31,11 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
     countRef.current?.(d.presupuestos.filter((p) => (panel === 'client' ? p.phase === 'pendiente' && p.decides !== false : p.phase === 'cambios')).length);
   }, (e) => setError(e.message)), [panel]);
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setOpen(null); setCreating(false); setImporting(false); }, [screen]);
+  useEffect(() => { setOpen(null); setCreating(false); setImporting(false); setAgentando(false); }, [screen]);
 
   if (creating) return <div className="fin obr"><Editor mode="new" onCancel={() => setCreating(false)} onSaved={(d) => { setCreating(false); load(); toast?.('Borrador guardado'); setOpen({ id: d.id }); }} /></div>;
   if (importing) return <div className="fin obr"><PdfImport toast={toast} onCancel={() => setImporting(false)} onDone={(id) => { setImporting(false); load(); setOpen({ id }); }} /></div>;
+  if (agentando) return <div className="fin obr"><AgenteImport toast={toast} onCancel={() => setAgentando(false)} onDone={(id) => { setAgentando(false); load(); setOpen({ id }); }} /></div>;
   if (screen === 'propuestas') return <Propuestas toast={toast} readOnly={readOnly} onCount={() => countRef.current?.()} />;
   if (open) {
     return (
@@ -117,6 +119,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
           <div className="obr-actions">
             <button type="button" className="fin-btn" onClick={() => setCreating(true)}><i className="ri-add-line"></i>Nuevo presupuesto</button>
             <button type="button" className="fin-btn is-primary" onClick={() => setImporting(true)}><i className="ri-file-upload-line"></i>Subir PDF de presupuesto</button>
+            <button type="button" className="fin-btn" onClick={() => setAgentando(true)}><i className="ri-magic-line"></i>Generar con la documentación de la visita</button>
           </div>
         ) : null}
       </div>
@@ -239,6 +242,65 @@ function PdfImport({ onCancel, onDone, toast }) {
         <div className="obr-actions obr-start">
           <button type="button" className="fin-btn" onClick={onCancel} disabled={busy}>Cancelar</button>
           <button type="button" className="fin-btn is-primary" onClick={read} disabled={busy || !file}><i className="ri-scan-2-line"></i>{busy ? 'Leyendo…' : 'Leer PDF'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const fileToBase64 = (file) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).split(',')[1] || '');
+  r.onerror = () => reject(new Error(`No se ha podido leer «${file.name}»`));
+  r.readAsDataURL(file);
+});
+
+// Notes, transcribed voice notes, photos and plans from the client visit →
+// a draft (backend: presupuestos/agente.js), matched against the base de
+// partidas the same way a PDF import is. Nothing is saved until the jefe
+// reviews it in the same editor and sends it.
+function AgenteImport({ onCancel, onDone, toast }) {
+  const [notes, setNotes] = useState('');
+  const [picked, setPicked] = useState([]);
+  const [draft, setDraft] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const generate = async () => {
+    setBusy(true); setError('');
+    try {
+      const files = await Promise.all(picked.map(async (f) => ({ name: f.name, mime: f.type || 'text/plain', dataBase64: await fileToBase64(f) })));
+      setDraft(await api.readAgente({ notes, files }));
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+  if (draft) {
+    return <Editor mode="new" initial={draft} onCancel={onCancel} onSaved={async (d, { send }) => {
+      let msg = 'Borrador guardado';
+      if (send) { try { await api.send(d.id); msg = 'Presupuesto enviado: queda pendiente de que el cliente lo apruebe'; } catch (e) { msg = `Guardado como borrador; no se ha podido enviar (${e.message})`; } }
+      toast?.(msg);
+      onDone(d.id);
+    }} />;
+  }
+  return (
+    <div className="fin-stack">
+      <div className="fin-page-head">
+        <h1>Generar presupuesto con la documentación de la visita</h1>
+        <p>Escribe lo que recogiste del cliente y adjunta fotos, planos o las notas de voz ya transcritas. El agente propone capítulos y partidas de la base de Ledens; lo que no pueda deducir de los archivos queda marcado para que lo resuelvas antes de enviarlo — nunca inventa medidas, precios ni decisiones del cliente.</p>
+      </div>
+      {error ? <ErrorBox message={error} /> : null}
+      <div className="fin-card fin-form">
+        <label className="fin-field"><span>Notas de la visita</span>
+          <textarea rows={6} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Qué se pide, estancias afectadas, materiales y calidades comentadas, medidas tomadas, qué queda pendiente de decidir…" />
+        </label>
+        <label className="fin-field"><span>Fotos, planos, PDF o notas de voz transcritas (máximo 20 MB en total)</span>
+          <input type="file" multiple accept="image/jpeg,image/png,image/heic,application/pdf,text/plain,.txt,.heic"
+            onChange={(e) => { setPicked([...e.target.files]); setError(''); }} />
+        </label>
+        {picked.length ? <p className="fin-muted">{picked.length} archivo(s) seleccionado(s).</p> : null}
+        {busy ? <p className="fin-muted">Leyendo la documentación de la visita… puede tardar un momento.</p> : null}
+        <div className="obr-actions obr-start">
+          <button type="button" className="fin-btn" onClick={onCancel} disabled={busy}>Cancelar</button>
+          <button type="button" className="fin-btn is-primary" onClick={generate} disabled={busy || (!notes.trim() && !picked.length)}><i className="ri-magic-line"></i>{busy ? 'Generando…' : 'Generar borrador'}</button>
         </div>
       </div>
     </div>
