@@ -158,7 +158,7 @@ const pctOf = (part, whole) => (whole > 0 ? Math.round(part / whole * 1000) / 10
 /* One project: its data, what its presupuestos add up to, its obras, its
  * presupuestos and, for whoever may see Gestión financiera of this project,
  * ingresos, costes and the latest movements assigned to it. */
-export function Proyecto({ projectId, readOnly, onNew, onImport, onBack, onOpen }) {
+export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBack, onOpen }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [fin, setFin] = useState(null); // { totales, rows, materiales, trabajadores } | { error }
@@ -203,6 +203,7 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onBack, onOpen 
           {pr.status ? <Badge bg="#E3E7F3" fg="#3E4D85" icon="ri-building-2-line">{pr.status}</Badge> : null}
           {!readOnly && onNew ? <button type="button" className="fin-btn" onClick={() => onNew(pr)}><i className="ri-add-line"></i>Nuevo presupuesto</button> : null}
           {!readOnly && onImport ? <button type="button" className="fin-btn is-primary" onClick={() => onImport(pr)}><i className="ri-file-upload-line"></i>Subir PDF de presupuesto</button> : null}
+          {!readOnly && onAgente ? <button type="button" className="fin-btn" onClick={() => onAgente(pr)}><i className="ri-magic-line"></i>Generar con la documentación de la visita</button> : null}
         </div>
       </div>
 
