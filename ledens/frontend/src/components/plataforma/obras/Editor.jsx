@@ -17,7 +17,7 @@ const fromVersion = (v) => (v?.chapters || []).map((c) => ({
  * kind), one VAT rate, conditions/exclusions. mode: 'new' (admin picks client
  * and jefe), 'ampliacion' (of `parent`) or 'edit' (the presupuesto `doc`). The
  * server validates everything again. */
-export default function Editor({ mode, doc, parent, initial, sourceFile, onSaved, onCancel }) {
+export default function Editor({ mode, doc, parent, initial, sourceFile, project: initialProject, onSaved, onCancel }) {
   const [title, setTitle] = useState(doc?.title || initial?.title || (mode === 'ampliacion' ? `Ampliación de ${parent.title}` : ''));
   const [address, setAddress] = useState(doc?.address || initial?.address || '');
   // An ampliación starts with the VAT rate of the obra it extends.
@@ -31,7 +31,7 @@ export default function Editor({ mode, doc, parent, initial, sourceFile, onSaved
   // '' = a new obra; otherwise the obra (approved main presupuesto) it joins.
   const [obraId, setObraId] = useState('');
   // Project of Gestión financiera for a new obra (an ampliación follows its obra).
-  const [project, setProject] = useState(null);
+  const [project, setProject] = useState(initialProject ? { id: initialProject.id, label: initialProject.name, code: initialProject.code } : null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 

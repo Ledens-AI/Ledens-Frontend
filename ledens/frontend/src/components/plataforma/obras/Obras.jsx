@@ -19,13 +19,19 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
   const [list, setList] = useState(null);
   const [error, setError] = useState('');
   const [open, setOpen] = useState(null); // { id, tab }
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(false); // true, or the project it starts in
   const [importing, setImporting] = useState(false);
   const [filter, setFilter] = useState('todos');
   // Team «Presupuestos y obras»: by project (default) or every presupuesto; the project open.
   const [view, setView] = useState('proyectos');
   const [project, setProject] = useState(null);
   const [unlinked, setUnlinked] = useState(false);
+  // Every project the team member may see (each one has its page, with or without presupuestos).
+  const [projects, setProjects] = useState(null);
+  useEffect(() => {
+    if (panel === 'client' || screen !== 'presupuestos') return;
+    api.projects().then((d) => setProjects(d.proyectos), () => setProjects(null));
+  }, [panel, screen]);
 
   const countRef = React.useRef(onCount);
   countRef.current = onCount;
@@ -36,7 +42,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setOpen(null); setCreating(false); setImporting(false); setProject(null); }, [screen]);
 
-  if (creating) return <div className="fin obr"><Editor mode="new" onCancel={() => setCreating(false)} onSaved={(d) => { setCreating(false); load(); toast?.('Borrador guardado'); setOpen({ id: d.id }); }} /></div>;
+  if (creating) return <div className="fin obr"><Editor mode="new" project={creating?.id ? creating : undefined} onCancel={() => setCreating(false)} onSaved={(d) => { setCreating(false); load(); toast?.('Borrador guardado'); setOpen({ id: d.id }); }} /></div>;
   if (importing) return <div className="fin obr"><PdfImport toast={toast} onCancel={() => setImporting(false)} onDone={(id) => { setImporting(false); load(); setOpen({ id }); }} /></div>;
   if (screen === 'propuestas') return <Propuestas toast={toast} readOnly={readOnly} onCount={() => countRef.current?.()} />;
   if (open) {
@@ -48,7 +54,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
     );
   }
   if (project) {
-    return <div className="fin obr"><Proyecto key={project} projectId={project} onBack={() => setProject(null)} onOpen={(p, tab) => setOpen({ id: p.id, tab })} /></div>;
+    return <div className="fin obr"><Proyecto key={project} projectId={project} readOnly={readOnly} onNew={(pr) => setCreating(pr)} onBack={() => setProject(null)} onOpen={(p, tab) => setOpen({ id: p.id, tab })} /></div>;
   }
   if (error) return <div className="fin"><ErrorBox message={error} onRetry={load} retryLabel={t.retry} /></div>;
   if (!list) return <div className="fin fin-loading fin-muted">{t.loading}</div>;
@@ -138,7 +144,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
         </div>
       ) : null}
       {byProject ? (
-        list.length ? <ProjectsGrid list={list} onOpenProject={setProject} onUnlinked={() => { setUnlinked(true); setFilter('todos'); }} />
+        list.length || projects?.length ? <ProjectsGrid list={list} projects={projects} onOpenProject={setProject} onUnlinked={() => { setUnlinked(true); setFilter('todos'); }} />
           : <Empty icon="ri-building-4-line" title="Nada por aquí" text={panel === 'admin' ? 'Crea un presupuesto con «Nuevo presupuesto» y elige su proyecto.' : 'Cuando un administrador te asigne un presupuesto u obra, aparecerá aquí.'} />
       ) : (
         <>

@@ -26,6 +26,7 @@ before(async () => {
     CREATE TABLE ledens.projects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), source_id text UNIQUE, raw_id uuid UNIQUE,
       project_id text, name text, customer_name_source text, salesman text, address text, start_date date, municipio text,
       provincia text, customer_id uuid, status_id uuid REFERENCES ledens.project_statuses (id), end_date date);
+    CREATE TABLE ledens.customers (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), display_name text NOT NULL);
     CREATE TABLE ledens.finance_project_permissions (user_id uuid NOT NULL, project_id uuid NOT NULL, PRIMARY KEY (user_id, project_id));
     INSERT INTO ledens.project_statuses VALUES ('00000000-0000-0000-0000-000000000001','EN_CURSO','En curso');`);
   for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql']) await db.exec(await migration(m));
@@ -99,4 +100,17 @@ test('moving the obra to another project is audited; the jefe needs access to th
   assert.match(a.detail, /P2026-014 · Casa Marbella → P2026-015 · Piso Vélez/);
   assert.equal((await as(admin).setProject(obraId, { projectId: null })).project, null);
   await assert.rejects(as(admin).setProject(obraId, { projectId: 'x' }), { status: 400 });
+});
+
+test('every project the team member may see is listed, with or without presupuestos', async () => {
+  const nuevo = (await db.query("INSERT INTO ledens.projects(project_id,name,municipio) VALUES ('P2026-020','Ático Málaga','Málaga') RETURNING id")).rows[0].id;
+  const all = await as(admin).projectsList();
+  assert.deepEqual(all.map((p) => p.code), ['P2026-020', 'P2026-015', 'P2026-014'], 'newest code first, a project without presupuestos included');
+  assert.equal((await as(admin).projectView(nuevo)).kpis.presupuestos, 0);
+  // A jefe: projects finance lets them see, plus those of their obras.
+  await as(admin).setProject(obraId, { projectId: marbella });
+  await db.query('DELETE FROM ledens.finance_project_permissions WHERE user_id=$1', [jefe.id]);
+  assert.deepEqual((await as(jefe).projectsList()).map((p) => p.code), ['P2026-014']);
+  assert.deepEqual((await as(otroJefe).projectsList()).map((p) => p.code), ['P2026-015']);
+  await assert.rejects(as(cliente).projectsList(), { status: 403 });
 });

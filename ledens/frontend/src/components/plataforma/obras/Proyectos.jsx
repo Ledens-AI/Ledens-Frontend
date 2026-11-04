@@ -15,16 +15,19 @@ import { useObrasI18n } from './i18n.js';
 
 export const projectLabel = (p) => (p ? [p.code, p.name].filter(Boolean).join(' · ') : 'Sin proyecto');
 
-// Projects of the presupuestos in `list`, with what each one adds up to.
-function groups(list) {
+// One group per project: every project the user may see (`projects`, newest
+// code first, also those without presupuestos), plus any other project its
+// presupuestos point to, and «Sin proyecto» last.
+function groups(list, projects) {
   const map = new Map();
+  for (const pr of projects || []) map.set(pr.id, { project: pr, rows: [] });
   for (const p of list) {
     const k = p.project?.id || '';
     const g = map.get(k) || { project: p.project || null, rows: [] };
     g.rows.push(p);
     map.set(k, g);
   }
-  return [...map.values()].map((g) => {
+  const out = [...map.values()].map((g) => {
     const approved = g.rows.filter((r) => ['aprobado', 'en_curso'].includes(r.phase));
     const open = g.rows.filter((r) => ['pendiente', 'cambios'].includes(r.phase));
     const obras = g.rows.filter((r) => !r.parent && r.obra);
@@ -39,33 +42,63 @@ function groups(list) {
       enCurso: g.rows.filter((r) => r.phase === 'en_curso').length,
       executionPct: base > 0 ? Math.round(executed / base * 1000) / 10 : null,
     };
-  }).sort((a, b) => (!a.project) - (!b.project) || String(a.project?.code || '').localeCompare(String(b.project?.code || ''), 'es', { numeric: true }) * -1);
+  });
+  const code = (g) => String(g.project?.code || '');
+  return out.sort((a, b) => (!a.project) - (!b.project) || code(b).localeCompare(code(a), 'es', { numeric: true }) || String(a.project?.name || '').localeCompare(String(b.project?.name || ''), 'es'));
 }
 
-export function ProjectsGrid({ list, onOpenProject, onUnlinked }) {
-  const gs = groups(list);
-  if (!gs.length) return null;
+const norm = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+export function ProjectsGrid({ list, projects, onOpenProject, onUnlinked }) {
+  const [q, setQ] = useState('');
+  const [estado, setEstado] = useState('');
+  const all = groups(list, projects);
+  const statuses = [...new Set(all.map((g) => g.project?.status).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+  const gs = all.filter((g) => (!estado || g.project?.status === estado)
+    && (!q || norm([g.project?.code, g.project?.name, g.project?.municipio, g.project?.address, g.project?.cliente, ...g.rows.map((r) => r.title)].join(' ')).includes(norm(q))));
   return (
-    <div className="obr-cards">
-      {gs.map((g) => (
-        <button key={g.project?.id || 'none'} type="button" className={'fin-card obr-card' + (g.project ? '' : ' obr-card-none')} onClick={() => (g.project ? onOpenProject(g.project.id) : onUnlinked())}>
-          <span className="obr-card-top">
-            <span className="fin-muted fin-small">{g.project ? g.project.code || 'Sin código' : 'Pendiente de vincular'}</span>
-            {g.action ? <Badge bg="#FBE0EA" fg="#B84371" icon="ri-error-warning-line">{`${g.action} por hacer`}</Badge>
-              : g.enCurso ? <PhaseBadge phase="en_curso" /> : null}
-          </span>
-          <strong className="obr-card-title">{g.project ? g.project.name : 'Sin proyecto'}</strong>
-          <span className="fin-muted fin-small">
-            {g.project ? [g.project.municipio, `${g.rows.length} ${g.rows.length === 1 ? 'presupuesto' : 'presupuestos'}`].filter(Boolean).join(' · ')
-              : `${g.rows.length} ${g.rows.length === 1 ? 'presupuesto' : 'presupuestos'} sin proyecto: vincúlalos desde cada obra`}
-          </span>
-          <span className="obr-proj-figs">
-            <span><span className="fin-muted fin-small">Aprobado</span><strong>{eur(g.approved)}</strong></span>
-            <span><span className="fin-muted fin-small">{`En negociación${g.openN ? ` · ${g.openN}` : ''}`}</span><strong>{eur(g.open)}</strong></span>
-          </span>
-          {g.executionPct !== null ? <><span className="obr-meter"><span>Ejecución</span></span><Progress value={g.executionPct} color="#5567AE" compact /></> : null}
-        </button>
-      ))}
+    <div className="fin-stack">
+      {all.length > 6 || statuses.length > 1 ? (
+        <div className="fin-filters">
+          <label className="fin-field obr-grow"><span>Buscar proyecto</span>
+            <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Código, nombre, municipio, cliente u obra…" />
+          </label>
+          {statuses.length > 1 ? (
+            <label className="fin-field"><span>Estado</span>
+              <select value={estado} onChange={(e) => setEstado(e.target.value)}>
+                <option value="">Todos</option>
+                {statuses.map((x) => <option key={x} value={x}>{x}</option>)}
+              </select>
+            </label>
+          ) : null}
+        </div>
+      ) : null}
+      {gs.length ? (
+        <div className="obr-cards">
+          {gs.map((g) => (
+            <button key={g.project?.id || 'none'} type="button" className={'fin-card obr-card' + (g.project ? '' : ' obr-card-none')} onClick={() => (g.project ? onOpenProject(g.project.id) : onUnlinked())}>
+              <span className="obr-card-top">
+                <span className="fin-muted fin-small">{g.project ? g.project.code || 'Sin código' : 'Pendiente de vincular'}</span>
+                {g.action ? <Badge bg="#FBE0EA" fg="#B84371" icon="ri-error-warning-line">{`${g.action} por hacer`}</Badge>
+                  : g.enCurso ? <PhaseBadge phase="en_curso" />
+                    : g.project?.status ? <Badge bg="#EDEDEA" fg="#3A3A38">{g.project.status}</Badge> : null}
+              </span>
+              <strong className="obr-card-title">{g.project ? g.project.name : 'Sin proyecto'}</strong>
+              <span className="fin-muted fin-small">
+                {g.project ? [g.project.municipio, g.rows.length ? `${g.rows.length} ${g.rows.length === 1 ? 'presupuesto' : 'presupuestos'}` : null].filter(Boolean).join(' · ') || ' '
+                  : `${g.rows.length} ${g.rows.length === 1 ? 'presupuesto' : 'presupuestos'} sin proyecto: vincúlalos desde cada obra`}
+              </span>
+              {g.rows.length ? (
+                <span className="obr-proj-figs">
+                  <span><span className="fin-muted fin-small">Aprobado</span><strong>{eur(g.approved)}</strong></span>
+                  <span><span className="fin-muted fin-small">{`En negociación${g.openN ? ` · ${g.openN}` : ''}`}</span><strong>{eur(g.open)}</strong></span>
+                </span>
+              ) : <span className="fin-muted fin-small obr-card-empty"><i className="ri-file-add-line" aria-hidden="true"></i> Aún sin presupuestos: entra para crear el primero</span>}
+              {g.executionPct !== null ? <><span className="obr-meter"><span>Ejecución</span></span><Progress value={g.executionPct} color="#5567AE" compact /></> : null}
+            </button>
+          ))}
+        </div>
+      ) : <Empty icon="ri-search-line" title="Ningún proyecto coincide" text="Prueba con otro código, nombre o estado." />}
     </div>
   );
 }
@@ -121,7 +154,7 @@ const pctOf = (part, whole) => (whole > 0 ? Math.round(part / whole * 1000) / 10
 /* One project: its data, what its presupuestos add up to, its obras, its
  * presupuestos and, for whoever may see Gestión financiera of this project,
  * ingresos, costes and the latest movements assigned to it. */
-export function Proyecto({ projectId, onBack, onOpen }) {
+export function Proyecto({ projectId, readOnly, onNew, onBack, onOpen }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [fin, setFin] = useState(null); // { totales, rows, materiales, trabajadores } | { error }
@@ -162,7 +195,10 @@ export function Proyecto({ projectId, onBack, onOpen }) {
           <h2>{pr.name}</h2>
           <span className="fin-muted">{[pr.municipio, pr.address, pr.cliente ? `Cliente: ${pr.cliente}` : null, dates].filter(Boolean).join(' · ')}</span>
         </div>
-        {pr.status ? <Badge bg="#E3E7F3" fg="#3E4D85" icon="ri-building-2-line">{pr.status}</Badge> : null}
+        <div className="obr-actions">
+          {pr.status ? <Badge bg="#E3E7F3" fg="#3E4D85" icon="ri-building-2-line">{pr.status}</Badge> : null}
+          {!readOnly && onNew ? <button type="button" className="fin-btn is-primary" onClick={() => onNew(pr)}><i className="ri-add-line"></i>Nuevo presupuesto</button> : null}
+        </div>
       </div>
 
       <h3 className="obr-h3">Presupuestos del proyecto</h3>
@@ -204,7 +240,7 @@ export function Proyecto({ projectId, onBack, onOpen }) {
 
       <h3 className="obr-h3">{`Presupuestos · ${rows.length}`}</h3>
       {rows.length ? <PresupuestosTable rows={rows} onOpen={onOpen} showProject={false} />
-        : <Empty icon="ri-file-list-3-line" title="Este proyecto no tiene presupuestos" text="Vincula una obra desde su ficha («Proyecto») o crea un presupuesto eligiendo este proyecto." />}
+        : <Empty icon="ri-file-list-3-line" title="Este proyecto no tiene presupuestos" text="Crea el primero con «Nuevo presupuesto» (queda en este proyecto) o vincula una obra existente desde su ficha." />}
 
       {fin?.rows?.length ? (
         <>
