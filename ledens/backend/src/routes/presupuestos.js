@@ -9,6 +9,8 @@ import { translatorFromEnv } from '../presupuestos/translate.js';
 import { translateDoc } from '../presupuestos/traducciones.js';
 import { PropuestasService } from '../presupuestos/propuestas.js';
 import { agenteDraft, agenteFromEnv } from '../presupuestos/agente.js';
+import { agenteChat } from '../presupuestos/agenteChat.js';
+import { getStorage } from '../obras/storage.js';
 
 // Presupuestos para clientes y obras en curso (/api/presupuestos). Every role
 // reaches it; what each one sees and may do is decided per row in
@@ -16,7 +18,7 @@ import { agenteDraft, agenteFromEnv } from '../presupuestos/agente.js';
 // `authenticate`/`pool` replace the session lookup and the database in tests.
 // `ocr` replaces Azure Document Intelligence (DI_ENDPOINT/DI_KEY) and `translator`
 // Azure Translator (AZURE_TRANSLATOR_*) in tests; null turns them off.
-export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, translator, anthropic, origin = process.env.CORS_ORIGIN } = {}) {
+export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, translator, anthropic, storage, origin = process.env.CORS_ORIGIN } = {}) {
   const router = Router();
   router.use((_req, res, next) => {
     if (!pool && !isDbConfigured()) return res.status(503).json({ error: 'Presupuestos no disponibles todavía' });
@@ -56,6 +58,17 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
       let body;
       try { body = JSON.parse(req.body.toString('utf8')); } catch { throw new PresupuestoError(400, 'Cuerpo no válido'); }
       return agenteDraft(req.user, body, { db: pool || getPool(), translator: translate, anthropic: agent });
+    }));
+  // Admin-only chat: finds the right project, reads its already-uploaded
+  // visita files itself (buscar_proyectos/listar_archivos_obra/leer_archivo_obra,
+  // over the same obra archivos Blob storage as /api/obras), and only then
+  // proposes a draft. Never runs on its own — only on an explicit message.
+  const blobStorage = storage !== undefined ? storage : getStorage();
+  router.post('/agente/chat', rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false }),
+    express.raw({ type: () => true, limit: 2 * 1024 * 1024 }), handle((req) => {
+      let body;
+      try { body = JSON.parse(req.body.toString('utf8')); } catch { throw new PresupuestoError(400, 'Cuerpo no válido'); }
+      return agenteChat(req.user, body, { db: pool || getPool(), translator: translate, anthropic: agent, storage: blobStorage });
     }));
   router.get('/opciones', handle((req) => svc(req).options()));
   // Proposed new partidas for the base (admins decide).

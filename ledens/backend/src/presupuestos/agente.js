@@ -20,12 +20,12 @@ export function agenteFromEnv() {
   return key ? new Anthropic({ apiKey: key }) : null;
 }
 
-const MODEL = process.env.AGENTE_PRESUPUESTOS_MODEL || 'claude-sonnet-5-5';
+export const MODEL = process.env.AGENTE_PRESUPUESTOS_MODEL || 'claude-sonnet-5-5';
 const MAX_FILES = 40;
-const MAX_FILE_BYTES = 8 * 1024 * 1024;
+export const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 
-const SYSTEM = `Eres el asistente de un jefe de obra de Ledens, una empresa de reformas en Málaga. Te da la documentación de la visita a un posible cliente (notas, notas de voz ya transcritas a texto, fotos, planos, presupuestos de proveedores) y debes extraer, con disciplina, qué reforma se ha pedido.
+export const SYSTEM = `Eres el asistente de un jefe de obra de Ledens, una empresa de reformas en Málaga. Te da la documentación de la visita a un posible cliente (notas, notas de voz ya transcritas a texto, fotos, planos, presupuestos de proveedores) y debes extraer, con disciplina, qué reforma se ha pedido.
 
 No puedes inventar: mediciones, cantidades, precios, materiales, modelos de producto, soluciones constructivas, recorridos de instalaciones, condiciones del inmueble, decisiones del cliente, alcances no mencionados, permisos, ni quién suministra un producto. Cualquier dato que no puedas demostrar con los archivos queda pendiente, nunca adivinado.
 No calculas ni asignas precios: eso lo hace otro sistema a partir de la base de partidas de Ledens. Nunca pongas un precio.
@@ -37,7 +37,7 @@ Registra en "contradicciones" cualquier dato que se contradiga entre archivos di
 Agrupa las partidas en los capítulos habituales de una reforma (trabajos previos, demoliciones, albañilería, fontanería, electricidad, climatización, pladur, revestimientos y pavimentos, pintura, carpintería, mobiliario, sanitarios, gestión de residuos, limpieza, partidas condicionadas, opciones y mejoras) cuando corresponda; no incluyas capítulos sin partidas.
 Devuelve siempre tu respuesta llamando a la herramienta "registrar_borrador", sin texto adicional.`;
 
-const DRAFT_TOOL = {
+export const DRAFT_TOOL = {
   name: 'registrar_borrador',
   description: 'Registra el borrador del presupuesto extraído de la documentación de la visita.',
   input_schema: {
@@ -85,15 +85,22 @@ const DRAFT_TOOL = {
 
 const IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 
+// One file → its content block(s), shared with the chat agent's
+// leer_archivo_obra tool result (same rules: images/PDFs go in as-is, by
+// media type Claude understands; anything else is read as text).
+export function fileBlocks(f) {
+  const blocks = [];
+  if (IMAGE_MIME.has(f.mime)) blocks.push({ type: 'image', source: { type: 'base64', media_type: f.mime, data: f.dataBase64 } });
+  else if (f.mime === 'application/pdf') blocks.push({ type: 'document', source: { type: 'base64', media_type: f.mime, data: f.dataBase64 } });
+  else blocks.push({ type: 'text', text: `--- ${f.name} ---\n${Buffer.from(f.dataBase64, 'base64').toString('utf8')}` });
+  blocks.push({ type: 'text', text: `(archivo: ${f.name})` });
+  return blocks;
+}
+
 function contentBlocks({ notes, files = [] } = {}) {
   const blocks = [];
   if (notes && notes.trim()) blocks.push({ type: 'text', text: `Notas del jefe de obra:\n${notes.trim()}` });
-  for (const f of files) {
-    if (IMAGE_MIME.has(f.mime)) blocks.push({ type: 'image', source: { type: 'base64', media_type: f.mime, data: f.dataBase64 } });
-    else if (f.mime === 'application/pdf') blocks.push({ type: 'document', source: { type: 'base64', media_type: f.mime, data: f.dataBase64 } });
-    else blocks.push({ type: 'text', text: `--- ${f.name} ---\n${Buffer.from(f.dataBase64, 'base64').toString('utf8')}` });
-    blocks.push({ type: 'text', text: `(archivo: ${f.name})` });
-  }
+  for (const f of files) blocks.push(...fileBlocks(f));
   if (!blocks.length) fail(400, 'No hay notas ni archivos que leer.');
   return blocks;
 }
@@ -174,19 +181,13 @@ function buildItems(capitulos, matches, catalog, vat) {
   return { chapters, warnings };
 }
 
-// user: who uploads (admin/jefe only, like pdfDraft). input: { notes, files:
-// [{ name, mime, dataBase64 }] }. db: required to match against the base de
-// partidas — without it every line would become a proposal, so it fails loud
-// instead. anthropic: injectable for tests.
-export async function agenteDraft(user, input, { db, translator, anthropic } = {}) {
-  if (!['admin', 'jefe'].includes(user?.role)) fail(403, 'Solo el equipo puede generar presupuestos con el agente');
-  if (!anthropic) fail(503, 'El agente de presupuestos no está configurado');
-  if (!db) fail(503, 'No se ha podido consultar la base de partidas');
-  validateInput(input);
-
-  const draft = await askAgent(anthropic, input);
-  if (!Array.isArray(draft.capitulos)) fail(502, 'El agente no ha devuelto capítulos.');
-
+// The step both agenteDraft() (one-shot) and the chat agent share once a
+// registrar_borrador call exists, from either path: match against the base,
+// build the saveable items (a line without a usable quantity never reaches
+// the chapters, only the warnings — service.js never accepts quantity 0) and
+// the notes shown to the jefe.
+export async function finalizeDraft(draft, { db, translator } = {}) {
+  if (!Array.isArray(draft?.capitulos)) fail(502, 'El agente no ha devuelto capítulos.');
   const catalog = await loadCatalog(db);
   const lines = draft.capitulos.flatMap((c) => (c.partidas || []).filter((p) => p.estado !== 'no_incluida')
     .map((p) => ({ code: null, name: p.nombre, description: p.descripcion, unit: p.unidad, unitPrice: null })));
@@ -203,4 +204,18 @@ export async function agenteDraft(user, input, { db, translator, anthropic } = {
     source: 'agente', title: draft.titulo || null, address: draft.direccion || null, vatRate: String(vat), pricesIncludeVat: true,
     notes: notes.slice(0, 5000) || null, totalDocument: round(totalDocument, 2).toFixed(2), warnings, chapters,
   };
+}
+
+// user: who uploads (admin/jefe only, like pdfDraft). input: { notes, files:
+// [{ name, mime, dataBase64 }] }. db: required to match against the base de
+// partidas — without it every line would become a proposal, so it fails loud
+// instead. anthropic: injectable for tests.
+export async function agenteDraft(user, input, { db, translator, anthropic } = {}) {
+  if (!['admin', 'jefe'].includes(user?.role)) fail(403, 'Solo el equipo puede generar presupuestos con el agente');
+  if (!anthropic) fail(503, 'El agente de presupuestos no está configurado');
+  if (!db) fail(503, 'No se ha podido consultar la base de partidas');
+  validateInput(input);
+
+  const draft = await askAgent(anthropic, input);
+  return finalizeDraft(draft, { db, translator });
 }
