@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { api, archivos, pctS } from './api.js';
-import { eur } from '../finanzas/format.js';
+import { api, archivos } from './api.js';
 import { Empty, ErrorBox, Kpi } from '../finanzas/ui.jsx';
 import Detalle, { PhaseBadge, Progress } from './Detalle.jsx';
 import Editor from './Editor.jsx';
 import Propuestas from './Propuestas.jsx';
+import { ObraCard, PresupuestosTable, ProjectsGrid, Proyecto } from './Proyectos.jsx';
 import { useObrasI18n } from './i18n.js';
 import '../../../styles/finanzas.css';
 import '../../../styles/obras.css';
@@ -22,6 +22,10 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [filter, setFilter] = useState('todos');
+  // Team «Presupuestos y obras»: by project (default) or every presupuesto; the project open.
+  const [view, setView] = useState('proyectos');
+  const [project, setProject] = useState(null);
+  const [unlinked, setUnlinked] = useState(false);
 
   const countRef = React.useRef(onCount);
   countRef.current = onCount;
@@ -30,7 +34,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
     countRef.current?.(d.presupuestos.filter((p) => (panel === 'client' ? p.phase === 'pendiente' && p.decides !== false : p.phase === 'cambios')).length);
   }, (e) => setError(e.message)), [panel]);
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setOpen(null); setCreating(false); setImporting(false); }, [screen]);
+  useEffect(() => { setOpen(null); setCreating(false); setImporting(false); setProject(null); }, [screen]);
 
   if (creating) return <div className="fin obr"><Editor mode="new" onCancel={() => setCreating(false)} onSaved={(d) => { setCreating(false); load(); toast?.('Borrador guardado'); setOpen({ id: d.id }); }} /></div>;
   if (importing) return <div className="fin obr"><PdfImport toast={toast} onCancel={() => setImporting(false)} onDone={(id) => { setImporting(false); load(); setOpen({ id }); }} /></div>;
@@ -39,9 +43,12 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
     return (
       <div className="fin obr">
         <Detalle key={open.id} id={open.id} initialTab={open.tab} initialEdit={open.edit && !readOnly} readOnly={readOnly} toast={toast}
-          onBack={() => setOpen(null)} onChanged={load} onOpen={(id) => setOpen({ id })} />
+          onBack={() => setOpen(null)} onChanged={load} onOpen={(id) => setOpen({ id })} onOpenProject={(id) => { setOpen(null); setProject(id); }} />
       </div>
     );
+  }
+  if (project) {
+    return <div className="fin obr"><Proyecto key={project} projectId={project} onBack={() => setProject(null)} onOpen={(p, tab) => setOpen({ id: p.id, tab })} /></div>;
   }
   if (error) return <div className="fin"><ErrorBox message={error} onRetry={load} retryLabel={t.retry} /></div>;
   if (!list) return <div className="fin fin-loading fin-muted">{t.loading}</div>;
@@ -104,15 +111,18 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
     );
   }
 
-  // Team (jefe de obra / admin): one table of everything they may act on.
+  // Team (jefe de obra / admin): by project, or one table of everything they may act on.
   const FILTERS = [['todos', 'Todos', list], ['accion', 'Por hacer', by('borrador', 'cambios')], ['pendiente', 'Esperando al cliente', by('pendiente')], ['aprobado', 'Aprobados sin fecha', by('aprobado')], ['en_curso', 'Obras en curso', obras], ['rechazado', 'Rechazados', by('rechazado')]];
-  const rows = (FILTERS.find((f) => f[0] === filter) || FILTERS[0])[2];
+  const base = unlinked ? list.filter((p) => !p.project) : list;
+  const filtered = FILTERS.map(([k, l, r]) => [k, l, unlinked ? r.filter((p) => !p.project) : r]);
+  const rows = (filtered.find((f) => f[0] === filter) || filtered[0])[2];
+  const byProject = screen !== 'home' && view === 'proyectos' && !unlinked;
   return (
     <div className="fin obr">
       <div className="obr-head">
         <Head title={panel === 'admin' ? 'Presupuestos y obras' : screen === 'home' ? 'Hoy' : 'Obras asignadas'} text={panel === 'admin'
-          ? 'Prepara presupuestos, envíalos al cliente, fija la fecha de inicio y sigue la producción de cada obra.'
-          : 'Presupuestos y obras de los que eres responsable. Declara aquí la producción de cada partida.'} />
+          ? 'Cada obra va vinculada a un proyecto de Gestión financiera. Entra en un proyecto para ver sus presupuestos, el avance de obra, lo cobrado y los costes.'
+          : 'Presupuestos y obras de los que eres responsable, por proyecto. Declara aquí la producción de cada partida.'} />
         {!readOnly ? (
           <div className="obr-actions">
             <button type="button" className="fin-btn" onClick={() => setCreating(true)}><i className="ri-add-line"></i>Nuevo presupuesto</button>
@@ -121,30 +131,25 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
         ) : null}
       </div>
       {screen === 'home' && obras.length ? <div className="obr-cards">{obras.map((p) => <ObraCard key={p.id} p={p} onClick={openP(p, 'obra')} team />)}</div> : null}
-      <div className="fin-segmented">
-        {FILTERS.map(([k, l, r]) => <button key={k} type="button" className={filter === k ? 'is-on' : ''} onClick={() => setFilter(k)}>{`${l} · ${r.length}`}</button>)}
-      </div>
-      {rows.length ? (
-        <div className="fin-card is-flush">
-          <div className="fin-table-wrap">
-            <table className="fin-table obr-click">
-              <thead><tr><th>Presupuesto</th><th>Cliente</th><th>Jefe de obra</th><th>Estado</th><th className="fin-num">Total con IVA</th><th>Avance</th></tr></thead>
-              <tbody>
-                {rows.map((p) => (
-                  <tr key={p.id} onClick={openP(p, p.phase === 'en_curso' ? 'obra' : undefined)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && openP(p, p.phase === 'en_curso' ? 'obra' : undefined)()}>
-                    <td><strong>{p.title}</strong><div className="fin-muted fin-small">{`${p.ref} · v${p.version.number}${p.parent ? ` · ampliación de ${p.parent.ref}` : ''}`}</div></td>
-                    <td>{p.client.name}</td>
-                    <td>{p.jefe?.name || <span className="fin-muted">Sin asignar</span>}</td>
-                    <td><PhaseBadge phase={p.phase} /></td>
-                    <td className="fin-num fin-nowrap">{eur(p.total)}</td>
-                    <td className="fin-nowrap">{p.obra && p.startDate ? `${pctS(p.obra.executionPct)} ejecutado · ${pctS(p.obra.consumedPct)} consumido` : <span className="fin-muted">—</span>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      {screen !== 'home' ? (
+        <div className="fin-segmented" role="tablist" aria-label="Vista">
+          <button type="button" role="tab" aria-selected={byProject} className={byProject ? 'is-on' : ''} onClick={() => { setView('proyectos'); setUnlinked(false); }}><i className="ri-building-4-line"></i> Por proyecto</button>
+          <button type="button" role="tab" aria-selected={!byProject} className={!byProject ? 'is-on' : ''} onClick={() => { setView('lista'); setUnlinked(false); }}><i className="ri-list-unordered"></i> Todos los presupuestos</button>
         </div>
-      ) : <Empty icon="ri-file-list-3-line" title="Nada por aquí" text={panel === 'admin' ? 'Crea un presupuesto con «Nuevo presupuesto».' : 'Cuando un administrador te asigne un presupuesto u obra, aparecerá aquí.'} />}
+      ) : null}
+      {byProject ? (
+        list.length ? <ProjectsGrid list={list} onOpenProject={setProject} onUnlinked={() => { setUnlinked(true); setFilter('todos'); }} />
+          : <Empty icon="ri-building-4-line" title="Nada por aquí" text={panel === 'admin' ? 'Crea un presupuesto con «Nuevo presupuesto» y elige su proyecto.' : 'Cuando un administrador te asigne un presupuesto u obra, aparecerá aquí.'} />
+      ) : (
+        <>
+          {unlinked ? <p className="fin-warn"><i className="ri-links-line"></i><span>{`${base.length} ${base.length === 1 ? 'presupuesto sin proyecto' : 'presupuestos sin proyecto'}. Abre la obra y usa «Vincular a un proyecto».`}</span></p> : null}
+          <div className="fin-segmented">
+            {filtered.map(([k, l, r]) => <button key={k} type="button" className={filter === k ? 'is-on' : ''} onClick={() => setFilter(k)}>{`${l} · ${r.length}`}</button>)}
+          </div>
+          {rows.length ? <PresupuestosTable rows={rows} onOpen={(p, tab) => setOpen({ id: p.id, tab })} />
+            : <Empty icon="ri-file-list-3-line" title="Nada por aquí" text={panel === 'admin' ? 'Crea un presupuesto con «Nuevo presupuesto».' : 'Cuando un administrador te asigne un presupuesto u obra, aparecerá aquí.'} />}
+        </>
+      )}
     </div>
   );
 }
@@ -178,25 +183,6 @@ function Section({ title, hint, rows, onOpen }) {
         ))}
       </ul>
     </section>
-  );
-}
-
-function ObraCard({ p, onClick, team, cta }) {
-  const { t, eur: money, fecha, pct } = useObrasI18n();
-  const o = p.obra || { executionPct: 0, consumedPct: 0 };
-  const started = p.startDate && p.startDate <= new Date().toISOString().slice(0, 10);
-  return (
-    <button type="button" className="fin-card obr-card" onClick={onClick}>
-      <span className="obr-card-top"><PhaseBadge phase="en_curso" /><span className="fin-muted fin-small">{started ? t.since(fecha(p.startDate)) : t.startsOn(fecha(p.startDate))}</span></span>
-      <strong className="obr-card-title">{p.title}</strong>
-      <span className="fin-muted fin-small">{[p.ref, p.address, team ? p.client.name : p.jefe ? t.jefe(p.jefe.name) : null].filter(Boolean).join(' · ')}</span>
-      <span className="obr-meter"><span>{t.execution}</span></span>
-      <Progress value={o.executionPct} color="#5567AE" />
-      <span className="obr-meter"><span>{t.consumed}</span></span>
-      <Progress value={o.consumedPct} color={o.consumedPct > 100 ? '#D14A4A' : '#55A89D'} />
-      <span className="fin-muted fin-small">{p.obra ? t.ofExVat(money(p.obra.consumed), money(p.obra.base)) : ''}</span>
-      {cta ? <span className="fin-btn is-primary is-small obr-card-cta"><i className="ri-edit-2-line"></i>{cta}</span> : null}
-    </button>
   );
 }
 
