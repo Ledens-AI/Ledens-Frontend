@@ -47,6 +47,8 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   router.get('/propuestas', handle((req) => propuestas(req).list({ status: req.query.estado || 'pending' })));
   router.post('/propuestas/:pid/aprobar', handle((req) => propuestas(req).approve(req.params.pid, req.body || {})));
   router.post('/propuestas/:pid/rechazar', handle((req) => propuestas(req).reject(req.params.pid, req.body || {})));
+  // A project of Gestión financiera with the presupuestos linked to it (team only).
+  router.get('/proyectos/:projectId', handle((req) => svc(req).projectView(req.params.projectId)));
   router.get('/:id', handle((req) => svc(req).get(req.params.id, { versionId: req.query.version || undefined })));
   router.post('/', handle((req) => svc(req).create(req.body || {})));
   router.put('/:id', handle((req) => svc(req).saveDraft(req.params.id, req.body || {})));
@@ -57,6 +59,7 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   router.post('/:id/rechazar', handle((req) => svc(req).reject(req.params.id, req.body || {})));
   router.post('/:id/comentarios', handle((req) => svc(req).comment(req.params.id, req.body || {})));
   router.put('/:id/jefe', handle((req) => svc(req).assignJefe(req.params.id, req.body || {})));
+  router.put('/:id/proyecto', handle((req) => svc(req).setProject(req.params.id, req.body || {})));
   router.put('/:id/nombre', handle((req) => svc(req).rename(req.params.id, req.body || {})));
   router.put('/:id/fechas',handle((req) => svc(req).schedule(req.params.id, req.body || {})));
   router.put('/:id/produccion', handle((req) => svc(req).declare(req.params.id, req.body || {})));
