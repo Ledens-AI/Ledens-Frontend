@@ -4,6 +4,7 @@ import { eur } from '../finanzas/format.js';
 import { ErrorBox } from '../finanzas/ui.jsx';
 import BaseMatch from './BaseMatch.jsx';
 import ProjectPicker from '../finanzas/ProjectPicker.jsx';
+import AgenteForm from './AgenteForm.jsx';
 
 const blankItem = () => ({ code: '', name: '', description: '', unit: 'ud', quantity: '', unitPrice: '', kind: 'confirmada' });
 const fromVersion = (v) => (v?.chapters || []).map((c) => ({
@@ -34,9 +35,19 @@ export default function Editor({ mode, doc, parent, initial, sourceFile, project
   const [project, setProject] = useState(initialProject ? { id: initialProject.id, label: initialProject.name, code: initialProject.code } : null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  // The reviewer can ask the agent again (more files, or just a second pass
+  // if the first one came back thin): it only ever appends new chapters to
+  // compare against what is already here, never replaces anything by itself.
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [agentNotice, setAgentNotice] = useState(null);
 
   useEffect(() => { if (mode === 'new') api.options().then(setOpts, (e) => setError(e.message)); }, [mode]);
 
+  const mergeAgentDraft = (draft) => {
+    setChapters((cs) => [...cs, ...fromVersion(draft)]);
+    setAgentNotice({ notes: draft.notes, warnings: draft.warnings });
+    setAgentOpen(false);
+  };
   const setChapter = (ci, patch) => setChapters((cs) => cs.map((c, i) => (i === ci ? { ...c, ...patch } : c)));
   const setItem = (ci, ii, patch) => setChapters((cs) => cs.map((c, i) => (i === ci ? { ...c, items: c.items.map((it, j) => (j === ii ? { ...it, ...patch } : it)) } : c)));
   const lineAmount = (it) => { const q = parseDecimal(it.quantity, 3), p = parseDecimal(it.unitPrice, 6); return q && p ? Number(q) * Number(p) : 0; };
@@ -85,6 +96,26 @@ export default function Editor({ mode, doc, parent, initial, sourceFile, project
       </div>
       {initial ? <PdfSummary initial={initial} all={Math.round(chapters.reduce((a, c) => a + c.items.reduce((b, it) => b + lineAmount(it), 0), 0) * 100) / 100} rate={rate} /> : null}
       {error ? <ErrorBox message={error} /> : null}
+      <div className="fin-stack">
+        {!agentOpen ? (
+          <div><button type="button" className="fin-btn" onClick={() => setAgentOpen(true)}><i className="ri-magic-line"></i>Usar el agente</button></div>
+        ) : (
+          <div className="fin-stack">
+            <p className="fin-muted fin-small">Sube más documentación de la visita, o la misma otra vez para una segunda pasada. Lo que proponga se añade como capítulos nuevos al final, sin tocar lo que ya hay — revisa y borra lo que no necesites.</p>
+            <AgenteForm onDraft={mergeAgentDraft} onCancel={() => setAgentOpen(false)} submitLabel="Añadir lo que proponga" />
+          </div>
+        )}
+        {agentNotice ? (
+          <div className="fin-warn">
+            <i className="ri-robot-line"></i>
+            <div>
+              {agentNotice.notes ? <p>{agentNotice.notes}</p> : null}
+              {agentNotice.warnings?.length ? <ul>{agentNotice.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul> : null}
+              <button type="button" className="fin-btn is-small is-ghost" onClick={() => setAgentNotice(null)}>Ocultar</button>
+            </div>
+          </div>
+        ) : null}
+      </div>
       <div className="fin-card fin-form">
         <div className="obr-grid">
           <label className="fin-field obr-span2"><span>Título</span><input value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} placeholder="Reforma de baño principal" /></label>
