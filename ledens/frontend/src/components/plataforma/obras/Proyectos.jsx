@@ -47,6 +47,9 @@ function groups(list, projects) {
   return out.sort((a, b) => (!a.project) - (!b.project) || code(b).localeCompare(code(a), 'es', { numeric: true }) || String(a.project?.name || '').localeCompare(String(b.project?.name || ''), 'es'));
 }
 
+// The project's client (Gestión financiera); else the clients its presupuestos were sent to.
+const clientOf = (g) => g.project?.cliente || [...new Set(g.rows.map((r) => r.client?.name).filter(Boolean))].join(', ');
+
 const norm = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 export function ProjectsGrid({ list, projects, onOpenProject, onUnlinked }) {
@@ -55,7 +58,7 @@ export function ProjectsGrid({ list, projects, onOpenProject, onUnlinked }) {
   const all = groups(list, projects);
   const statuses = [...new Set(all.map((g) => g.project?.status).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
   const gs = all.filter((g) => (!estado || g.project?.status === estado)
-    && (!q || norm([g.project?.code, g.project?.name, g.project?.municipio, g.project?.address, g.project?.cliente, ...g.rows.map((r) => r.title)].join(' ')).includes(norm(q))));
+    && (!q || norm([g.project?.code, g.project?.name, g.project?.municipio, g.project?.address, g.project?.cliente, ...g.rows.map((r) => r.title), ...g.rows.map((r) => r.client?.name)].join(' ')).includes(norm(q))));
   return (
     <div className="fin-stack">
       {all.length > 6 || statuses.length > 1 ? (
@@ -84,6 +87,7 @@ export function ProjectsGrid({ list, projects, onOpenProject, onUnlinked }) {
                     : g.project?.status ? <Badge bg="#EDEDEA" fg="#3A3A38">{g.project.status}</Badge> : null}
               </span>
               <strong className="obr-card-title">{g.project ? g.project.name : 'Sin proyecto'}</strong>
+              {g.project && clientOf(g) ? <span className="obr-card-client"><i className="ri-user-3-line" aria-hidden="true"></i>{clientOf(g)}</span> : null}
               <span className="fin-muted fin-small">
                 {g.project ? [g.project.municipio, g.rows.length ? `${g.rows.length} ${g.rows.length === 1 ? 'presupuesto' : 'presupuestos'}` : null].filter(Boolean).join(' · ') || ' '
                   : `${g.rows.length} ${g.rows.length === 1 ? 'presupuesto' : 'presupuestos'} sin proyecto: vincúlalos desde cada obra`}
@@ -154,7 +158,7 @@ const pctOf = (part, whole) => (whole > 0 ? Math.round(part / whole * 1000) / 10
 /* One project: its data, what its presupuestos add up to, its obras, its
  * presupuestos and, for whoever may see Gestión financiera of this project,
  * ingresos, costes and the latest movements assigned to it. */
-export function Proyecto({ projectId, readOnly, onNew, onBack, onOpen }) {
+export function Proyecto({ projectId, readOnly, onNew, onImport, onBack, onOpen }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [fin, setFin] = useState(null); // { totales, rows, materiales, trabajadores } | { error }
@@ -197,7 +201,8 @@ export function Proyecto({ projectId, readOnly, onNew, onBack, onOpen }) {
         </div>
         <div className="obr-actions">
           {pr.status ? <Badge bg="#E3E7F3" fg="#3E4D85" icon="ri-building-2-line">{pr.status}</Badge> : null}
-          {!readOnly && onNew ? <button type="button" className="fin-btn is-primary" onClick={() => onNew(pr)}><i className="ri-add-line"></i>Nuevo presupuesto</button> : null}
+          {!readOnly && onNew ? <button type="button" className="fin-btn" onClick={() => onNew(pr)}><i className="ri-add-line"></i>Nuevo presupuesto</button> : null}
+          {!readOnly && onImport ? <button type="button" className="fin-btn is-primary" onClick={() => onImport(pr)}><i className="ri-file-upload-line"></i>Subir PDF de presupuesto</button> : null}
         </div>
       </div>
 
@@ -240,7 +245,7 @@ export function Proyecto({ projectId, readOnly, onNew, onBack, onOpen }) {
 
       <h3 className="obr-h3">{`Presupuestos · ${rows.length}`}</h3>
       {rows.length ? <PresupuestosTable rows={rows} onOpen={onOpen} showProject={false} />
-        : <Empty icon="ri-file-list-3-line" title="Este proyecto no tiene presupuestos" text="Crea el primero con «Nuevo presupuesto» (queda en este proyecto) o vincula una obra existente desde su ficha." />}
+        : <Empty icon="ri-file-list-3-line" title="Este proyecto no tiene presupuestos" text="Crea el primero con «Subir PDF de presupuesto» o «Nuevo presupuesto» (queda en este proyecto), o vincula una obra existente desde su ficha." />}
 
       {fin?.rows?.length ? (
         <>

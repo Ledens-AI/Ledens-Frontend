@@ -586,10 +586,12 @@ export class PresupuestosService {
     const out = new Map();
     if (!list.length) return out;
     const rows = (await db.query(`
-      SELECT p.id, p.project_id code, p.name, p.address, to_jsonb(p)->>'municipio' municipio, to_jsonb(p)->>'customer_name_source' cliente,
+      SELECT p.id, p.project_id code, p.name, p.address, to_jsonb(p)->>'municipio' municipio,
+             coalesce(c.display_name, to_jsonb(p)->>'customer_name_source') cliente,
              to_jsonb(p)->>'start_date' start_date, to_jsonb(p)->>'end_date' end_date,
              (SELECT s.name FROM ledens.project_statuses s WHERE s.id::text=to_jsonb(p)->>'status_id') status
-        FROM ledens.projects p WHERE p.id=ANY($1::uuid[])`, [list])).rows;
+        FROM ledens.projects p LEFT JOIN ledens.customers c ON c.id::text=to_jsonb(p)->>'customer_id'
+       WHERE p.id=ANY($1::uuid[])`, [list])).rows;
     for (const r of rows) out.set(r.id, { id: r.id, code: r.code, name: r.name, address: r.address, municipio: r.municipio, cliente: r.cliente, startDate: r.start_date, endDate: r.end_date, status: r.status });
     // A link to a project the accounting import no longer has stays visible as such.
     for (const id of list) if (!out.has(id)) out.set(id, { id, code: null, name: 'Proyecto no encontrado', missing: true });
