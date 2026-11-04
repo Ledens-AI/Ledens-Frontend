@@ -59,6 +59,9 @@ export const api = {
   rechazarPropuesta: (id, body) => request('POST', `${base}/propuestas/${id}/rechazar`, body),
   assignJefe: (id, body) => request('PUT', `${base}/${id}/jefe`, body),
   rename: (id, body) => request('PUT', `${base}/${id}/nombre`, body),
+  // Projects of Gestión financiera: the obra's link (team) and a project with its presupuestos.
+  setProject: (id, body) => request('PUT', `${base}/${id}/proyecto`, body),
+  project: (projectId) => request('GET', `${base}/proyectos/${projectId}`),
   schedule: (id, body) => request('PUT', `${base}/${id}/fechas`, body),
   declare: (id, body) => request('PUT', `${base}/${id}/produccion`, body),
 };
