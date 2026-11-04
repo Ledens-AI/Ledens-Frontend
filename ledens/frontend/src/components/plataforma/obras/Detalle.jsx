@@ -92,6 +92,8 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
 
       {doc.parent ? <p className="fin-warn"><i className="ri-information-line"></i><span>{t.extensionNoteA}<button type="button" className="fin-link" onClick={() => onOpen?.(doc.parent.id)}>{`${doc.parent.ref} · ${doc.parent.title}`}</button>{t.extensionNoteB}</span></p> : null}
 
+      {/* The team (admin or jefe on the client panel in English) is told when the budget could not be translated, and why. */}
+      {doc.translation?.error ? <p className="fin-warn"><i className="ri-translate-2"></i>{`Las partidas no se han podido traducir al inglés: ${doc.translation.error}`}</p> : null}
       <div className="fin-segmented" role="tablist">
         {tabs.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'is-on' : ''} onClick={() => setTab(k)}>{l}</button>)}
       </div>
@@ -455,7 +457,7 @@ function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
                   return (
                     <tr key={i.id}>
                       <td className="fin-nowrap">{i.code || '—'}</td>
-                      <td><strong>{tr(i, 'name')}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{i.lastDeclared.by ? `${t.declaredBy(i.lastDeclared.by, fechaHora(i.lastDeclared.at))}${i.lastDeclared.note ? ` · ${i.lastDeclared.note}` : ''}` : (i.lastDeclared.note || t.imported)}</div> : null}</td>
+                      <td><strong>{tr(i, 'name')}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{i.lastDeclared.by ? `${t.declaredBy(i.lastDeclared.by, fechaHora(i.lastDeclared.at))}${i.lastDeclared.note ? ` · ${tr(i.lastDeclared, 'note')}` : ''}` : (tr(i.lastDeclared, 'note') || t.imported)}</div> : null}</td>
                       <td className="fin-num fin-nowrap">{`${num(i.quantity)} ${i.unit}`}</td>
                       <td className="fin-num fin-nowrap">
                         {editing ? (p === null ? '—' : `${num(Number(i.quantity) * Number(p) / 100)} ${i.unit}`) : `${num(i.executed)} ${i.unit}`}

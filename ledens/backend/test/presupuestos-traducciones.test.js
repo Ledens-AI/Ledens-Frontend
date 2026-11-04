@@ -69,6 +69,7 @@ test('in English: chapters, lines, descriptions and notes translated once, the S
     const again = await call(`/${presupuestoId}`, cliente, 'en');
     assert.equal(again.body.version.chapters[0].items[0].descriptionEn, 'Distribution network from the meter to each point of use.');
     assert.equal(calls.length, 1, 'the second time comes from presupuesto_traducciones');
+    assert.deepEqual(again.body.translation, { lang: 'en', complete: true });
 
     // An action answers with the presupuesto too, also in English.
     const c = await call(`/${presupuestoId}/comentarios`, cliente, 'en', { method: 'POST', body: { body: 'Thanks' } });
@@ -77,6 +78,7 @@ test('in English: chapters, lines, descriptions and notes translated once, the S
 
     const es = await call(`/${presupuestoId}`, cliente, null);
     assert.equal(es.body.version.chapters[0].items[0].nameEn, undefined, 'in Spanish nothing is added');
+    assert.equal(es.body.translation, undefined);
     assert.equal(calls.length, 1);
   });
 });
@@ -91,11 +93,33 @@ test('a failing or missing translator shows the Spanish, never an error', async 
       assert.equal(r.status, 200);
       assert.equal(r.body.version.chapters[0].items[0].nameEn, undefined);
       assert.equal(r.body.version.chapters[0].items[0].name, 'Tubería de agua fría');
+      assert.deepEqual(r.body.translation, { lang: 'en', complete: false }, 'the client is not told why');
+      const team = await call(`/${presupuestoId}`, admin, 'en');
+      assert.equal(team.body.translation.complete, false);
+      assert.match(team.body.translation.error, /traductor: traductor 401/, 'the team sees why');
     });
   } finally { console.error = errors; }
   await withRouter({ translator: null }, async (call) => {
     const r = await call(`/${presupuestoId}`, cliente, 'en');
     assert.equal(r.status, 200);
     assert.equal(r.body.version.chapters[0].nameEn, undefined);
+    assert.match((await call(`/${presupuestoId}`, admin, 'en')).body.translation.error, /no configurado/);
+  });
+});
+
+test('the obra: progress notes are translated too', async () => {
+  await db.query('DELETE FROM presupuesto_traducciones');
+  const svc = new PresupuestosService(pool, admin);
+  const sent = await new PresupuestosService(pool, cliente).get(presupuestoId);
+  await new PresupuestosService(pool, cliente).approve(presupuestoId, { versionId: sent.version.id, selected: [] });
+  await svc.schedule(presupuestoId, { startDate: '2026-11-02' });
+  const d = await svc.get(presupuestoId);
+  const lineId = d.obra.chapters[0].items[0].id;
+  await svc.declare(presupuestoId, { items: [{ partidaId: lineId, executed: '10', note: 'Corregido según el parte de obra' }] });
+  await withRouter({ translator }, async (call) => {
+    const r = await call(`/${presupuestoId}`, cliente, 'en');
+    const item = r.body.obra.chapters[0].items[0];
+    assert.equal(item.lastDeclared.noteEn, '[en] Corregido según el parte de obra');
+    assert.equal(r.body.obra.chapters[0].nameEn, 'Plumbing and sanitation');
   });
 });
