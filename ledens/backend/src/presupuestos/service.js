@@ -1,4 +1,5 @@
 import { audit } from '../db/audit.js';
+import { createInBase } from './propuestas.js';
 
 // Presupuestos para clientes y seguimiento de obra (migration 020). One
 // service per request, built with the effective user (after «Ver como»).
@@ -367,7 +368,8 @@ export class PresupuestosService {
     return { clients: pick('client'), jefes: [...pick('jefe'), ...pick('admin')], obras };
   }
 
-  // A draft saved again replaces its pending proposals with the ones it now carries.
+  // A draft saved again replaces its pending proposals with the ones it now carries;
+  // a line no partida covers gets a new partida of the base at once (propose).
   async writeContent(db, versionId, content) {
     await db.query('UPDATE presupuesto_versiones SET vat_rate=$2, notes=$3 WHERE id=$1', [versionId, content.vatRate, content.notes]);
     await db.query("DELETE FROM partida_propuestas WHERE status='pending' AND partida_id IN (SELECT id FROM presupuesto_partidas WHERE version_id=$1)", [versionId]);
@@ -386,11 +388,13 @@ export class PresupuestosService {
 
   async propose(db, partidaId, p, x, sourceFile) {
     const file = sourceFile ? `«${sourceFile}»` : 'un presupuesto en PDF';
-    const origin = `Partida propuesta el ${new Date().toISOString().slice(0, 10)} a partir de ${file} para la obra ${p.ref} «${p.title}». Partida más próxima descartada: ${x.nearestCode || 'ninguna'}.`;
+    const origin = `Partida creada el ${new Date().toISOString().slice(0, 10)} a partir de ${file} para la obra ${p.ref} «${p.title}». Partida más próxima descartada: ${x.nearestCode || 'ninguna'}.`;
     const priceSource = x.priceInclVat == null ? null : `Precio de venta del presupuesto ${p.ref} (${file}) presentado al cliente`;
-    await db.query(`INSERT INTO partida_propuestas (partida_id, presupuesto_id, category_code, category_name, name, definition, unit, price_incl_vat, price_source, nearest_code, reason, origin, created_by)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-    [partidaId, p.id, x.categoryCode, x.categoryName, x.name, x.definition, x.unit, x.priceInclVat, priceSource, x.nearestCode, x.reason, origin, this.user.id || null]);
+    const row = (await db.query(`INSERT INTO partida_propuestas (partida_id, presupuesto_id, category_code, category_name, name, definition, unit, price_incl_vat, price_source, nearest_code, reason, origin, created_by)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+    [partidaId, p.id, x.categoryCode, x.categoryName, x.name, x.definition, x.unit, x.priceInclVat, priceSource, x.nearestCode, x.reason, origin, this.user.id || null])).rows[0];
+    // A partida the base does not have is created right away (with the next PA-###) and the line points to it.
+    await createInBase(db, { ...row, ref: p.ref }, {}, this.user, { auto: true });
   }
 
   async create(body = {}) {
