@@ -142,3 +142,37 @@ test('another supplier: the invoice OCR reads the documents, and the anticipo is
  const cost=(await db.query("SELECT sum(gross_amount)::text s FROM ledens.financial_records WHERE source_valid AND status<>'excluded' AND (document_id=$1 OR bank_movement_id=ANY($2::uuid[]))",[a2,[pay2,q2]])).rows[0].s;
  assert.equal(cost,'850.00');
 });
+
+// A «Documento pendiente de desglose» (a document read without lines) can be segregated
+// too: with its detail (one file) or with the documents of its anticipo (several). Its
+// lines replace it and inherit its class and obra.
+test('a Documento pendiente de desglose is segregated into the lines of what is attached, keeping its class and obra',async()=>{
+ const obra=(await db.query("INSERT INTO ledens.projects(name,project_id) VALUES('Obra Sobre','P-SOBRE') RETURNING id")).rows[0].id;
+ const envelope=async(numero,total)=>{
+  const d=(await db.query("INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento,tercero,niftercero) VALUES($1,'Pagar','2026-10-19',$2,'Cocinas Sur','B12345674') RETURNING id",[-total,numero])).rows[0].id;
+  const l=(await db.query("INSERT INTO ledens.invoice_lines(document_id,line_number,description,evidence) VALUES($1,10000,'Documento pendiente de desglose','{\"kind\":\"document_review_envelope\"}') RETURNING id",[d])).rows[0].id;
+  const r=(await db.query("INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,gross_amount,currency,category) VALUES($1,$2,'2026-10-19','Documento pendiente de desglose',$3,'EUR','materials') RETURNING id",[l,d,total])).rows[0].id;
+  await db.query('INSERT INTO ledens.project_financial_allocations(record_id,project_id,allocated_amount) VALUES($1,$2,$3)',[r,obra,total]);
+  return {d,l,r};
+ };
+ const lines=async d=>(await db.query(`SELECT r.gross_amount::text gross,r.category,(SELECT project_id FROM ledens.project_financial_allocations a WHERE a.record_id=r.id) obra
+  FROM ledens.financial_records r WHERE r.document_id=$1 AND r.source_valid AND r.status<>'excluded' ORDER BY r.gross_amount`,[d])).rows;
+ OCR.detalle=invoice({id:'ENV-1',total:120,items:[70,50]});
+ const e1=await envelope('ENV-1',120);
+ const row=(await asAdmin().listRecords({q:'ENV-1',pageSize:100})).rows.find(r=>r.id===e1.l);
+ assert.equal(row?.segregable,true,'the envelope offers «Segregar»');
+ const res=await asAdmin().attachDocumentDetail({id:null,documentId:e1.d,content:file('detalle'),ocr,readNative,pollMs:1});
+ assert.deepEqual([res.lineas,res.segregado],[2,true]);
+ assert.deepEqual(await lines(e1.d),[{gross:'50.00',category:'materials',obra},{gross:'70.00',category:'materials',obra}]);
+ assert.equal((await db.query('SELECT status FROM ledens.financial_records WHERE id=$1',[e1.r])).rows[0].status,'excluded');
+ // An anticipo read without lines, not reconciled with any payment: the devolución waits for the Bridge.
+ OCR.factura2=invoice({id:'CS-F-9',total:250,items:[150,100]});OCR.abono2=invoice({id:'CS-A-9',total:-50,items:[-50]});
+ const e2=await envelope('CS-ANT-9',300);
+ const order=await asAdmin().segregateOrder({documentId:e2.d,files:[file('factura2'),file('abono2')],readNative,ocr,pollMs:1});
+ assert.deepEqual(order.devoluciones.map(d=>[d.documento,d.importe,d.movimiento]),[['CS-A-9','50.00',null]]);
+ assert.deepEqual(await lines(e2.d),[{gross:'100.00',category:'materials',obra},{gross:'150.00',category:'materials',obra}]);
+ // A validated envelope needs its validation removed first.
+ const e3=await envelope('ENV-3',120);await db.query("UPDATE ledens.financial_records SET status='approved',net_amount=99.17,vat_amount=20.83,nondeductible_vat=0,withholding_amount=0,recognized_on='2026-10-19' WHERE id=$1",[e3.r]);
+ OCR.detalle3=invoice({id:'ENV-3',total:120,items:[70,50]});
+ await assert.rejects(asAdmin().attachDocumentDetail({id:null,documentId:e3.d,content:file('detalle3'),ocr,readNative,pollMs:1}),{status:409,message:/validado/});
+});
