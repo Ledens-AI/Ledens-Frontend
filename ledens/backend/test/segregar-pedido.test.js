@@ -176,3 +176,20 @@ test('a Documento pendiente de desglose is segregated into the lines of what is 
  OCR.detalle3=invoice({id:'ENV-3',total:120,items:[70,50]});
  await assert.rejects(asAdmin().attachDocumentDetail({id:null,documentId:e3.d,content:file('detalle3'),ocr,readNative,pollMs:1}),{status:409,message:/validado/});
 });
+
+// A plain Obramat sale (no order) whose OCR reading could not add up its lines: its own
+// text gives them (readObramatSalePdf, a stand-in here), for one file and for several.
+test('a plain Obramat sale is segregated from its PDF text, without the OCR',async()=>{
+ const d=(await db.query("INSERT INTO ledens.documents(total,tipo,document_on,numerodocumento,tercero,niftercero) VALUES(-60.50,'Pagar','2026-10-05','008-0010-900001','OBRAMAT','B84406289') RETURNING id")).rows[0].id;
+ const l=(await db.query("INSERT INTO ledens.invoice_lines(document_id,line_number,description) VALUES($1,10000,'Documento pendiente de desglose') RETURNING id",[d])).rows[0].id;
+ await db.query("INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,gross_amount,currency,category) VALUES($1,$2,'2026-10-05','Documento pendiente de desglose',60.50,'EUR','materials')",[l,d]);
+ const sale={kind:'sale',issuer_tax_id:'B84406289',document_number:'008-0010-900001',issued_on:'2026-10-05',gross:'60.50',
+  lines:[{line_number:1,description:'SACO PRUEBA',product_code:'12345678',quantity:10,gross_amount:'10.00',net_amount:'8.26',vat_amount:'1.74',evidence:{origin:'native-pdf-obramat-sale-v1'}},
+   {line_number:2,description:'TABLERO PRUEBA',product_code:'12345679',quantity:2,gross_amount:'50.50',net_amount:'41.74',vat_amount:'8.76',evidence:{origin:'native-pdf-obramat-sale-v1'}}]};
+ const readSale=async()=>({data:sale});
+ // No OCR configured: the sale does not need it.
+ const res=await asAdmin().attachDocumentDetail({id:null,documentId:d,content:file('venta'),readNative,readSale});
+ assert.equal(res.lineas,2);
+ assert.deepEqual(await active(d),[{gross:'10.00',category:'materials'},{gross:'50.50',category:'materials'}]);
+ assert.equal((await db.query("SELECT detail->>'source' s FROM ledens.bridge_events WHERE document_id=$1 AND action='detail_attached'",[d])).rows[0].s,'native-pdf-obramat-sale-v1');
+});
