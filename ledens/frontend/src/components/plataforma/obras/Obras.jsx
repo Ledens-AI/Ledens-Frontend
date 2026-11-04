@@ -20,7 +20,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
   const [error, setError] = useState('');
   const [open, setOpen] = useState(null); // { id, tab }
   const [creating, setCreating] = useState(false); // true, or the project it starts in
-  const [importing, setImporting] = useState(false);
+  const [importing, setImporting] = useState(null); // the project the budget PDF is uploaded to
   const [filter, setFilter] = useState('todos');
   // Team «Presupuestos y obras»: by project (default) or every presupuesto; the project open.
   const [view, setView] = useState('proyectos');
@@ -40,10 +40,10 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
     countRef.current?.(d.presupuestos.filter((p) => (panel === 'client' ? p.phase === 'pendiente' && p.decides !== false : p.phase === 'cambios')).length);
   }, (e) => setError(e.message)), [panel]);
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setOpen(null); setCreating(false); setImporting(false); setProject(null); }, [screen]);
+  useEffect(() => { setOpen(null); setCreating(false); setImporting(null); setProject(null); }, [screen]);
 
   if (creating) return <div className="fin obr"><Editor mode="new" project={creating?.id ? creating : undefined} onCancel={() => setCreating(false)} onSaved={(d) => { setCreating(false); load(); toast?.('Borrador guardado'); setOpen({ id: d.id }); }} /></div>;
-  if (importing) return <div className="fin obr"><PdfImport toast={toast} onCancel={() => setImporting(false)} onDone={(id) => { setImporting(false); load(); setOpen({ id }); }} /></div>;
+  if (importing) return <div className="fin obr"><PdfImport project={importing} toast={toast} onCancel={() => setImporting(null)} onDone={(id) => { setImporting(null); load(); setOpen({ id }); }} /></div>;
   if (screen === 'propuestas') return <Propuestas toast={toast} readOnly={readOnly} onCount={() => countRef.current?.()} />;
   if (open) {
     return (
@@ -54,7 +54,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
     );
   }
   if (project) {
-    return <div className="fin obr"><Proyecto key={project} projectId={project} readOnly={readOnly} onNew={(pr) => setCreating(pr)} onBack={() => setProject(null)} onOpen={(p, tab) => setOpen({ id: p.id, tab })} /></div>;
+    return <div className="fin obr"><Proyecto key={project} projectId={project} readOnly={readOnly} onNew={(pr) => setCreating(pr)} onImport={(pr) => setImporting(pr)} onBack={() => setProject(null)} onOpen={(p, tab) => setOpen({ id: p.id, tab })} /></div>;
   }
   if (error) return <div className="fin"><ErrorBox message={error} onRetry={load} retryLabel={t.retry} /></div>;
   if (!list) return <div className="fin fin-loading fin-muted">{t.loading}</div>;
@@ -132,7 +132,6 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
         {!readOnly ? (
           <div className="obr-actions">
             <button type="button" className="fin-btn" onClick={() => setCreating(true)}><i className="ri-add-line"></i>Nuevo presupuesto</button>
-            <button type="button" className="fin-btn is-primary" onClick={() => setImporting(true)}><i className="ri-file-upload-line"></i>Subir PDF de presupuesto</button>
           </div>
         ) : null}
       </div>
@@ -194,7 +193,7 @@ function Section({ title, hint, rows, onOpen }) {
 
 // The budget PDF presented to the client: read it (text, else OCR), review it in
 // the editor and send it; the original PDF is kept with the presupuesto.
-function PdfImport({ onCancel, onDone, toast }) {
+function PdfImport({ project, onCancel, onDone, toast }) {
   const [file, setFile] = useState(null);
   const [draft, setDraft] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -205,7 +204,7 @@ function PdfImport({ onCancel, onDone, toast }) {
     setBusy(false);
   };
   if (draft) {
-    return <Editor mode="new" initial={draft} sourceFile={file?.name} onCancel={onCancel} onSaved={async (d, { send }) => {
+    return <Editor mode="new" initial={draft} project={project} sourceFile={file?.name} onCancel={onCancel} onSaved={async (d, { send }) => {
       const notes = [];
       // Files hang from the obra: an added presupuesto keeps its PDF there, under its reference.
       const title = d.parent ? `Presupuesto original (PDF) · ${d.ref}` : 'Presupuesto original (PDF)';
@@ -220,6 +219,7 @@ function PdfImport({ onCancel, onDone, toast }) {
     <div className="fin-stack">
       <div className="fin-page-head">
         <h1>Subir PDF de presupuesto</h1>
+        {project ? <p className="obr-project-line"><i className="ri-building-4-line" aria-hidden="true"></i><span>{'Proyecto '}<strong>{[project.code, project.name].filter(Boolean).join(' · ')}</strong></span></p> : null}
         <p>Sube el PDF que has presentado al cliente. Se leen capítulos, partidas, mediciones, precios e importes; lo revisas y se lo envías para que lo apruebe.</p>
       </div>
       {error ? <ErrorBox message={error} /> : null}

@@ -34,7 +34,7 @@ before(async () => {
     ('admin@pp.test','Admin','admin'),('jefe@pp.test','Jefe','jefe'),('jefe2@pp.test','Otro Jefe','jefe'),('cliente@pp.test','Cliente','client')
     RETURNING id,email,name,role`)).rows;
   [marbella, velez] = (await db.query(`INSERT INTO ledens.projects(project_id,name,municipio,customer_name_source,status_id) VALUES
-    ('P2026-014','Casa Marbella','Marbella','Cliente','00000000-0000-0000-0000-000000000001'),('P2026-015','Piso Vélez','Vélez-Málaga',NULL,NULL) RETURNING id`)).rows.map((r) => r.id);
+    ('P2026-014','Casa Marbella','Marbella','Cliente (importado)','00000000-0000-0000-0000-000000000001'),('P2026-015','Piso Vélez','Vélez-Málaga',NULL,NULL) RETURNING id`)).rows.map((r) => r.id);
 });
 after(() => db?.close());
 
@@ -113,4 +113,13 @@ test('every project the team member may see is listed, with or without presupues
   assert.deepEqual((await as(jefe).projectsList()).map((p) => p.code), ['P2026-014']);
   assert.deepEqual((await as(otroJefe).projectsList()).map((p) => p.code), ['P2026-015']);
   await assert.rejects(as(cliente).projectsList(), { status: 403 });
+});
+
+test('the project carries its client: the customer of Gestión financiera, else the imported name', async () => {
+  assert.equal((await as(admin).projectView(marbella)).project.cliente, 'Cliente (importado)');
+  const c = (await db.query("INSERT INTO ledens.customers(display_name) VALUES ('María López') RETURNING id")).rows[0].id;
+  await db.query('UPDATE ledens.projects SET customer_id=$1 WHERE id=$2', [c, marbella]);
+  assert.equal((await as(admin).projectView(marbella)).project.cliente, 'María López');
+  assert.equal((await as(admin).projectsList()).find((p) => p.id === marbella).cliente, 'María López');
+  assert.equal((await as(admin).list()).find((r) => r.project?.id === marbella).project.cliente, 'María López');
 });

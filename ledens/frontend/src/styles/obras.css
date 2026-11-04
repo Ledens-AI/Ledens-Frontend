@@ -150,3 +150,5 @@
 .obr-project-line > i { color: #5567AE; font-size: 18px; }
 .obr-grow { flex: 1 1 280px; }
 .obr-card-empty { margin-top: auto; padding-top: 8px; }
+.obr-card-client { display: flex; align-items: center; gap: 6px; font-size: 14px; color: #3A3A38; margin-top: -4px; }
+.obr-card-client > i { color: #5567AE; }
