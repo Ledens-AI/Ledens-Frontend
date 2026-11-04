@@ -596,6 +596,24 @@ export class PresupuestosService {
     return out;
   }
 
+  // Every project of Gestión financiera the team member may see, each one with
+  // its own page in «Presupuestos y obras» even before it has a presupuesto: an
+  // admin, all; a jefe, those finance_project_permissions gives them and those
+  // of the obras assigned to them. Newest code first.
+  async projectsList() {
+    if (!['admin', 'jefe'].includes(this.user.role)) fail(403, 'Solo el equipo ve los proyectos');
+    const rows = (await this.pool.query(`
+      SELECT p.id, p.project_id code, p.name, p.address, to_jsonb(p)->>'municipio' municipio,
+             coalesce(c.display_name, to_jsonb(p)->>'customer_name_source') cliente,
+             to_jsonb(p)->>'start_date' start_date, to_jsonb(p)->>'end_date' end_date,
+             (SELECT s.name FROM ledens.project_statuses s WHERE s.id::text=to_jsonb(p)->>'status_id') status
+        FROM ledens.projects p LEFT JOIN ledens.customers c ON c.id::text=to_jsonb(p)->>'customer_id'
+       WHERE $1 OR EXISTS (SELECT 1 FROM ledens.finance_project_permissions fp WHERE fp.user_id=$2 AND fp.project_id=p.id)
+          OR EXISTS (SELECT 1 FROM presupuestos x WHERE x.project_id=p.id AND x.jefe_id=$2)
+       ORDER BY p.project_id DESC NULLS LAST, p.name, p.id LIMIT 1000`, [this.user.role === 'admin', this.user.id])).rows;
+    return rows.map((r) => ({ id: r.id, code: r.code, name: r.name, address: r.address, municipio: r.municipio, cliente: r.cliente, startDate: r.start_date, endDate: r.end_date, status: r.status }));
+  }
+
   // A project the user may link a presupuesto to: an admin, any; a jefe, those
   // Gestión financiera lets them see (finance_project_permissions).
   async checkProject(db, projectId) {

@@ -148,3 +148,5 @@
 .obr-hint-tight { margin: -8px 0 0; }
 .obr-project-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 15px; }
 .obr-project-line > i { color: #5567AE; font-size: 18px; }
+.obr-grow { flex: 1 1 280px; }
+.obr-card-empty { margin-top: auto; padding-top: 8px; }

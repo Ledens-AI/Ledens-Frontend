@@ -52,6 +52,7 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   router.post('/propuestas/:pid/aprobar', handle((req) => propuestas(req).approve(req.params.pid, req.body || {})));
   router.post('/propuestas/:pid/rechazar', handle((req) => propuestas(req).reject(req.params.pid, req.body || {})));
   // A project of Gestión financiera with the presupuestos linked to it (team only).
+  router.get('/proyectos', handle(async (req) => ({ proyectos: await svc(req).projectsList() })));
   router.get('/proyectos/:projectId', handle((req) => svc(req).projectView(req.params.projectId)));
   router.get('/:id', handle((req) => svc(req).get(req.params.id, { versionId: req.query.version || undefined })));
   router.post('/', handle((req) => svc(req).create(req.body || {})));

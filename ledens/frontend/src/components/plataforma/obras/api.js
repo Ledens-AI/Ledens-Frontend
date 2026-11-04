@@ -61,6 +61,7 @@ export const api = {
   rename: (id, body) => request('PUT', `${base}/${id}/nombre`, body),
   // Projects of Gestión financiera: the obra's link (team) and a project with its presupuestos.
   setProject: (id, body) => request('PUT', `${base}/${id}/proyecto`, body),
+  projects: () => request('GET', `${base}/proyectos`),
   project: (projectId) => request('GET', `${base}/proyectos/${projectId}`),
   schedule: (id, body) => request('PUT', `${base}/${id}/fechas`, body),
   declare: (id, body) => request('PUT', `${base}/${id}/produccion`, body),
