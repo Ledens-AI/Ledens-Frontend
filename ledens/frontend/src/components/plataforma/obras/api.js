@@ -4,6 +4,8 @@ import { ApiError, viewAsHeaders } from '../finanzas/api.js';
 import { apiErrorText } from '../../../i18n/apiErrors.js';
 
 // Error texts follow the ES / EN switch (I18nProvider keeps <html lang> in step).
+// X-Ledens-Lang: in English a presupuesto also comes with its chapters, lines
+// and notes translated (`nameEn`, `descriptionEn`, `notesEn`; see `tr` in i18n.js).
 const MSG = {
   es: { net: 'Error de conexión. Comprueba tu red e inténtalo de nuevo.', 401: 'Tu sesión ha caducado. Vuelve a iniciar sesión.', 403: 'No tienes permiso para esta acción.', other: 'No se pudo completar la operación.' },
   en: { net: 'Connection error. Check your network and try again.', 401: 'Your session has expired. Please log in again.', 403: 'You don’t have permission for this action.', other: 'The operation could not be completed.' },
@@ -14,7 +16,7 @@ async function request(method, url, body) {
   const m = MSG[lang()];
   let r;
   try {
-    r = await fetch(url, { method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...viewAsHeaders() }, body: body ? JSON.stringify(body) : undefined });
+    r = await fetch(url, { method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), 'X-Ledens-Lang': lang(), ...viewAsHeaders() }, body: body ? JSON.stringify(body) : undefined });
   } catch {
     throw new ApiError(0, m.net);
   }
