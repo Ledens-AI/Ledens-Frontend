@@ -112,9 +112,13 @@ function validateInput({ notes, files = [] } = {}) {
 }
 
 async function askAgent(anthropic, input) {
+  // tool_choice: {type:'tool', ...} (forcing this one tool) is rejected by
+  // some models ("not supported for this model") — 'auto' plus the system
+  // prompt's explicit instruction to always call it is what actually works
+  // across models, at the cost of needing the fallback below.
   const r = await anthropic.messages.create({
     model: MODEL, max_tokens: 8000, system: SYSTEM,
-    tools: [DRAFT_TOOL], tool_choice: { type: 'tool', name: 'registrar_borrador' },
+    tools: [DRAFT_TOOL], tool_choice: { type: 'auto' },
     messages: [{ role: 'user', content: contentBlocks(input) }],
   });
   const use = r.content.find((b) => b.type === 'tool_use');
