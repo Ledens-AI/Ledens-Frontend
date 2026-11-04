@@ -1,5 +1,5 @@
 import {hasPurchases,registerPurchaseDocument,PurchaseReviewError} from '../finance/purchases.js';
-import {readObramatPdf} from '../ingestion/obramat.js';
+import {readObramatPdf,readObramatSalePdf} from '../ingestion/obramat.js';
 // Spanish UI facade: never writes source project_id or a parallel money ledger.
 import {createHash} from 'node:crypto';
 import {FinanceService,FinanceError,uuid} from '../finance/service.js';
@@ -961,7 +961,7 @@ export class FinanzasService {
  // (refundMovements, {número de la devolución: movimiento}); none: it waits for the Bridge.
  // The documents are read outside the transaction; everything else runs in one, so
  // any error registers nothing.
- async segregateOrder({materialId=null,documentId=null,files,refundMovements={},ocr=null,readNative=readObramatPdf,timeoutMs=40000,pollMs=1500}={}){
+ async segregateOrder({materialId=null,documentId=null,files,refundMovements={},ocr=null,readNative=readObramatPdf,readSale=readObramatSalePdf,timeoutMs=40000,pollMs=1500}={}){
   if(this.user.role!=='admin')throw new FinError(403,'Segregar conceptos requiere administrador');
   if(!uuid(materialId||documentId))throw new FinError(404,materialId?'Material no encontrado':'Documento no encontrado');
   if(!Array.isArray(files)||!files.length)throw new FinError(400,'Adjunta los documentos del anticipo');
@@ -976,6 +976,11 @@ export class FinanzasService {
    const native=type==='application/pdf'?(await readNative(content).catch(()=>null))?.data:null;
    if(native){read.push({...native,name,source:'native-pdf-obramat-v1',tax_id:native.issuer_tax_id,vendor:'OBRAMAT',
     amount:native.kind==='advance_refund'?-cents(native.nominal_gross):native.kind==='advance'?cents(native.nominal_gross):cents(native.applied_gross)});continue;}
+   // A plain Obramat sale (no order): an invoice with products, read from its own text too.
+   const sale=type==='application/pdf'?(await readSale(content).catch(()=>null))?.data:null;
+   if(sale){const hash=createHash('sha256').update(content).digest('hex');
+    read.push({name,source:'native-pdf-obramat-sale-v1',document_number:sale.document_number,tax_id:sale.issuer_tax_id,vendor:'OBRAMAT',issued_on:sale.issued_on,
+     kind:'delivery',amount:cents(sale.gross),lines:sale.lines.map(l=>({...l,evidence:{...l.evidence,attachment_sha256:hash}})),hash});continue;}
    if(!ocr)throw new FinError(503,'La lectura de documentos no está configurada');
    const result=await this.ocrResult(content,type,ocr,{timeoutMs,pollMs});
    const info=extractInvoice(result,{pdfText:type==='application/pdf'?(await pageTexts(content,3).catch(()=>[])).join('\n'):''});
@@ -987,7 +992,7 @@ export class FinanzasService {
    read.push({name,source:'azure-di',document_number:info.number||null,tax_id:info.taxId||null,vendor:info.vendor||null,issued_on:info.date,
     signed,amount:signed<0n?-signed:signed,kind:signed>0n?'advance_refund':'delivery',lines,hash});
   }
-  const orders=[...new Set(read.filter(d=>d.source!=='azure-di').map(d=>d.order_reference))];
+  const orders=[...new Set(read.filter(d=>d.order_reference).map(d=>d.order_reference))];
   if(orders.length>1)throw new FinError(422,`Los documentos de Obramat son de pedidos distintos (${orders.join(', ')}): adjunta solo los del pedido del anticipo`);
   const order=orders[0]||null;
   const numbered=read.filter(d=>d.document_number).map(d=>number(d.document_number));
@@ -1166,7 +1171,7 @@ export class FinanzasService {
  // An Obramat delivery invoice (factura de entrega) is read from its own PDF text
  // instead (readObramatPdf): its products add up to the anticipo it settles, and its
  // «YA PAGADO DEL PEDIDO» line, which brings its total to 0, is not a product.
- async attachDocumentDetail({id,documentId,content,ocr,timeoutMs=40000,pollMs=1500,readNative=readObramatPdf}={}){
+ async attachDocumentDetail({id,documentId,content,ocr,timeoutMs=40000,pollMs=1500,readNative=readObramatPdf,readSale=readObramatSalePdf}={}){
   if(this.user.role!=='admin')throw new FinError(403,'Adjuntar el detalle de un documento requiere administrador');
   if(id!==null&&!uuid(id))throw new FinError(404,'Movimiento no encontrado');
   if(!uuid(documentId))throw new FinError(404,'Documento no encontrado');
@@ -1176,7 +1181,10 @@ export class FinanzasService {
   if(!type)throw new FinError(415,'Formato no admitido: adjunta un PDF, JPG o PNG');
   const native=type==='application/pdf'?(await readNative(content).catch(()=>null))?.data:null;
   if(native&&native.kind!=='delivery')throw new FinError(422,`El documento adjunto es ${native.kind==='advance'?'el anticipo':'la devolución del anticipo'} del pedido ${native.order_reference} de Obramat: adjunta su factura de entrega, con los productos`);
-  if(!native&&!ocr)throw new FinError(503,'La lectura de documentos no está configurada');
+  // A plain Obramat sale (no order) is read from its own text as well: the OCR (F0) reads
+  // only its first two pages, and its totals are on the third.
+  const sale=type==='application/pdf'&&!native?(await readSale(content).catch(()=>null))?.data:null;
+  if(!native&&!sale&&!ocr)throw new FinError(503,'La lectura de documentos no está configurada');
   const check=async c=>{
    const d=(id?await c.query(`SELECT d.* FROM ledens.documents d JOIN ledens.bank_document_allocations a ON a.document_id=d.id
     WHERE d.id=$1 AND a.bank_movement_id=$2 AND a.state='Confirmado' LIMIT 1`,[documentId,id]):await c.query('SELECT d.* FROM ledens.documents d WHERE d.id=$1',[documentId])).rows[0];
@@ -1191,7 +1199,9 @@ export class FinanzasService {
   await check(this.pool);
   const hash=createHash('sha256').update(content).digest('hex');
   const lines=native?native.lines.map(l=>({...l,currency:'EUR',confidence:1,evidence:{...l.evidence,attached_detail:true,attachment_sha256:hash,
-    delivery_document:native.document_number,order_reference:native.order_reference}})):await this.readDetailLines(content,type,ocr,{timeoutMs,pollMs,hash});
+    delivery_document:native.document_number,order_reference:native.order_reference}}))
+   :sale?sale.lines.map(l=>({...l,currency:'EUR',confidence:1,evidence:{...l.evidence,attached_detail:true,attachment_sha256:hash,sale_document:sale.document_number}}))
+   :await this.readDetailLines(content,type,ocr,{timeoutMs,pollMs,hash});
   return this.finance.transaction(async c=>{
    const d=await check(c);
    const carry=await this.takeEnvelopes(c,documentId);
@@ -1208,7 +1218,8 @@ export class FinanzasService {
    await this.carryEnvelopes(c,documentId,carry);
    await c.query('INSERT INTO ledens.bridge_events(document_id,bank_movement_id,actor_id,action,detail) VALUES($1,$2,$3,$4,$5)',
     [documentId,id,this.user.id,'detail_attached',JSON.stringify({lineas:r.line_count,attachment_sha256:hash,type,
-     ...(native?{source:'native-pdf-obramat-v1',delivery_document:native.document_number,order_reference:native.order_reference}:{})})]);
+     ...(native?{source:'native-pdf-obramat-v1',delivery_document:native.document_number,order_reference:native.order_reference}:{}),
+     ...(sale?{source:'native-pdf-obramat-sale-v1',sale_document:sale.document_number}:{})})]);
    return {document_id:documentId,lineas:r.line_count};
   }).then(async res=>{
    // 026's deferred trigger has replaced the provisional material by these concepts on commit.

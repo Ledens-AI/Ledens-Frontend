@@ -10,6 +10,17 @@ function allocateNet(rows,net,rate){
  for(const p of [...parts].sort((a,b)=>a.remainder===b.remainder?a.l.line_number-b.l.line_number:a.remainder>b.remainder?-1:1)){if(residual>0n){p.value++;residual--;}}
  return parts.map(p=>({...p.l,net_amount:decimal(p.value),vat_amount:decimal(money(p.l.gross_amount)-p.value),evidence:{...p.l.evidence,net_basis:'gross_and_document_tax_group',rounding_rule:'largest_remainder_line_number'}}));
 }
+// The item rows of an Obramat invoice: number, description, quantity, prices, VAT
+// rate and amount (VAT included), and the 8-digit reference on the next line.
+function itemRows(text){
+ const rows=[];const lines=text.split('\n').map(s=>s.trim());
+ const row=/^(\d{1,3})\s+(.+?)\s+(\d+(?:[.,]\d+)?)\s+(?:(UNID\.)\s+)?(-?[\d.,]+)\s+(-?[\d.,]+)\s+(-?[\d.,]+)\s+(\d+[.,]\d{2})\s+(-?[\d.,]+)\s+(-?[\d.,]+)$/;
+ for(let i=0;i<lines.length;i++){const m=lines[i].match(row);if(!m)continue;const sku=lines[i+1];check(/^\d{8}$/.test(sku),'item_reference_missing');const gross=money(m[10]),quantity=m[3].replace(',','.');check(gross!==null&&gross!==0n,'invalid_item_amount');
+  const q=Number(quantity),unitGross=money(m[9]);check(Number.isInteger(q)&&q>0&&unitGross!==null&&unitGross*BigInt(q)===gross,'item_quantity_amount_mismatch');
+  rows.push({line_number:Number(m[1]),description:m[2],product_code:sku,quantity:q,gross_amount:decimal(gross),rate:money(m[8]),evidence:{origin:'native-pdf-obramat-v1',product_code:sku,unit_price:m[5].replace(',','.'),unit_gross:decimal(unitGross),unit:'UNID.',line_kind:/PALET RETORNABLE/i.test(m[2])?'returnable_deposit':/PREPARACION MERCANCIA/i.test(m[2])?'preparation_service':'product'}});
+ }
+ return rows;
+}
 export function parseObramatPages(pages,{businessTaxId='B19753805'}={}){
  const all=pages.join('\n');
  if(!/BRICOLAJE BRICOMAN/i.test(all)||!/PAGO ANTICIPADO DEL PEDIDO|YA PAGADO DEL PEDIDO|Reembolso Acuenta|Entrega \(/i.test(all))return null;
@@ -25,12 +36,7 @@ export function parseObramatPages(pages,{businessTaxId='B19753805'}={}){
   if(!/PAGO ANTICIPADO DEL PEDIDO|YA PAGADO DEL PEDIDO|Reembolso Acuenta/i.test(text))return null;
   const dates=[...new Set([...text.matchAll(/Fecha de (?:venta|devolucion)\s*:\s*(\d{2})\/(\d{2})\/(\d{4})/gi)].map(m=>m[3]+'-'+m[2]+'-'+m[1]))];check(dates.length===1,'date_not_unique');
   const date=new Date(dates[0]+'T00:00:00Z');check(Number.isFinite(+date)&&date.toISOString().slice(0,10)===dates[0]&&date.getUTCFullYear()>=2000&&date.getUTCFullYear()<=new Date().getUTCFullYear()+1,'invalid_invoice_date');
-  const rows=[];const lines=text.split('\n').map(s=>s.trim());
-  const row=/^(\d{1,3})\s+(.+?)\s+(\d+(?:[.,]\d+)?)\s+(?:(UNID\.)\s+)?(-?[\d.,]+)\s+(-?[\d.,]+)\s+(-?[\d.,]+)\s+(\d+[.,]\d{2})\s+(-?[\d.,]+)\s+(-?[\d.,]+)$/;
-  for(let i=0;i<lines.length;i++){const m=lines[i].match(row);if(!m)continue;const sku=lines[i+1];check(/^\d{8}$/.test(sku),'item_reference_missing');const gross=money(m[10]),quantity=m[3].replace(',','.');check(gross!==null&&gross!==0n,'invalid_item_amount');
-   const q=Number(quantity),unitGross=money(m[9]);check(Number.isInteger(q)&&q>0&&unitGross!==null&&unitGross*BigInt(q)===gross,'item_quantity_amount_mismatch');
-   rows.push({line_number:Number(m[1]),description:m[2],product_code:sku,quantity:q,gross_amount:decimal(gross),rate:money(m[8]),evidence:{origin:'native-pdf-obramat-v1',product_code:sku,unit_price:m[5].replace(',','.'),unit_gross:decimal(unitGross),unit:'UNID.',line_kind:/PALET RETORNABLE/i.test(m[2])?'returnable_deposit':/PREPARACION MERCANCIA/i.test(m[2])?'preparation_service':'product'}});
-  }
+  const rows=itemRows(text);
   check(rows.length>0&&rows.every((r,i)=>r.line_number===i+1),'missing_or_duplicate_item');
   const summary=[...text.matchAll(/^(ANTICIPO\s+)?(\d+[.,]\d{2})%?\s+(-?[\d.,]+)\s+(-?[\d.,]+)\s+(-?[\d.,]+)\s*$/gm)].map(m=>({advance:Boolean(m[1]),rate:money(m[2]),net:money(m[3]),vat:money(m[4]),due:money(m[5])}));
   check(summary.length>0&&summary.every(s=>s.net!==null&&s.vat!==null&&s.due!==null),'tax_summary_missing');
@@ -51,7 +57,8 @@ export function parseObramatPages(pages,{businessTaxId='B19753805'}={}){
   data.fingerprint=digest({...data,original_pages:undefined,financial_pages:undefined});return {data};
  }catch(e){return {reason:'purchase_'+e.message};}
 }
-export async function readObramatPdf(content,options={}){
+// The text of each page, its words joined line by line (null beyond 10 pages or unreadable).
+async function pdfPages(content){
  let pdf;try{
   pdf=await getDocument({data:new Uint8Array(content),isEvalSupported:false,useSystemFonts:true,disableFontFace:true}).promise;
   if(pdf.numPages>10)return null;const pages=[];
@@ -59,6 +66,47 @@ export async function readObramatPdf(content,options={}){
    for(const item of text.items.filter(x=>x.str?.trim())){let g=groups.find(g=>Math.abs(g.y-item.transform[5])<2);if(!g){g={y:item.transform[5],items:[]};groups.push(g);}g.items.push(item);}
    pages.push(groups.sort((a,b)=>b.y-a.y).map(g=>g.items.sort((a,b)=>a.transform[4]-b.transform[4]).map(i=>i.str).join(' ')).join('\n'));
   }
-  return parseObramatPages(pages,options);
+  return pages;
  }catch{return null;}finally{await pdf?.destroy();}
+}
+export async function readObramatPdf(content,options={}){
+ const pages=await pdfPages(content);
+ return pages?parseObramatPages(pages,options):null;
+}
+// A plain Obramat sale: the invoice of a «Ticket de caja … Venta», with no order (not
+// an anticipo, a devolución or a factura de entrega). Its products and its tax summary
+// are read from the PDF text like the purchase documents; each line's net and VAT come
+// from its VAT group. Only «Adjuntar detalle» and «Segregar» read it: the ingestion keeps
+// reading these invoices with the OCR. The duplicate copy prints each header field twice
+// on one line («Numero NIF Numero NIF : : B… B…»), so the labels allow that.
+const twice=(label,value)=>new RegExp(`${label}(?:\\s+${label})?\\s*:(?:\\s*:)?\\s*${value}`,'gi');
+export function parseObramatSale(pages,{businessTaxId='B19753805'}={}){
+ const all=pages.join('\n');
+ if(!/BRICOLAJE BRICOMAN/i.test(all)||!/Ticket de caja\b[^\n]*\bVenta\b/i.test(all)||/PAGO ANTICIPADO DEL PEDIDO|YA PAGADO DEL PEDIDO|Reembolso Acuenta/i.test(all))return null;
+ try{
+  check(/B[\s-]*84406289/i.test(all),'issuer_not_verified');
+  const financial=pages.filter(p=>/FACTURA\s+\d{3}-/i.test(p));
+  check(financial.length>0&&pages.every(p=>financial.includes(p)||/^\s*CONDICIONES GENERALES/i.test(p)),'unknown_financial_page');
+  const text=financial.join('\n');check(/\bEUR\b/.test(text),'currency_not_verified');
+  const numbers=[...new Set([...text.matchAll(/FACTURA\s+(\d{3}-\d{4}-\d+)/gi)].map(m=>m[1]))];check(numbers.length===1,'multiple_invoice_numbers');
+  const customer=[...new Set([...text.matchAll(twice('Numero NIF','([A-Z0-9-]+)'))].map(m=>taxId(m[1])))];check(customer.length===1&&customer[0]===taxId(businessTaxId),'buyer_not_verified');
+  const pagesOf=[...new Set([...text.matchAll(/Pag\.\s*\d+\s*\/\s*(\d+)/g)].map(m=>Number(m[1])))];check(pagesOf.length===1&&pagesOf[0]===financial.length,'missing_invoice_page');
+  const dates=[...new Set([...text.matchAll(twice('Fecha de venta','(\\d{2})\\/(\\d{2})\\/(\\d{4})'))].map(m=>m[3]+'-'+m[2]+'-'+m[1]))];check(dates.length===1,'date_not_unique');
+  const date=new Date(dates[0]+'T00:00:00Z');check(Number.isFinite(+date)&&date.toISOString().slice(0,10)===dates[0]&&date.getUTCFullYear()>=2000&&date.getUTCFullYear()<=new Date().getUTCFullYear()+1,'invalid_invoice_date');
+  const rows=itemRows(text);
+  check(rows.length>0&&rows.every((r,i)=>r.line_number===i+1&&money(r.gross_amount)>0n),'missing_or_duplicate_item');
+  const summary=[...text.matchAll(/^(\d+[.,]\d{2})%?\s+(-?[\d.,]+)\s+(-?[\d.,]+)\s+(-?[\d.,]+)\s*$/gm)].map(m=>({rate:money(m[1]),net:money(m[2]),vat:money(m[3]),due:money(m[4])}));
+  check(summary.length>0&&summary.every(g=>g.net>0n&&g.vat!==null&&g.due===g.net+g.vat)&&new Set(summary.map(g=>String(g.rate))).size===summary.length,'tax_summary_missing');
+  const total=rows.reduce((t,r)=>t+money(r.gross_amount),0n);check(summary.reduce((t,g)=>t+g.due,0n)===total,'sale_total_mismatch');
+  const lines=[];
+  for(const g of summary){const members=rows.filter(l=>l.rate===g.rate);check(members.length>0&&members.reduce((t,l)=>t+money(l.gross_amount),0n)===g.due,'item_tax_group_mismatch');lines.push(...allocateNet(members,g.net,g.rate));}
+  check(lines.length===rows.length,'unknown_item_tax_rate');lines.sort((a,b)=>a.line_number-b.line_number);
+  return {data:{kind:'sale',issuer_tax_id:'B84406289',buyer_tax_id:customer[0],document_number:numbers[0],currency:'EUR',issued_on:dates[0],
+   gross:decimal(total),net:decimal(summary.reduce((t,g)=>t+g.net,0n)),vat:decimal(summary.reduce((t,g)=>t+g.vat,0n)),
+   lines:lines.map(({rate,...l})=>({...l,evidence:{...l.evidence,origin:'native-pdf-obramat-sale-v1'}}))}};
+ }catch(e){return {reason:'sale_'+e.message};}
+}
+export async function readObramatSalePdf(content,options={}){
+ const pages=await pdfPages(content);
+ return pages?parseObramatSale(pages,options):null;
 }
