@@ -27,7 +27,7 @@ export function Progress({ value, color = '#5567AE', compact }) {
  * comes from the server (`can`); readOnly is «Ver como». What the client sees
  * follows the ES / EN switch (./i18n.js); team-only actions stay in Spanish. */
 export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, onBack, onChanged, onOpen, onOpenProject }) {
-  const { t, eur, num, fecha, fechaHora, VSTATUS, KIND } = useObrasI18n();
+  const { t, eur, num, fecha, fechaHora, VSTATUS, KIND, tr, lang } = useObrasI18n();
   const [doc, setDoc] = useState(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState(initialTab || 'presupuesto');
@@ -39,7 +39,8 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState('');
 
-  const load = useCallback((v) => api.get(id, v).then((d) => { setDoc(d); setError(''); }, (e) => setError(e.message)), [id]);
+  // Reloaded when the language changes: the budget texts come translated (X-Ledens-Lang).
+  const load = useCallback((v) => api.get(id, v).then((d) => { setDoc(d); setError(''); }, (e) => setError(e.message)), [id, lang]);
   useEffect(() => { load(versionId); }, [load, versionId]);
 
   const act = async (fn, message) => {
@@ -137,7 +138,7 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
 
           {v.chapters.length ? v.chapters.map((c, ci) => (
             <div className="fin-card is-flush" key={c.id}>
-              <div className="obr-chapter-head"><h2>{`${ci + 1}. ${c.name}`}</h2><span className="fin-strong">{eur(c.base)}</span></div>
+              <div className="obr-chapter-head"><h2>{`${ci + 1}. ${tr(c, 'name')}`}</h2><span className="fin-strong">{eur(c.base)}</span></div>
               <div className="fin-table-wrap">
                 <table className="fin-table">
                   <thead><tr><th>{t.hCode}</th><th>{t.hItem}</th><th>{t.hUnit}</th><th className="fin-num">{t.hQty}</th><th className="fin-num">{t.hPrice}</th><th className="fin-num">{t.hAmount}</th></tr></thead>
@@ -149,11 +150,11 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
                           <td className="fin-nowrap">{i.code || '—'}</td>
                           <td>
                             <div className="obr-line-name">
-                              {can.decide && optional ? <input type="checkbox" aria-label={t.include(i.name)} checked={selected.includes(i.id)} onChange={(e) => setSelected((s) => (e.target.checked ? [...s, i.id] : s.filter((x) => x !== i.id)))} /> : null}
-                              <strong>{i.name}</strong>
+                              {can.decide && optional ? <input type="checkbox" aria-label={t.include(tr(i, 'name'))} checked={selected.includes(i.id)} onChange={(e) => setSelected((s) => (e.target.checked ? [...s, i.id] : s.filter((x) => x !== i.id)))} /> : null}
+                              <strong>{tr(i, 'name')}</strong>
                               {i.kind !== 'confirmada' ? <Badge bg={KIND[i.kind].bg} fg={KIND[i.kind].fg}>{i.selected ? `${KIND[i.kind].label} · ${t.chosen}` : KIND[i.kind].label}</Badge> : null}
                             </div>
-                            {i.description ? <div className="fin-muted obr-desc">{i.description}</div> : null}
+                            {i.description ? <div className="fin-muted obr-desc">{tr(i, 'description')}</div> : null}
                             <BaseMatch item={i} />
                           </td>
                           <td>{i.unit}</td>
@@ -169,7 +170,7 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
             </div>
           )) : <Empty icon="ri-file-list-3-line" title={t.noItems} text={t.noItemsText} />}
           <BudgetDocs id={doc.parent?.id || doc.id} />
-          {v.notes ? <div className="fin-card"><h3>{t.notes}</h3><p className="obr-pre">{v.notes}</p></div> : null}
+          {v.notes ? <div className="fin-card"><h3>{t.notes}</h3><p className="obr-pre">{tr(v, 'notes')}</p></div> : null}
           {doc.ampliaciones.length ? (
             <div className="fin-card">
               <div className="fin-card-head"><h2>{t.extensions}</h2></div>
@@ -227,7 +228,7 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
             <dt>{t.base}</dt><dd>{eur(Number(v.base) + optionalChosen)}</dd>
             <dt>{t.vat(v.vatRate)}</dt><dd>{eur(Math.round((Number(v.base) + optionalChosen) * Number(v.vatRate)) / 100)}</dd>
             <dt>{t.total}</dt><dd className="fin-strong">{eur(Number(v.base) + optionalChosen + Math.round((Number(v.base) + optionalChosen) * Number(v.vatRate)) / 100)}</dd>
-            {options.length ? <><dt>{t.chosenOptions}</dt><dd>{selected.length ? options.filter((o) => selected.includes(o.id)).map((o) => o.name).join(', ') : t.none}</dd></> : null}
+            {options.length ? <><dt>{t.chosenOptions}</dt><dd>{selected.length ? options.filter((o) => selected.includes(o.id)).map((o) => tr(o, 'name')).join(', ') : t.none}</dd></> : null}
           </dl>
           <p className="fin-muted">{t.approveNote}</p>
           {dialogError ? <span className="fin-error-inline">{dialogError}</span> : null}
@@ -425,7 +426,7 @@ const pctOf = (i) => Math.round(Number(i.executed) / Number(i.quantity) * 10000)
 const pctText = (n) => String(n).replace('.', ',');
 
 function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
-  const { t, eur, num, fecha, fechaHora } = useObrasI18n();
+  const { t, eur, num, fecha, fechaHora, tr } = useObrasI18n();
   const o = doc.obra;
   const items = o.chapters.flatMap((c) => c.items);
   const initial = () => Object.fromEntries(items.map((i) => [i.id, pctText(pctOf(i))]));
@@ -477,7 +478,7 @@ function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
       {o.chapters.map((c) => (
         <div className="fin-card is-flush" key={c.id}>
           <div className="obr-chapter-head">
-            <div><h2>{c.name}</h2>{c.presupuesto.ampliacion ? <span className="fin-muted fin-small">{t.extension(c.presupuesto.ref)}</span> : null}</div>
+            <div><h2>{tr(c, 'name')}</h2>{c.presupuesto.ampliacion ? <span className="fin-muted fin-small">{t.extension(c.presupuesto.ref)}</span> : null}</div>
             <div className="obr-chapter-figs">
               <span>{t.execution}<Progress value={c.executionPct} color="#5567AE" compact /></span>
               <span>{t.chConsumedOf(eur(c.consumed), eur(c.base))}<Progress value={c.consumedPct} color={c.consumedPct > 100 ? '#D14A4A' : '#55A89D'} compact /></span>
@@ -492,7 +493,7 @@ function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
                   return (
                     <tr key={i.id}>
                       <td className="fin-nowrap">{i.code || '—'}</td>
-                      <td><strong>{i.name}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{i.lastDeclared.by ? `${t.declaredBy(i.lastDeclared.by, fechaHora(i.lastDeclared.at))}${i.lastDeclared.note ? ` · ${i.lastDeclared.note}` : ''}` : (i.lastDeclared.note || t.imported)}</div> : null}</td>
+                      <td><strong>{tr(i, 'name')}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{i.lastDeclared.by ? `${t.declaredBy(i.lastDeclared.by, fechaHora(i.lastDeclared.at))}${i.lastDeclared.note ? ` · ${i.lastDeclared.note}` : ''}` : (i.lastDeclared.note || t.imported)}</div> : null}</td>
                       <td className="fin-num fin-nowrap">{`${num(i.quantity)} ${i.unit}`}</td>
                       <td className="fin-num fin-nowrap">
                         {editing ? (p === null ? '—' : `${num(Number(i.quantity) * Number(p) / 100)} ${i.unit}`) : `${num(i.executed)} ${i.unit}`}

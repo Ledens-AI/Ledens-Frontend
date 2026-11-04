@@ -1,5 +1,6 @@
-// Azure AI Translator (Text Translation v3) for the lines of a budget PDF that
-// are not in Spanish, so they can be matched against the base de partidas.
+// Azure AI Translator (Text Translation v3): the lines of a budget PDF that are
+// not in Spanish, so they can be matched against the base de partidas, and the
+// text of a presupuesto a client reads in English (traducciones.js).
 // Configured with AZURE_TRANSLATOR_KEY, AZURE_TRANSLATOR_REGION and optionally
 // AZURE_TRANSLATOR_ENDPOINT; without them nothing is translated.
 const DEFAULT_ENDPOINT = 'https://api.cognitive.microsofttranslator.com';
@@ -9,15 +10,15 @@ export class AzureTranslator {
     this.key = key; this.region = region; this.endpoint = endpoint.replace(/\/$/, ''); this.fetch = fetcher;
   }
 
-  // texts → [{ text (Spanish), from (detected language) }], same order.
+  // texts → [{ text (in `to`, Spanish by default), from (detected language) }], same order.
   // Batches of up to 100 texts / 40 000 characters per request (service limits: 1000 / 50 000).
-  async translate(texts) {
+  async translate(texts, { to = 'es' } = {}) {
     const out = new Array(texts.length).fill(null);
     let batch = [];
     let size = 0;
     const flush = async () => {
       if (!batch.length) return;
-      const r = await this.fetch(`${this.endpoint}/translate?api-version=3.0&to=es`, {
+      const r = await this.fetch(`${this.endpoint}/translate?api-version=3.0&to=${encodeURIComponent(to)}`, {
         method: 'POST', redirect: 'error', signal: AbortSignal.timeout(20000),
         headers: { 'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': this.key, ...(this.region ? { 'Ocp-Apim-Subscription-Region': this.region } : {}) },
         body: JSON.stringify(batch.map(([, text]) => ({ Text: text }))),
@@ -32,7 +33,7 @@ export class AzureTranslator {
     };
     for (const [i, raw] of texts.entries()) {
       const text = String(raw || '').slice(0, 5000);
-      if (!text.trim()) { out[i] = { text, from: 'es' }; continue; }
+      if (!text.trim()) { out[i] = { text, from: to }; continue; }
       if (batch.length >= 100 || size + text.length > 40000) await flush();
       batch.push([i, text]); size += text.length;
     }

@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { PresupuestosService } from '../src/presupuestos/service.js';
-// Presupuestos linked to the projects of Gestión financiera (migration 032), on
+// Presupuestos linked to the projects of Gestión financiera (migration 033), on
 // PGlite: users/audit_log, the presupuestos migrations and the ledens.projects
 // columns this flow reads (copied from test/fixtures/ledens-accounting.sql).
 let db, pool, admin, jefe, otroJefe, cliente, marbella, velez, obraId;
@@ -37,11 +37,11 @@ before(async () => {
 });
 after(() => db?.close());
 
-test('migration 032 links the one Marbella obra to P2026-014 and audits it', async () => {
+test('migration 033 links the one Marbella obra to P2026-014 and audits it', async () => {
   // An obra created before the migration (the column does not exist yet).
   await db.query(`INSERT INTO presupuestos(title,address,client_id,jefe_id) VALUES ('Casa Marbella','Marbella',$1,$2) `, [cliente.id, jefe.id]);
   await db.query(`INSERT INTO presupuestos(title,client_id) VALUES ('Baño Nerja',$1)`, [cliente.id]);
-  await db.exec(await migration('032_presupuestos_proyecto.sql'));
+  await db.exec(await migration('033_presupuestos_proyecto.sql'));
   const rows = (await db.query('SELECT title, project_id FROM presupuestos ORDER BY title')).rows;
   assert.deepEqual(rows, [{ title: 'Baño Nerja', project_id: null }, { title: 'Casa Marbella', project_id: marbella }]);
   assert.equal((await db.query("SELECT count(*)::int n FROM audit_log WHERE action='Presupuesto vinculado a proyecto'")).rows[0].n, 1);
