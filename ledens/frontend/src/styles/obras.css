@@ -140,3 +140,15 @@
 .obr-notes li { display: flex; gap: 6px; align-items: flex-start; }
 .obr-notes li.is-precio, .obr-notes li.is-base { color: #7A4E0E; }
 .obr-notes li.is-nueva { color: #9E2F2F; }
+
+/* Projects (obras/Proyectos.jsx) and the project line of an obra (Detalle.jsx). */
+.obr-proj-figs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+.obr-proj-figs > span { display: flex; flex-direction: column; gap: 2px; }
+.obr-card-none { border-style: dashed; background: #FCFCFA; }
+.obr-hint-tight { margin: -8px 0 0; }
+.obr-project-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 15px; }
+.obr-project-line > i { color: #5567AE; font-size: 18px; }
+.obr-grow { flex: 1 1 280px; }
+.obr-card-empty { margin-top: auto; padding-top: 8px; }
+.obr-card-client { display: flex; align-items: center; gap: 6px; font-size: 14px; color: #3A3A38; margin-top: -4px; }
+.obr-card-client > i { color: #5567AE; }

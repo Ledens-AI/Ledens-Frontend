@@ -3,6 +3,7 @@ import { api, KIND, parseDecimal } from './api.js';
 import { eur } from '../finanzas/format.js';
 import { ErrorBox } from '../finanzas/ui.jsx';
 import BaseMatch from './BaseMatch.jsx';
+import ProjectPicker from '../finanzas/ProjectPicker.jsx';
 
 const blankItem = () => ({ code: '', name: '', description: '', unit: 'ud', quantity: '', unitPrice: '', kind: 'confirmada' });
 const fromVersion = (v) => (v?.chapters || []).map((c) => ({
@@ -16,7 +17,7 @@ const fromVersion = (v) => (v?.chapters || []).map((c) => ({
  * kind), one VAT rate, conditions/exclusions. mode: 'new' (admin picks client
  * and jefe), 'ampliacion' (of `parent`) or 'edit' (the presupuesto `doc`). The
  * server validates everything again. */
-export default function Editor({ mode, doc, parent, initial, sourceFile, onSaved, onCancel }) {
+export default function Editor({ mode, doc, parent, initial, sourceFile, project: initialProject, onSaved, onCancel }) {
   const [title, setTitle] = useState(doc?.title || initial?.title || (mode === 'ampliacion' ? `Ampliación de ${parent.title}` : ''));
   const [address, setAddress] = useState(doc?.address || initial?.address || '');
   // An ampliación starts with the VAT rate of the obra it extends.
@@ -29,6 +30,8 @@ export default function Editor({ mode, doc, parent, initial, sourceFile, onSaved
   const [jefeId, setJefeId] = useState('');
   // '' = a new obra; otherwise the obra (approved main presupuesto) it joins.
   const [obraId, setObraId] = useState('');
+  // Project of Gestión financiera for a new obra (an ampliación follows its obra).
+  const [project, setProject] = useState(initialProject ? { id: initialProject.id, label: initialProject.name, code: initialProject.code } : null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -61,7 +64,7 @@ export default function Editor({ mode, doc, parent, initial, sourceFile, onSaved
       body.chapters.push({ name: c.name, items });
     }
     if (mode === 'new' && obraId) body.parentId = obraId; // client and jefe come from the obra
-    else if (mode === 'new') { body.clientId = clientId; body.jefeId = jefeId || undefined; }
+    else if (mode === 'new') { body.clientId = clientId; body.jefeId = jefeId || undefined; body.projectId = project?.id || undefined; }
     if (mode === 'ampliacion') body.parentId = parent.id;
     if (mode === 'edit') body.version = doc.versions[0]?.number;
     if (sourceFile) body.sourceFile = sourceFile;
@@ -106,6 +109,11 @@ export default function Editor({ mode, doc, parent, initial, sourceFile, onSaved
                   {(opts?.jefes || []).map((j) => <option key={j.id} value={j.id}>{j.name}</option>)}
                 </select>
               </label>
+            )}
+            {obraId ? null : (
+              <div className="fin-field obr-span2"><span>Proyecto (Gestión financiera)</span>
+                <ProjectPicker value={project} onChange={setProject} label="Proyecto de la obra" placeholder="Busca por código, nombre o dirección…" />
+              </div>
             )}
             {obraId ? <p className="fin-muted fin-small obr-span2">Se añade a esa obra como un presupuesto más: el cliente lo aprueba por separado y, al aprobarlo, suma al total y al avance de la obra. El jefe de obra es el de la obra.</p> : null}
           </>) : null}

@@ -183,7 +183,7 @@ export class PresupuestosService {
               WHERE true ${this.versionFilter()} ORDER BY v.presupuesto_id, v.number DESC)
       SELECT vis.id, vis.ref, vis.title, vis.address, vis.parent_id, par.ref parent_ref, par.title parent_title,
              vis.start_date::text, vis.end_date::text, vis.client_id, c.name client_name, c.email client_email,
-             vis.jefe_id, j.name jefe_name, cur.id version_id, cur.number version_number, cur.status, cur.vat_rate,
+             vis.jefe_id, j.name jefe_name, coalesce(par.project_id, vis.project_id) project_id, cur.id version_id, cur.number version_number, cur.status, cur.vat_rate,
              cur.sent_at, cur.decided_at, cur.created_at version_created_at, t.base, t.optional
         FROM vis JOIN cur ON cur.presupuesto_id=vis.id
         JOIN users c ON c.id=vis.client_id LEFT JOIN users j ON j.id=vis.jefe_id
@@ -193,6 +193,8 @@ export class PresupuestosService {
                              FROM presupuesto_partidas l WHERE l.version_id=cur.id) t ON true
        ORDER BY coalesce(cur.sent_at, cur.created_at) DESC, vis.ref DESC`, [this.user.id])).rows;
     const obras = await this.obraTotals(rows.filter((r) => !r.parent_id && r.status === 'approved').map((r) => r.id));
+    // The project (Gestión financiera) is internal: the team sees it, a client never does.
+    const projects = this.isClient ? new Map() : await this.projectsById(rows.map((r) => r.project_id));
     return rows.map((r) => ({
       id: r.id, ref: r.ref, title: r.title, address: r.address,
       parent: r.parent_id ? { id: r.parent_id, ref: r.parent_ref, title: r.parent_title } : null,
@@ -202,6 +204,7 @@ export class PresupuestosService {
       phase: this.phase(r, r.status), startDate: r.start_date, endDate: r.end_date,
       ...this.totals(r.base, r.optional, r.vat_rate),
       obra: obras.get(r.id) || null,
+      ...(this.isClient ? {} : { project: projects.get(r.project_id) || null }),
       // A client invited to the obra (obra_clientes) sees it; only the titular decides.
       decides: !this.isClient || r.client_id === this.user.id,
     }));
@@ -288,6 +291,8 @@ export class PresupuestosService {
     const approved = versions.some((v) => v.status === 'approved');
     const ampliaciones = p.parent_id ? [] : (await this.list()).filter((r) => r.parent?.id === p.id);
     const obra = !p.parent_id && approved ? await this.obra(p) : null;
+    const projectId = !team ? null : p.parent_id ? (await this.pool.query('SELECT project_id FROM presupuestos WHERE id=$1', [p.parent_id])).rows[0]?.project_id : p.project_id;
+    const project = projectId ? (await this.projectsById([projectId])).get(projectId) : null;
     return {
       id: p.id, ref: p.ref, title: p.title, address: p.address, parent, client: person(p.client_id), jefe: person(p.jefe_id),
       startDate: p.start_date ? toDate(p.start_date) : null, endDate: p.end_date ? toDate(p.end_date) : null,
@@ -295,7 +300,7 @@ export class PresupuestosService {
       versions: versions.map((v) => ({ id: v.id, number: v.number, status: v.status, sentAt: v.sent_at, sentBy: v.sent_by, decidedAt: v.decided_at, decidedBy: v.decided_by, ...this.totals(v.base, v.optional, v.vat_rate) })),
       version: { id: shown.id, number: shown.number, status: shown.status, notes: shown.notes, sentAt: shown.sent_at, decidedAt: shown.decided_at, ...this.totals(shown.base,shown.optional, shown.vat_rate), chapters },
       comments: comments.map((k) => ({ id: Number(k.id), kind: k.kind, body: k.body, at: k.created_at, versionNumber: k.version_number, author: k.author, team: k.author_role !== 'client' })),
-      ampliaciones, obra,
+      ampliaciones, obra, ...(team ? { project } : {}),
       can: {
         edit: team && !!latestAll && ['draft', 'sent', 'changes_requested'].includes(latestAll.status),
         send: team && latestAll?.status === 'draft',
@@ -308,6 +313,8 @@ export class PresupuestosService {
         ampliar: team && !p.parent_id && approved,
         assignJefe: this.user.role === 'admin' && !p.parent_id,
         rename: team,
+        // The project lives on the obra; an ampliación follows it.
+        linkProject: team && !p.parent_id,
         // Clients are invited to the obra (root presupuesto): /api/invitaciones.
         invite: team && !p.parent_id,
       },
@@ -414,8 +421,10 @@ export class PresupuestosService {
           jefeId = body.jefeId;
         }
       }
-      const p = (await db.query(`INSERT INTO presupuestos (title, address, client_id, jefe_id, parent_id, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-        [title, address, clientId, jefeId || null, body.parentId || null, this.user.id])).rows[0];
+      if (body.parentId && body.projectId) fail(400, 'Una ampliación va en el proyecto de su obra');
+      const projectId = body.projectId ? (await this.checkProject(db, body.projectId)).id : null;
+      const p = (await db.query(`INSERT INTO presupuestos (title, address, client_id, jefe_id, parent_id, created_by, project_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+        [title, address, clientId, jefeId || null, body.parentId || null, this.user.id, projectId])).rows[0];
       const v = (await db.query('INSERT INTO presupuesto_versiones (presupuesto_id, number, created_by) VALUES ($1,1,$2) RETURNING id', [p.id, this.user.id])).rows[0];
       await this.writeContent(db, v.id, content);
       return p.id;
@@ -568,6 +577,105 @@ export class PresupuestosService {
       await audit({ actor: this.actor(), action: 'Jefe de obra asignado', target: { id: p.client_id, label: p.ref }, detail: `${p.ref} · ${j ? j.name || j.email : 'sin asignar'}` }, db);
     });
     return this.get(id);
+  }
+
+  // Projects of Gestión financiera (ledens.projects, owned by the accounting
+  // import: only read here). Optional columns through to_jsonb, as finanzas does.
+  async projectsById(ids, db = this.pool) {
+    const list = [...new Set(ids.filter(Boolean))];
+    const out = new Map();
+    if (!list.length) return out;
+    const rows = (await db.query(`
+      SELECT p.id, p.project_id code, p.name, p.address, to_jsonb(p)->>'municipio' municipio,
+             coalesce(c.display_name, to_jsonb(p)->>'customer_name_source') cliente,
+             to_jsonb(p)->>'start_date' start_date, to_jsonb(p)->>'end_date' end_date,
+             (SELECT s.name FROM ledens.project_statuses s WHERE s.id::text=to_jsonb(p)->>'status_id') status
+        FROM ledens.projects p LEFT JOIN ledens.customers c ON c.id::text=to_jsonb(p)->>'customer_id'
+       WHERE p.id=ANY($1::uuid[])`, [list])).rows;
+    for (const r of rows) out.set(r.id, { id: r.id, code: r.code, name: r.name, address: r.address, municipio: r.municipio, cliente: r.cliente, startDate: r.start_date, endDate: r.end_date, status: r.status });
+    // A link to a project the accounting import no longer has stays visible as such.
+    for (const id of list) if (!out.has(id)) out.set(id, { id, code: null, name: 'Proyecto no encontrado', missing: true });
+    return out;
+  }
+
+  // Every project of Gestión financiera the team member may see, each one with
+  // its own page in «Presupuestos y obras» even before it has a presupuesto: an
+  // admin, all; a jefe, those finance_project_permissions gives them and those
+  // of the obras assigned to them. Newest code first.
+  async projectsList() {
+    if (!['admin', 'jefe'].includes(this.user.role)) fail(403, 'Solo el equipo ve los proyectos');
+    const rows = (await this.pool.query(`
+      SELECT p.id, p.project_id code, p.name, p.address, to_jsonb(p)->>'municipio' municipio,
+             coalesce(c.display_name, to_jsonb(p)->>'customer_name_source') cliente,
+             to_jsonb(p)->>'start_date' start_date, to_jsonb(p)->>'end_date' end_date,
+             (SELECT s.name FROM ledens.project_statuses s WHERE s.id::text=to_jsonb(p)->>'status_id') status
+        FROM ledens.projects p LEFT JOIN ledens.customers c ON c.id::text=to_jsonb(p)->>'customer_id'
+       WHERE $1 OR EXISTS (SELECT 1 FROM ledens.finance_project_permissions fp WHERE fp.user_id=$2 AND fp.project_id=p.id)
+          OR EXISTS (SELECT 1 FROM presupuestos x WHERE x.project_id=p.id AND x.jefe_id=$2)
+       ORDER BY p.project_id DESC NULLS LAST, p.name, p.id LIMIT 1000`, [this.user.role === 'admin', this.user.id])).rows;
+    return rows.map((r) => ({ id: r.id, code: r.code, name: r.name, address: r.address, municipio: r.municipio, cliente: r.cliente, startDate: r.start_date, endDate: r.end_date, status: r.status }));
+  }
+
+  // A project the user may link a presupuesto to: an admin, any; a jefe, those
+  // Gestión financiera lets them see (finance_project_permissions).
+  async checkProject(db, projectId) {
+    if (!isUuid(projectId)) fail(400, 'Proyecto no válido');
+    const r = (await db.query(`SELECT p.id, p.project_id code, p.name FROM ledens.projects p WHERE p.id=$1
+      AND ($2 OR EXISTS (SELECT 1 FROM ledens.finance_project_permissions fp WHERE fp.user_id=$3 AND fp.project_id=p.id))`,
+    [projectId, this.user.role === 'admin', this.user.id])).rows[0];
+    if (!r) fail(404, 'Proyecto no encontrado');
+    return r;
+  }
+
+  // Links the obra (root presupuesto, with its ampliaciones) to a project, or
+  // unlinks it (projectId null). The assigned jefe or an admin; audited.
+  async setProject(id, body = {}) {
+    if (body.projectId !== null && body.projectId !== undefined && !isUuid(body.projectId)) fail(400, 'Proyecto no válido');
+    await this.tx(async (db) => {
+      const p = await this.load(db, id, { lock: true });
+      if (!this.isTeam(p)) fail(403, 'No tienes permiso para cambiar el proyecto');
+      if (p.parent_id) fail(400, 'Una ampliación va en el proyecto de su obra: cámbialo en la obra principal');
+      const next = body.projectId ? await this.checkProject(db, body.projectId) : null;
+      if ((next?.id || null) === (p.project_id || null)) return;
+      const prev = p.project_id ? (await this.projectsById([p.project_id], db)).get(p.project_id) : null;
+      await db.query('UPDATE presupuestos SET project_id=$2, updated_at=now() WHERE id=$1', [p.id, next?.id || null]);
+      const label = (x) => (x ? [x.code, x.name].filter(Boolean).join(' · ') : 'sin proyecto');
+      await audit({ actor: this.actor(), action: 'Presupuesto vinculado a proyecto', target: { id: p.client_id, label: p.ref }, detail: `${p.ref} · ${label(prev)} → ${label(next)}` }, db);
+    });
+    return this.get(id);
+  }
+
+  // One project as «Presupuestos y obras» shows it: its data, the presupuestos
+  // linked to it (obras and their ampliaciones) the user may see, and the
+  // figures that add up from them. The finance side (ingresos, costes) comes
+  // from /api/finanzas, which applies its own permissions.
+  async projectView(projectId) {
+    if (!['admin', 'jefe'].includes(this.user.role)) fail(403, 'Solo el equipo ve los proyectos');
+    if (!isUuid(projectId)) fail(404, 'Proyecto no encontrado');
+    const project = (await this.projectsById([projectId])).get(projectId);
+    const rows = (await this.list()).filter((r) => r.project?.id === projectId);
+    let allowed = this.user.role === 'admin' || rows.length > 0;
+    if (!allowed && !project.missing) allowed = (await this.pool.query('SELECT 1 FROM ledens.finance_project_permissions WHERE user_id=$1 AND project_id=$2', [this.user.id, projectId])).rows.length > 0;
+    if (project.missing || !allowed) fail(404, 'Proyecto no encontrado');
+    const sum = (rs, k) => money(rs.reduce((a, r) => a + cents(r[k]), 0));
+    const of = (...phases) => rows.filter((r) => phases.includes(r.phase));
+    const approved = of('aprobado', 'en_curso'), open = of('pendiente', 'cambios');
+    const obras = rows.filter((r) => !r.parent && r.obra);
+    const ob = { base: 0, executed: 0, consumed: 0 };
+    for (const r of obras) { ob.base += cents(r.obra.base); ob.executed += cents(r.obra.executedAmount); ob.consumed += cents(r.obra.consumed); }
+    return {
+      project,
+      presupuestos: rows,
+      kpis: {
+        obras: rows.filter((r) => !r.parent).length,
+        presupuestos: rows.length,
+        aprobado: { n: approved.length, base: sum(approved, 'base'), total: sum(approved, 'total') },
+        enNegociacion: { n: open.length, base: sum(open, 'base'), total: sum(open, 'total') },
+        borradores: of('borrador').length,
+        rechazados: of('rechazado').length,
+        ejecucion: { base: money(ob.base), executedAmount: money(ob.executed), consumed: money(ob.consumed), executionPct: pct(ob.executed, ob.base), consumedPct: pct(ob.consumed, ob.base) },
+      },
+    };
   }
 
   // The obra's name, at any stage (also once approved, when the draft editor is

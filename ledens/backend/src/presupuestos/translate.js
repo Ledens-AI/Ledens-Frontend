@@ -23,7 +23,12 @@ export class AzureTranslator {
         headers: { 'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': this.key, ...(this.region ? { 'Ocp-Apim-Subscription-Region': this.region } : {}) },
         body: JSON.stringify(batch.map(([, text]) => ({ Text: text }))),
       });
-      if (!r.ok) throw new Error(`traductor ${r.status}`);
+      if (!r.ok) {
+        // Azure answers {error: {code, message}}; the message says what is wrong (key, region, quota).
+        let detail = null;
+        try { detail = (await r.json())?.error?.message || null; } catch { /* no JSON body */ }
+        throw new Error(`traductor ${r.status}${detail ? `: ${detail}` : ''}`);
+      }
       const res = await r.json();
       batch.forEach(([i, text], k) => {
         const x = res[k];

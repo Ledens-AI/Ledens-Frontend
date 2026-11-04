@@ -5,6 +5,7 @@ import Editor from './Editor.jsx';
 import BaseMatch from './BaseMatch.jsx';
 import Archivos from './Archivos.jsx';
 import Clientes from './Clientes.jsx';
+import ProjectPicker from '../finanzas/ProjectPicker.jsx';
 import { useObrasI18n } from './i18n.js';
 
 export const PhaseBadge = ({ phase }) => { const { PHASE } = useObrasI18n(); const p = PHASE[phase] || PHASE.borrador; return <Badge bg={p.bg} fg={p.fg} icon={p.icon}>{p.label}</Badge>; };
@@ -25,7 +26,7 @@ export function Progress({ value, color = '#5567AE', compact }) {
  * approved, the obra (execution and consumed budget). What the user may do
  * comes from the server (`can`); readOnly is «Ver como». What the client sees
  * follows the ES / EN switch (./i18n.js); team-only actions stay in Spanish. */
-export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, onBack, onChanged, onOpen }) {
+export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, onBack, onChanged, onOpen, onOpenProject }) {
   const { t, eur, num, fecha, fechaHora, VSTATUS, KIND, tr, lang } = useObrasI18n();
   const [doc, setDoc] = useState(null);
   const [error, setError] = useState('');
@@ -88,10 +89,14 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
         </div>
         <PhaseBadge phase={doc.phase} />
       </div>
+      {doc.can?.linkProject || doc.project ? <ProjectLink doc={doc} canEdit={!!can.linkProject} busy={busy} onOpenProject={onOpenProject}
+        onSave={(projectId) => act(() => api.setProject(doc.id, { projectId }), projectId ? 'Obra vinculada al proyecto' : 'Obra desvinculada del proyecto')} error={dialog === null ? dialogError : ''} /> : null}
       {can.assignJefe ? <JefePicker doc={doc} busy={busy} onSave={(jefeId) => act(() => api.assignJefe(doc.id, { jefeId }), 'Jefe de obra actualizado')} /> : null}
 
       {doc.parent ? <p className="fin-warn"><i className="ri-information-line"></i><span>{t.extensionNoteA}<button type="button" className="fin-link" onClick={() => onOpen?.(doc.parent.id)}>{`${doc.parent.ref} · ${doc.parent.title}`}</button>{t.extensionNoteB}</span></p> : null}
 
+      {/* The team (admin or jefe on the client panel in English) is told when the budget could not be translated, and why. */}
+      {doc.translation?.error ? <p className="fin-warn"><i className="ri-translate-2"></i>{`Las partidas no se han podido traducir al inglés: ${doc.translation.error}`}</p> : null}
       <div className="fin-segmented" role="tablist">
         {tabs.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'is-on' : ''} onClick={() => setTab(k)}>{l}</button>)}
       </div>
@@ -361,6 +366,41 @@ function Schedule({ doc, busy, onSave, error }) {
 }
 
 // Admins: who is in charge of the obra (team-only, in Spanish).
+// The project of Gestión financiera the obra belongs to (team only). An
+// ampliación shows the project of its obra and changes with it.
+function ProjectLink({ doc, canEdit, busy, onSave, onOpenProject, error }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(null);
+  const pr = doc.project;
+  const label = pr ? [pr.code, pr.name].filter(Boolean).join(' · ') : null;
+  if (editing) {
+    return (
+      <div className="fin-filters">
+        <div className="fin-field fin-w-picker"><span>Proyecto</span>
+          <ProjectPicker value={value} onChange={setValue} autoFocus label="Proyecto de la obra" placeholder="Busca por código, nombre o dirección…" />
+        </div>
+        <button type="button" className="fin-btn" onClick={() => setEditing(false)} disabled={busy}>Cancelar</button>
+        <button type="button" className="fin-btn is-primary" disabled={busy || !value} onClick={() => { setEditing(false); onSave(value.id); }}>Guardar</button>
+      </div>
+    );
+  }
+  return (
+    <div className="obr-project-line">
+      <i className="ri-building-4-line" aria-hidden="true"></i>
+      {pr ? (
+        <span>{'Proyecto '}
+          {onOpenProject && !pr.missing ? <button type="button" className="fin-link" onClick={() => onOpenProject(pr.id)}>{label}</button> : <strong>{label}</strong>}
+          {doc.parent ? <span className="fin-muted"> (el de su obra)</span> : null}
+        </span>
+      ) : <span className="fin-muted">Sin proyecto: vincula la obra a su proyecto de Gestión financiera.</span>}
+      {canEdit ? <button type="button" className="fin-btn is-small" disabled={busy} onClick={() => { setValue(pr && !pr.missing ? { id: pr.id, label: pr.name, code: pr.code } : null); setEditing(true); }}>
+        <i className="ri-links-line"></i>{pr ? 'Cambiar proyecto' : 'Vincular a un proyecto'}</button> : null}
+      {canEdit && pr ? <button type="button" className="fin-btn is-small is-ghost" disabled={busy} onClick={() => onSave(null)}>Desvincular</button> : null}
+      {error ? <span className="fin-error-inline">{error}</span> : null}
+    </div>
+  );
+}
+
 function JefePicker({ doc, busy, onSave }) {
   const [open, setOpen] = useState(false);
   const [opts, setOpts] = useState(null);
@@ -455,7 +495,7 @@ function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
                   return (
                     <tr key={i.id}>
                       <td className="fin-nowrap">{i.code || '—'}</td>
-                      <td><strong>{tr(i, 'name')}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{i.lastDeclared.by ? `${t.declaredBy(i.lastDeclared.by, fechaHora(i.lastDeclared.at))}${i.lastDeclared.note ? ` · ${i.lastDeclared.note}` : ''}` : (i.lastDeclared.note || t.imported)}</div> : null}</td>
+                      <td><strong>{tr(i, 'name')}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{i.lastDeclared.by ? `${t.declaredBy(i.lastDeclared.by, fechaHora(i.lastDeclared.at))}${i.lastDeclared.note ? ` · ${tr(i.lastDeclared, 'note')}` : ''}` : (tr(i.lastDeclared, 'note') || t.imported)}</div> : null}</td>
                       <td className="fin-num fin-nowrap">{`${num(i.quantity)} ${i.unit}`}</td>
                       <td className="fin-num fin-nowrap">
                         {editing ? (p === null ? '—' : `${num(Number(i.quantity) * Number(p) / 100)} ${i.unit}`) : `${num(i.executed)} ${i.unit}`}
