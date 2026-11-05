@@ -110,6 +110,16 @@ export const api = {
   createWorker: (body) => request('POST', '/api/finanzas/gestion-trabajadores', body),
   updateWorker: (id, body) => request('PUT', `/api/finanzas/gestion-trabajadores/${id}`, body),
   setWorkerActive: (id, body) => request('PUT', `/api/finanzas/gestion-trabajadores/${id}/estado`, body),
+  // Cuentas por pagar (backend: finanzas/payables.js; admins only).
+  payables: (f) => request('GET', '/api/finanzas/cuentas-por-pagar' + qs(f)),
+  payablesOptions: () => request('GET', '/api/finanzas/cuentas-por-pagar/opciones'),
+  payablesGrid: (f) => request('GET', '/api/finanzas/cuentas-por-pagar/jornales' + qs(f)),
+  setAttendance: (items) => request('PUT', '/api/finanzas/cuentas-por-pagar/asistencia', { items }),
+  setPaySettings: (id, body) => request('PUT', `/api/finanzas/cuentas-por-pagar/trabajadores/${id}/ajustes`, body),
+  createPayable: (body) => request('POST', '/api/finanzas/cuentas-por-pagar', body),
+  updatePayable: (id, body) => request('PUT', `/api/finanzas/cuentas-por-pagar/${id}`, body),
+  setPayableStatus: (body) => request('POST', '/api/finanzas/cuentas-por-pagar/estado', body),
+  setPayableProject: (body) => request('POST', '/api/finanzas/cuentas-por-pagar/proyecto', body),
   saveWorkerSplits: (items) => request('POST', '/api/finanzas/pendiente-trabajador/guardar', { items }),
   returnWorkerBatch: (batchId) => request('DELETE', `/api/finanzas/pendiente-trabajador/${batchId}`),
 };

@@ -1,6 +1,7 @@
 import { createApp } from './app.js';
-import { isDbConfigured } from './db/pool.js';
+import { getPool, isDbConfigured } from './db/pool.js';
 import { runMigrations } from './db/migrate.js';
+import { startPayablesScheduler } from './finanzas/payables.js';
 
 const PORT = Number(process.env.PORT || 4000);
 
@@ -8,6 +9,8 @@ async function start() {
   if (isDbConfigured()) {
     try {
       await runMigrations();
+      // Cuentas por pagar: the jornales of each day that passes (hourly, idempotent).
+      startPayablesScheduler(getPool());
     } catch (err) {
       // Do not take the whole API down (and with it the lead form) because the
       // database is unreachable — log loudly and keep serving.

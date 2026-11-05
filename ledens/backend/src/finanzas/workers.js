@@ -5,6 +5,7 @@
 // Rows created here have no source_id/raw_id; every change goes to audit_log.
 import {uuid} from '../finance/service.js';
 import {FinError} from './service.js';
+import {startAccruingToday} from './payables.js';
 
 const FIELDS=['code','name','positionId','tipo','dailyPay','hours'];
 const COLUMN={code:'empleadoid',name:'name',positionId:'primary_position_id',tipo:'tipo',dailyPay:'daily_pay',hours:'horasjornada'};
@@ -82,6 +83,8 @@ export class WorkersService {
    const v=await this.clean(c,body);
    const cols=FIELDS.map(f=>COLUMN[f]);
    const id=(await c.query(`INSERT INTO ledens.employees(${cols.join(',')},activo) VALUES(${cols.map((_,i)=>'$'+(i+1)).join(',')},true) RETURNING id`,FIELDS.map(f=>v[f]))).rows[0].id;
+   // Cuentas por pagar: a new worker accrues jornales from today, never before.
+   await startAccruingToday(c,id);
    const w=await this.get(c,id);
    await this.audit(c,'Trabajador dado de alta',w,`${w.name}${w.puesto?` · ${w.puesto}`:''}${w.code?` (${w.code})`:''}`);
    return w;
@@ -95,6 +98,7 @@ export class WorkersService {
    const old={code:before.code,name:before.name,positionId:before.position_id,tipo:before.tipo,dailyPay:before.daily_pay,hours:before.hours};
    const changed=FIELDS.filter(f=>!same(f,old[f],v[f]));
    if(!changed.length)return {...before,changed:false};
+   if(changed.includes('dailyPay')&&!(Number(old.dailyPay)>0)&&Number(v.dailyPay)>0)await startAccruingToday(c,id);
    await c.query(`UPDATE ledens.employees SET ${changed.map((f,i)=>COLUMN[f]+'=$'+(i+2)).join(',')} WHERE id=$1`,[id,...changed.map(f=>v[f])]);
    const after=await this.get(c,id);
    await this.audit(c,'Trabajador editado',after,changed.map(f=>`${LABEL[f]}: ${f==='positionId'?before.puesto??'—':old[f]??'—'} → ${f==='positionId'?after.puesto??'—':v[f]??'—'}`).join(' · '));
@@ -111,6 +115,8 @@ export class WorkersService {
    const before=await this.locked(c,id,version);
    if(before.activo===activo)return {...before,changed:false};
    await c.query('UPDATE ledens.employees SET activo=$2 WHERE id=$1',[id,activo]);
+   // Cuentas por pagar: the days on baja never accrue a jornal.
+   if(activo)await startAccruingToday(c,id);
    const after=await this.get(c,id);
    await this.audit(c,activo?'Trabajador reactivado':'Trabajador dado de baja',after,`${after.name}${reason?.trim()?` · ${reason.trim()}`:''}`);
    return {...after,changed:true};
