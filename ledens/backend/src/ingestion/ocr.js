@@ -143,7 +143,12 @@ export class InvoiceOcr {
   async request(url, options = {}) {
     const r = await this.fetch(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(20000),
       headers: { 'Ocp-Apim-Subscription-Key': this.key, ...options.headers } });
-    if (!r.ok) { const e = new Error('ocr_request_failed'); e.transient = r.status === 429 || r.status >= 500; throw e; }
+    if (!r.ok) {
+      const e = new Error('ocr_request_failed'); e.transient = r.status === 429 || r.status >= 500; e.status = r.status;
+      // Seconds the service asks to wait (429 on the free tier: about 20 calls per minute).
+      const wait = Number(r.headers?.get?.('retry-after')); if (Number.isFinite(wait) && wait >= 0) e.retryAfter = wait;
+      throw e;
+    }
     return r;
   }
   async start(content, type) {

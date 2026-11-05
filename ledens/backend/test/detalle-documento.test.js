@@ -182,6 +182,19 @@ test('a detail that does not add up to the document stores nothing',async()=>{
  await assert.rejects(attach({status:'running'},{timeoutMs:0}),{status:504});
 });
 
+test('a rate-limited reader (429 of the free tier) is retried, not fatal; quota or key errors say so',async()=>{
+ const err=(status,extra={})=>Object.assign(new Error('ocr_request_failed'),{status,transient:status===429||status>=500,...extra});
+ let polls=0;
+ const flaky={async start(){return 'op';},async poll(){if(polls++<2)throw err(429,{retryAfter:0});return reading([10,20],30);}};
+ await assert.rejects(attach(null,{ocr:flaky}),{status:422,message:/suman 30\.00/},'got past the 429s and read the document');
+ assert.equal(polls,3);
+ const limited={async start(){throw err(429,{retryAfter:0});},async poll(){}};
+ await assert.rejects(attach(null,{ocr:limited,timeoutMs:20}),{status:429,message:/límite de uso/});
+ const quota={async start(){throw err(403);},async poll(){}};
+ await assert.rejects(attach(null,{ocr:quota}),{status:503,message:/cuota/});
+ assert.deepEqual(await records(),[]);
+});
+
 test('format, size, role, link and reader are checked before reading',async()=>{
  await assert.rejects(attach(reading([40],40),{content:Buffer.from('hola')}),{status:415});
  await assert.rejects(attach(reading([40],40),{content:Buffer.alloc(4*1024*1024+1,0x25)}),{status:413});
