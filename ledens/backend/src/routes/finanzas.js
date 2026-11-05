@@ -129,10 +129,10 @@ export function createFinanzasRouter({ service, projects, workers, payables, run
     res.json(await svc(req).profitability(req.params.id));
   }));
 
-  // Movimientos conciliados: how each reconciled record is classified, and the
-  // change of class (category only; audited with its reason).
+  // Movimientos conciliados: one row per reconciled movement, its documents, class
+  // and project assignment. The per-record change of class below stays for the API.
   router.get('/conciliados', handle(async (req, res) => {
-    res.json(await svc(req).reconciled({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), clase: req.query.clase || '', from: req.query.desde, to: req.query.hasta }));
+    res.json(await svc(req).reconciled({ page: req.query.pagina, pageSize: req.query.tam, q: String(req.query.q || '').slice(0, 100), clase: req.query.clase || '', proyecto: req.query.proyecto || '', from: req.query.desde, to: req.query.hasta }));
   }));
   router.put('/conciliados/:recordId/clasificacion', traced('imputacion', 'Cambio de clasificación', { entity: (req) => ({ type: 'registro', id: req.params.recordId }), summary: (b) => ({ message: 'Clasificado como ' + b.clase, detail: { clase: b.clase, categoria: b.category } }) })(async (req, res) => {
     const b = req.body || {};

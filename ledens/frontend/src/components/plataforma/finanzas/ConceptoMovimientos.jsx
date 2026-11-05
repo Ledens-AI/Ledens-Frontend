@@ -34,7 +34,7 @@ const baseChoices = (r) => (r.obramat
 // Every movement can change class; only an Obramat advance is materials as is (its
 // cost enters with the delivery invoice). Changing it undoes what the old class
 // registered from the movement (backend undoMovementFlow).
-const canClassify = (r) => !['compra_obramat', 'devolucion_anticipo'].includes(r.origen) && choices(r).some((c) => c !== r.clase);
+export const canClassify = (r) => !['compra_obramat', 'devolucion_anticipo'].includes(r.origen) && choices(r).some((c) => c !== r.clase);
 // The new class replaces a flow of the old one: the movement then enters as if nothing were registered.
 const undoes = (r, c) => r.lote || r.clase === 'reembolso_proveedor' || (r.origen === 'provisional' && c === 'trabajadores')
   || (r.clase === 'clientes' && r.origen === 'registro' && c === 'reembolso_proveedor');
@@ -49,7 +49,7 @@ const CON_REGISTROS = (row, c) => (c === 'reembolso_proveedor'
   ? `Se registrará como material en negativo, que descuenta coste al asignarlo a una obra.${row.documentos ? ` Los conceptos del abono (${row.documentos}) se excluyen para no contarlo dos veces; tienen que estar sin clasificar, sin obra y sumar lo mismo que el cobro.` : ''}`
   : `Se clasificará entero${row.documentos ? ` su documento (${row.documentos})` : ''} de una vez.`);
 
-function Classify({ row, onClose, onDone }) {
+export function Classify({ row, onClose, onDone }) {
   const options = choices(row).filter((c) => c !== row.clase);
   const [clase, setClase] = useState(options[0] || ''), [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false), [error, setError] = useState('');

@@ -90,12 +90,13 @@ En rentabilidad, los registros aprobados que vienen de efectivo (`ledens.v_cash_
 
 ## Movimientos conciliados
 
-Pantalla solo para administrador. Lista cada registro financiero cuyo movimiento ya está conciliado, leído de `ledens.treasury_movements`: el documento tiene un enlace Bridge `Confirmado`, el registro está unido directamente al movimiento bancario, o viene de un efectivo asignado (material, cobro de cliente o pago a trabajadores de su lote). La columna Origen dice Banco o Efectivo. Muestra el movimiento, el documento y la línea, el tercero, el importe, la clasificación y el proyecto.
+Pantalla solo para administrador. **Una fila por movimiento conciliado**, nunca segregado en sus conceptos, leído de `ledens.treasury_movements` con la misma consulta que Concepto de movimientos (`movementsSql`): entra todo movimiento con un documento enlazado en el Bridge (`Confirmado`) o con registros propios (un efectivo asignado, un material o cobro unido al movimiento). Muestra la fecha, el origen (Banco o Efectivo), el movimiento, el tercero, el importe, **con qué número de documento está conciliado** (los del Bridge; si no hay, los de sus registros), su clase (la de Concepto de movimientos: materiales, trabajadores, clientes, reembolso, varias clases o pendiente) y el proyecto.
 
-La clasificación sale de `financial_records.category`: Materiales (`materials`/`overhead`), Pagos a trabajadores (`labor`), Cobro de clientes (`revenue`/`advance`), Sin clasificar (`unclassified`) u Otros costes.
+**Todo movimiento conciliado tiene que estar asignado a un proyecto.** `proyecto_estado`: `asignado` (todos sus registros repartidos por completo en `project_financial_allocations`), `parcial` (alguno sí y alguno no), `sin_proyecto` (ninguno) o `sin_registros` (conciliado con un documento sin conceptos: no hay nada que asignar). Todo lo que no es `asignado` cuenta en `resumen.sin_proyecto` y sale marcado; la pantalla muestra el aviso y los contadores.
 
-- GET /api/finanzas/conciliados: q, clase=materiales|trabajadores|clientes|sin_clasificar|otros, desde, hasta (fecha del movimiento), pagina, tam.
-- PUT /api/finanzas/conciliados/:recordId/clasificacion `{clase, version, reason}`: cambia solo la categoría del registro y nunca mueve filas entre las tablas importadas (`material_expenses`, `worker_payments`, `customer_payments`).
+- GET /api/finanzas/conciliados: q (también por proyecto), clase (las de Concepto de movimientos), proyecto=asignado|sin_proyecto, desde, hasta (fecha del movimiento), pagina, tam. Devuelve `rows`, `total` y `resumen: { movimientos, sin_proyecto }` (con la búsqueda y las fechas, sin los filtros de clase y proyecto).
+- «Cambiar» abre la clasificación del movimiento entero, la misma de Concepto de movimientos (`PUT /api/finanzas/movimientos/:id/clasificacion`).
+- PUT /api/finanzas/conciliados/:recordId/clasificacion `{clase, version, reason}` (API, ya no lo usa la pantalla): cambia solo la categoría del registro y nunca mueve filas entre las tablas importadas (`material_expenses`, `worker_payments`, `customer_payments`).
   - **Sentido:** un pago solo puede ser de materiales o de trabajadores, y un cobro solo de clientes. El sentido se toma de `documents.tipo`, del origen o del signo bancario. Un `customer_payment` no se reclasifica.
   - **Control:** exige la versión vigente y un motivo, y queda en `finance_events` (`reclassified`) y en Logs de transacciones.
 - Las pestañas Materiales y Pagos a trabajadores siguen la categoría, así que un registro reclasificado cambia de pestaña.
