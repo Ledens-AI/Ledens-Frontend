@@ -325,6 +325,8 @@ export class PresupuestosService {
         linkProject: team && !p.parent_id,
         // Clients are invited to the obra (root presupuesto): /api/invitaciones.
         invite: team && !p.parent_id,
+        // An obra created on its own becomes an ampliación of another obra of the client.
+        joinObra: team && !p.parent_id,
       },
     };
   }
@@ -365,11 +367,11 @@ export class PresupuestosService {
     // Obras a new presupuesto can join (as one more budget of the obra, approved
     // separately): approved main presupuestos the user runs (an admin: all).
     const obras = (await this.pool.query(`
-      SELECT p.id, p.ref, p.title, p.address, p.client_id FROM presupuestos p
+      SELECT p.id, p.ref, p.title, p.address, p.client_id, p.project_id FROM presupuestos p
        WHERE p.parent_id IS NULL AND (${this.user.role === 'admin' ? 'true' : 'p.jefe_id=$1'})
          AND EXISTS (SELECT 1 FROM presupuesto_versiones v WHERE v.presupuesto_id=p.id AND v.status='approved')
        ORDER BY p.created_at DESC`, this.user.role === 'admin' ? [] : [this.user.id])).rows
-      .map((p) => ({ id: p.id, ref: p.ref, title: p.title, address: p.address, clientId: p.client_id }));
+      .map((p) => ({ id: p.id, ref: p.ref, title: p.title, address: p.address, clientId: p.client_id, projectId: p.project_id }));
     // An admin may also be the person in charge of an obra.
     if (this.user.role === 'jefe') return { clients: pick('client'), jefes: [{ id: this.user.id, name: this.user.name || this.user.email, email: this.user.email }], obras };
     return { clients: pick('client'), jefes: [...pick('jefe'), ...pick('admin')], obras };
@@ -583,6 +585,53 @@ export class PresupuestosService {
       if ((p.jefe_id || null) === (j?.id || null)) return;
       await db.query('UPDATE presupuestos SET jefe_id=$2, updated_at=now() WHERE id=$1 OR parent_id=$1', [p.id, j?.id || null]);
       await audit({ actor: this.actor(), action: 'Jefe de obra asignado', target: { id: p.client_id, label: p.ref }, detail: `${p.ref} · ${j ? j.name || j.email : 'sin asignar'}` }, db);
+    });
+    return this.get(id);
+  }
+
+  // Turns an obra (root presupuesto) created on its own into an ampliación of
+  // another obra of the same client, so one obra gathers every presupuesto of
+  // the work: its ampliaciones, photos and documents, invited clients and open
+  // invitations move with it; the target keeps its own jefe and dates (taking
+  // this one's when it has none) and its project (taking this one's when it
+  // has none). Nothing else changes: versions, approvals, lines and their
+  // production stay as they are, and approved lines now add to the target.
+  async joinObra(id, body = {}) {
+    if (!isUuid(body.obraId)) fail(400, 'Selecciona la obra a la que se une');
+    if (body.obraId === id) fail(400, 'Elige otra obra');
+    await this.tx(async (db) => {
+      // Both rows locked, always in the same order, so two joins never deadlock.
+      const [a, b] = [id, body.obraId].sort();
+      const locked = new Map();
+      for (const x of [a, b]) locked.set(x, await this.load(db, x, { lock: true }));
+      const p = locked.get(id), target = locked.get(body.obraId);
+      if (!this.isTeam(p) || !this.isTeam(target)) fail(403, 'No tienes permiso para unir estas obras');
+      if (p.parent_id) fail(400, 'Este presupuesto ya es una ampliación de otra obra');
+      if (target.parent_id) fail(400, 'Una ampliación se une a la obra principal');
+      if (p.client_id !== target.client_id) fail(400, 'Las dos obras deben ser del mismo cliente');
+      if (p.project_id && target.project_id && p.project_id !== target.project_id) fail(400, 'Las dos obras están en proyectos distintos: vincúlalas antes al mismo proyecto');
+      if (!(await db.query("SELECT 1 FROM presupuesto_versiones WHERE presupuesto_id=$1 AND status='approved'", [target.id])).rows.length) fail(409, 'Solo se une a una obra con presupuesto aprobado');
+
+      // Dates go as a pair: the target's when it has a start date, else this obra's.
+      const dates = target.start_date ? target : p;
+      const day = (d) => (d ? toDate(d) : null);
+      await db.query('UPDATE presupuestos SET project_id=$2, start_date=$3, end_date=$4, updated_at=now() WHERE id=$1',
+        [target.id, target.project_id || p.project_id || null, day(dates.start_date), day(dates.end_date)]);
+      // This obra and its own ampliaciones hang from the target from now on, with its jefe.
+      await db.query('UPDATE presupuestos SET parent_id=$2, jefe_id=$3, updated_at=now() WHERE parent_id=$1', [p.id, target.id, target.jefe_id]);
+      await db.query('UPDATE presupuestos SET parent_id=$2, jefe_id=$3, project_id=NULL, start_date=NULL, end_date=NULL, updated_at=now() WHERE id=$1', [p.id, target.id, target.jefe_id]);
+      // What hangs from the obra (root presupuesto) moves to the target.
+      await db.query('UPDATE obra_archivos SET presupuesto_id=$2 WHERE presupuesto_id=$1', [p.id, target.id]);
+      await db.query(`INSERT INTO obra_clientes (presupuesto_id, user_id, invitacion_id, added_by, created_at)
+                      SELECT $2, user_id, invitacion_id, added_by, created_at FROM obra_clientes WHERE presupuesto_id=$1
+                      ON CONFLICT (presupuesto_id, user_id) DO NOTHING`, [p.id, target.id]);
+      await db.query('DELETE FROM obra_clientes WHERE presupuesto_id=$1', [p.id]);
+      // Open invitations move unless the person already has one open on the target (then it ends here).
+      const OPEN = 'accepted_at IS NULL AND revoked_at IS NULL';
+      await db.query(`UPDATE invitaciones i SET presupuesto_id=$2 WHERE i.presupuesto_id=$1
+                         AND NOT (i.${OPEN} AND EXISTS (SELECT 1 FROM invitaciones t WHERE t.presupuesto_id=$2 AND t.user_id=i.user_id AND t.${OPEN}))`, [p.id, target.id]);
+      await db.query(`UPDATE invitaciones SET revoked_at=now(), revoked_by=$2, token_hash=NULL WHERE presupuesto_id=$1 AND ${OPEN}`, [p.id, this.user.id || null]);
+      await audit({ actor: this.actor(), action: 'Obra unida a otra obra', target: { id: p.client_id, label: p.ref }, detail: `${p.ref} «${p.title}» → ampliación de ${target.ref} «${target.title}»` }, db);
     });
     return this.get(id);
   }

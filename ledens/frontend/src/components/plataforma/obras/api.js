@@ -94,6 +94,8 @@ export const api = {
   rename: (id, body) => request('PUT', `${base}/${id}/nombre`, body),
   // Projects of Gestión financiera: the obra's link (team) and a project with its presupuestos.
   setProject: (id, body) => request('PUT', `${base}/${id}/proyecto`, body),
+  // { obraId }: this obra becomes an ampliación of that one (same client).
+  joinObra: (id, body) => request('PUT', `${base}/${id}/obra`, body),
   projects: () => request('GET', `${base}/proyectos`),
   project: (projectId) => request('GET', `${base}/proyectos/${projectId}`),
   // Planificación (Gantt) of a project with an approved presupuesto (backend: presupuestos/gantt.js).

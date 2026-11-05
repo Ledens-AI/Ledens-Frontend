@@ -42,6 +42,9 @@ export default function Editor({ mode, doc, parent, initial, sourceFile, project
   const [agentNotice, setAgentNotice] = useState(null);
 
   useEffect(() => { if (mode === 'new') api.options().then(setOpts, (e) => setError(e.message)); }, [mode]);
+  // A second presupuesto of a project whose client already has an approved obra
+  // there joins that obra by default (an ampliación), not a new obra.
+  const obraOfProject = (cid) => (project?.id && (opts?.obras || []).find((o) => o.clientId === cid && o.projectId === project.id)?.id) || '';
 
   const mergeAgentDraft = (draft) => {
     setChapters((cs) => [...cs, ...fromVersion(draft)]);
@@ -122,7 +125,7 @@ export default function Editor({ mode, doc, parent, initial, sourceFile, project
           <label className="fin-field obr-span2"><span>Dirección de la obra</span><input value={address} maxLength={300} onChange={(e) => setAddress(e.target.value)} /></label>
           {mode === 'new' ? (<>
             <label className="fin-field"><span>Cliente</span>
-              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setObraId(''); }}>
+              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setObraId(obraOfProject(e.target.value)); }}>
                 <option value="">{opts ? 'Selecciona el cliente' : 'Cargando…'}</option>
                 {(opts?.clients || []).map((c) => <option key={c.id} value={c.id}>{`${c.name} · ${c.email}${c.registered === false ? ' · pendiente de registro' : ''}`}</option>)}
               </select>
@@ -146,6 +149,7 @@ export default function Editor({ mode, doc, parent, initial, sourceFile, project
                 <ProjectPicker value={project} onChange={setProject} label="Proyecto de la obra" placeholder="Busca por código, nombre o dirección…" />
               </div>
             )}
+            {!obraId && clientId && obraOfProject(clientId) ? <p className="fin-warn obr-span2"><i className="ri-information-line"></i><span>Este cliente ya tiene una obra aprobada en este proyecto. Si es la misma obra, elígela en «Obra» para que este presupuesto sea una ampliación.</span></p> : null}
             {obraId ? <p className="fin-muted fin-small obr-span2">Se añade a esa obra como un presupuesto más: el cliente lo aprueba por separado y, al aprobarlo, suma al total y al avance de la obra. El jefe de obra es el de la obra.</p> : null}
           </>) : null}
           <label className="fin-field"><span>IVA (%)</span><input className="fin-w-num" inputMode="decimal" value={vatRate} onChange={(e) => setVatRate(e.target.value)} /></label>
