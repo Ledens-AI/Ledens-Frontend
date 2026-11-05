@@ -147,3 +147,17 @@ test('a worker added later accrues from the day of the alta, not from the start'
  assert.match(starts,/^\d{4}-\d{2}-\d{2}$/);
  assert.equal((await db.query("SELECT count(*)::int n FROM ledens.payables WHERE employee_id=$1",[w.id])).rows[0].n,0);
 });
+
+test('review fixes: pausing first generates the days already passed; an annulled jornal cannot be paid',async()=>{
+ const w=(await db.query("INSERT INTO ledens.employees(name,daily_pay,activo) VALUES('Pausa Tardía',50,true) RETURNING id")).rows[0].id;
+ await db.query("INSERT INTO ledens.worker_pay_settings(employee_id,starts_on) VALUES($1,'2026-11-12')",[w]);
+ today='2026-11-13';
+ await as(admin).setSettings(w,{accrues:false}); // the hourly run has not generated Thursday yet
+ assert.equal((await db.query("SELECT count(*)::int n FROM ledens.payables WHERE employee_id=$1 AND work_date='2026-11-12'",[w])).rows[0].n,1,'Thursday is still owed');
+ await as(admin).setSettings(w,{accrues:true});
+ await as(admin).setAttendance([{employeeId:w,date:'2026-11-12',works:false}]);
+ const id=(await db.query("SELECT id,status FROM ledens.payables WHERE employee_id=$1 AND work_date='2026-11-12'",[w])).rows[0];
+ assert.equal(id.status,'anulada');
+ await assert.rejects(as(admin).setStatus({ids:[id.id],status:'pagada'}),{status:409,message:/anulado/});
+ today='2026-11-12';
+});

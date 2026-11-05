@@ -61,7 +61,11 @@ export class PayablesService {
 
  // The automation: one jornal per worker and past day that accrues, up to yesterday
  // (a day is owed once it has passed). Safe to run any number of times at once.
+ // Attendance and settings changes take the same lock, so a jornal is never
+ // generated from attendance another transaction is about to change.
  async generate(db=this.pool){
+  if(db===this.pool)return this.transaction((c)=>this.generate(c));
+  await db.query("SELECT pg_advisory_xact_lock(hashtextextended('ledens-payables-jornales',0))");
   const r=await db.query(`INSERT INTO ledens.payables(origin,employee_id,work_date,concept,counterparty,amount,due_on)
    SELECT 'jornal',x.employee_id,x.work_date,'Jornal '||to_char(x.work_date,'DD/MM/YYYY'),x.name,x.amount,${DUE('x.work_date','x.frequency')}
    FROM (${ACCRUAL("'2000-01-01'",'$1')}) x
@@ -144,6 +148,7 @@ export class PayablesService {
    return {employeeId:i.employeeId,date:i.date,works:i.works};
   });
   const out=await this.transaction(async(c)=>{
+   await c.query("SELECT pg_advisory_xact_lock(hashtextextended('ledens-payables-jornales',0))");
    const names=new Map((await c.query('SELECT id,name FROM ledens.employees WHERE id=ANY($1::uuid[])',[[...new Set(clean.map((i)=>i.employeeId))]])).rows.map((r)=>[r.id,r.name]));
    const log=[];let annulled=0,restored=0;
    for(const i of clean){
@@ -176,6 +181,8 @@ export class PayablesService {
   if(frequency!==undefined&&!FREQUENCIES.includes(frequency))throw new FinError(400,'Frecuencia de pago no válida');
   if(accrues!==undefined&&typeof accrues!=='boolean')throw new FinError(400,'Indica si genera jornales');
   return this.transaction(async(c)=>{
+   // Days already passed are owed under the settings they were worked with.
+   await this.generate(c);
    const w=(await c.query(`SELECT e.id,e.name,coalesce(s.frequency,'semanal') frequency,coalesce(s.accrues,true) accrues FROM ledens.employees e
     LEFT JOIN ledens.worker_pay_settings s ON s.employee_id=e.id WHERE e.id=$1 FOR UPDATE OF e`,[employeeId])).rows[0];
    if(!w)throw new FinError(404,'Trabajador no encontrado');
@@ -284,7 +291,7 @@ export class PayablesService {
    const rows=(await c.query(`${SELECT} WHERE p.id=ANY($1::uuid[]) ORDER BY p.id FOR UPDATE OF p`,[[...new Set(ids)]])).rows;
    if(rows.length!==new Set(ids).size)throw new FinError(404,'Alguna cuenta ya no existe. Recarga la lista.');
    if(status==='anulada'){const j=rows.find((r)=>r.origin==='jornal');if(j)throw new FinError(409,`${j.concept} de ${j.employee}: un jornal no se anula aquí. Marca ese día como «No trabaja» en la tabla de jornales.`);}
-   if(status==='pendiente'){const j=rows.find((r)=>r.origin==='jornal'&&r.status==='anulada');if(j)throw new FinError(409,`${j.concept} de ${j.employee} está anulado: marca ese día como «Trabaja» en la tabla de jornales.`);}
+   if(status!=='anulada'){const j=rows.find((r)=>r.origin==='jornal'&&r.status==='anulada');if(j)throw new FinError(409,`${j.concept} de ${j.employee} está anulado: marca ese día como «Trabaja» en la tabla de jornales.`);}
    const todo=rows.filter((r)=>r.status!==status);
    if(todo.length)await c.query('UPDATE ledens.payables SET status=$2,paid_on=$3,updated_by=$4,updated_at=now() WHERE id=ANY($1::uuid[])',[todo.map((r)=>r.id),status,day,this.user.id||null]);
    const total=todo.reduce((s,r)=>s+Math.round(Number(r.amount)*100),0)/100;
