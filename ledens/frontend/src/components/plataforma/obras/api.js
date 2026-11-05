@@ -96,6 +96,9 @@ export const api = {
   setProject: (id, body) => request('PUT', `${base}/${id}/proyecto`, body),
   projects: () => request('GET', `${base}/proyectos`),
   project: (projectId) => request('GET', `${base}/proyectos/${projectId}`),
+  // Planificación (Gantt) of a project with an approved presupuesto (backend: presupuestos/gantt.js).
+  gantt: (projectId) => request('GET', `${base}/proyectos/${projectId}/gantt`),
+  saveGantt: (projectId, partidaId, body) => request('PUT', `${base}/proyectos/${projectId}/gantt/${partidaId}`, body),
   schedule: (id, body) => request('PUT', `${base}/${id}/fechas`, body),
   declare: (id, body) => request('PUT', `${base}/${id}/produccion`, body),
 };

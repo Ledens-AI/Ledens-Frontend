@@ -9,6 +9,7 @@ import { translatorFromEnv } from '../presupuestos/translate.js';
 import { translateDoc } from '../presupuestos/traducciones.js';
 import { PropuestasService } from '../presupuestos/propuestas.js';
 import { PartidasService } from '../presupuestos/partidas.js';
+import { GanttService } from '../presupuestos/gantt.js';
 import { agenteDraft, agenteFromEnv } from '../presupuestos/agente.js';
 import { agenteChat } from '../presupuestos/agenteChat.js';
 import { getStorage } from '../obras/storage.js';
@@ -84,6 +85,10 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   // A project of Gestión financiera with the presupuestos linked to it (team only).
   router.get('/proyectos', handle(async (req) => ({ proyectos: await svc(req).projectsList() })));
   router.get('/proyectos/:projectId', handle((req) => svc(req).projectView(req.params.projectId)));
+  // Planificación (Gantt) of a project with an approved presupuesto.
+  const gantt = (req) => new GanttService(pool || getPool(), req.user);
+  router.get('/proyectos/:projectId/gantt', handle((req) => gantt(req).get(req.params.projectId)));
+  router.put('/proyectos/:projectId/gantt/:partidaId', handle((req) => gantt(req).update(req.params.projectId, req.params.partidaId, req.body || {})));
   router.get('/:id', handle((req) => svc(req).get(req.params.id, { versionId: req.query.version || undefined })));
   router.post('/', handle((req) => svc(req).create(req.body || {})));
   router.put('/:id', handle((req) => svc(req).saveDraft(req.params.id, req.body || {})));

@@ -5,6 +5,7 @@ import { eur, fecha } from '../finanzas/format.js';
 import { Empty, ErrorBox, Kpi, Badge } from '../finanzas/ui.jsx';
 import { PhaseBadge, Progress } from './Detalle.jsx';
 import { useObrasI18n } from './i18n.js';
+import Gantt from './Gantt.jsx';
 
 /* «Presupuestos y obras» by project: every presupuesto belongs to a project of
  * Gestión financiera (ledens.projects) through its obra. The team (admin and
@@ -215,6 +216,7 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [fin, setFin] = useState(null); // { totales, rows, materiales, trabajadores } | { error }
+  const [gantt, setGantt] = useState(false); // Planificación (Gantt) open
 
   const load = useCallback(() => api.project(projectId).then((d) => { setData(d); setError(''); }, (e) => setError(e.message)), [projectId]);
   useEffect(() => { load(); }, [load]);
@@ -233,6 +235,7 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
   const back = <div><button type="button" className="fin-btn is-ghost is-small" onClick={onBack}><i className="ri-arrow-left-line"></i>Todos los proyectos</button></div>;
   if (error) return <div className="fin-stack">{back}<ErrorBox message={error} onRetry={load} /></div>;
   if (!data) return <div className="fin-loading fin-muted">Cargando el proyecto…</div>;
+  if (gantt) return <Gantt projectId={projectId} readOnly={readOnly} onBack={() => { setGantt(false); load(); }} />;
 
   const { project: pr, kpis: k, presupuestos: rows } = data;
   const obras = rows.filter((r) => r.phase === 'en_curso');
@@ -254,6 +257,7 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
         </div>
         <div className="obr-actions">
           {pr.status ? <Badge bg="#E3E7F3" fg="#3E4D85" icon="ri-building-2-line">{pr.status}</Badge> : null}
+          {k.aprobado.n ? <button type="button" className="fin-btn" onClick={() => setGantt(true)}><i className="ri-calendar-schedule-line"></i>Planificación (Gantt)</button> : null}
           {!readOnly && onNew ? <button type="button" className="fin-btn" onClick={() => onNew(pr)}><i className="ri-add-line"></i>Nuevo presupuesto</button> : null}
           {!readOnly && onImport ? <button type="button" className="fin-btn is-primary" onClick={() => onImport(pr)}><i className="ri-file-upload-line"></i>Subir PDF de presupuesto</button> : null}
           {!readOnly && onAgente ? <button type="button" className="fin-btn" onClick={() => onAgente(pr)}><i className="ri-magic-line"></i>Generar con la documentación de la visita</button> : null}

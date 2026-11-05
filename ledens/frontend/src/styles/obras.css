@@ -164,4 +164,20 @@
 .obr-avance-proj:first-child { border-top: 0; padding-top: 0; }
 .obr-avance-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .obr-avance-head > div:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.obr-avance-title { font-size: 16px; font-weight: 700; margin: 0; }
+.obr .obr-avance-title { font-size: 17px; font-weight: 700; letter-spacing: 0; text-transform: none; color: #0C062B; margin: 0; }
+
+/* Planificación (Gantt) of a project */
+.obr-gantt { display: flex; overflow: hidden; }
+.obr-gantt-labels { flex: none; border-right: 1px solid #E6E6E1; background: #fff; }
+.obr-gantt-labels-head { display: flex; align-items: flex-end; padding: 0 12px 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: #6B6B68; border-bottom: 1px solid #E6E6E1; box-sizing: border-box; }
+.obr-gantt-label { display: flex; align-items: center; gap: 4px; padding: 0 12px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid #F0F0EC; box-sizing: border-box; }
+.obr-gantt-scroll { flex: 1; overflow-x: auto; min-width: 0; }
+.obr-gantt-scroll svg { display: block; }
+.obr-gantt-table td { vertical-align: middle; }
+.obr-gantt-num { width: 72px; font: inherit; font-size: 14px; min-height: 36px; padding: 6px 8px; border: 1px solid #D9D9D9; border-radius: 8px; }
+.obr-gantt-preds { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.obr-gantt-pred { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; white-space: nowrap; }
+.obr-gantt-table .obr-gantt-pred select { max-width: 220px; }
+.obr-gantt-table td:nth-child(2) { min-width: 200px; }
+.obr-gantt-warn { color: #B26A00; }
+@media (max-width: 720px) { .obr-gantt-labels { width: 120px !important; } }
