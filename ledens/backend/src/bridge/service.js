@@ -1,7 +1,7 @@
 import {hasPurchases,purchaseFundingState} from '../finance/purchases.js';
 import {AlertService} from '../notifications/service.js';
 import {createHash} from 'node:crypto';
-import {LOCK_ID,RULE_VERSION,OWNED_RULE_VERSIONS,NEAR_DATE_DAYS,bankMatchRule,cents,abs,decimal,day,automaticBlock,eligibleBank,hasParty,hasReference,documentFingerprint,bankFingerprint} from './rules.js';
+import {LOCK_ID,RULE_VERSION,OWNED_RULE_VERSIONS,NEAR_DATE_DAYS,bankMatchRule,cents,abs,decimal,day,automaticBlock,eligibleBank,hasParty,hasReference,documentFingerprint,bankFingerprint,BANK_MOVEMENTS} from './rules.js';
 
 export class BridgeError extends Error{constructor(status,code){super(code);this.status=status;this.code=code;}}
 const DOC=`SELECT d.*,to_jsonb(i)->>'invoice_currency' invoice_currency,i.date_confidence,
@@ -14,7 +14,7 @@ const DOC=`SELECT d.*,to_jsonb(i)->>'invoice_currency' invoice_currency,i.date_c
 const BANK=`SELECT b.*,
   (SELECT COALESCE(sum(abs(a.allocated_amount)),0)::text FROM ledens.bank_document_allocations a WHERE a.bank_movement_id=b.id AND a.state='Confirmado') confirmed,
   (SELECT count(*)::int FROM ledens.bank_document_allocations a WHERE a.bank_movement_id=b.id) links
-  FROM ledens.bank_movements b`;
+  FROM ${BANK_MOVEMENTS} b`;
 const amount=n=>cents(String(n));
 // A movement marked as a transfer between the company's own accounts (027,
 // «Concepto de movimientos») is never matched with a document, like an imported

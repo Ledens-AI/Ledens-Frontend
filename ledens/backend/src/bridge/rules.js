@@ -26,6 +26,13 @@ export function day(value){
 }
 const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export const documentFingerprint=d=>digest([d.id,String(d.total),d.tipo,day(d.document_on),d.numerodocumento,d.tercero,d.niftercero,d.invoice_currency]);
+// A bank movement the import left without currency takes its account's
+// (ledens.bank_accounts.currency): it is that account's money. Never assumed
+// when the account is unknown too. BANK_MOVEMENTS reads every column of
+// ledens.bank_movements with that currency; bankCurrency(alias) is the same
+// expression for a query that joins the table itself.
+export const bankCurrency=m=>`coalesce(${m}.currency,(SELECT ba.currency FROM ledens.bank_accounts ba WHERE ba.id=${m}.bank_account_id))`;
+export const BANK_MOVEMENTS=`(SELECT (jsonb_populate_record(m,jsonb_build_object('currency',${bankCurrency('m')}))).* FROM ledens.bank_movements m)`;
 export const bankFingerprint=b=>digest([b.id,String(b.amount),String(b.total_amount),b.state,b.type,b.currency,day(b.completed_on),b.reference,b.description,b.beneficiary_name,b.is_internal_transfer,String(b.bank_fee),b.bill_currency,String(b.bill_amount)]);
 export function hasReference(number,bank){
   const ref=normalize(number), compact=ref.replace(/\s/g,'');

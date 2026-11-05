@@ -1,6 +1,6 @@
 import {hasPurchases,purchaseDetails} from './purchases.js';
 import {createHash} from 'node:crypto';
-import {cents} from '../bridge/rules.js';
+import {cents,bankCurrency} from '../bridge/rules.js';
 import {projectSuggestions} from './ingestion.js';
 
 export class FinanceError extends Error {
@@ -14,7 +14,7 @@ export class FinanceService {
  constructor(pool){this.pool=pool;}
  async documentFunding(c=this.pool){
   const native=await hasPurchases(c);
-  return {native,funding:native?'SELECT * FROM ledens.v_document_funding':"SELECT b.document_id,b.bank_movement_id,b.allocated_amount,abs(d.total) capacity FROM ledens.bank_document_allocations b JOIN ledens.documents d ON d.id=b.document_id JOIN ledens.bank_movements m ON m.id=b.bank_movement_id AND m.state='COMPLETED' AND m.currency='EUR' WHERE b.state='Confirmado' AND d.total<>0",capacities:native?'SELECT * FROM ledens.v_document_economic_capacity':'SELECT id document_id,abs(total) capacity FROM ledens.documents'};
+  return {native,funding:native?'SELECT * FROM ledens.v_document_funding':"SELECT b.document_id,b.bank_movement_id,b.allocated_amount,abs(d.total) capacity FROM ledens.bank_document_allocations b JOIN ledens.documents d ON d.id=b.document_id JOIN ledens.bank_movements m ON m.id=b.bank_movement_id AND m.state='COMPLETED' AND "+bankCurrency('m')+"='EUR' WHERE b.state='Confirmado' AND d.total<>0",capacities:native?'SELECT * FROM ledens.v_document_economic_capacity':'SELECT id document_id,abs(total) capacity FROM ledens.documents'};
  }
  async purchase(user,documentId){
   if(!await hasPurchases(this.pool))return null;
@@ -273,7 +273,7 @@ export class FinanceService {
     UNION ALL
     SELECT m.id,m.total_amount*s.share*abs(s.gross_amount/m.total_amount)
     FROM shares s JOIN ledens.bank_movements m ON m.id=s.bank_movement_id
-    WHERE s.category='advance' AND m.state='COMPLETED' AND m.currency='EUR' AND m.total_amount<>0
+    WHERE s.category='advance' AND m.state='COMPLETED' AND ${bankCurrency('m')}='EUR' AND m.total_amount<>0
     AND NOT EXISTS(SELECT 1 FROM ledens.bank_document_allocations b WHERE b.bank_movement_id=m.id AND b.state='Confirmado')
     ${cashView?`UNION ALL
     SELECT NULL::uuid,CASE WHEN s.category IN ('advance','revenue') THEN 1 ELSE -1 END*abs(s.gross_amount*s.share)

@@ -1,4 +1,4 @@
-import {cents,decimal,normalize,taxId} from '../bridge/rules.js';
+import {cents,decimal,normalize,taxId,bankCurrency} from '../bridge/rules.js';
 export class PurchaseReviewError extends Error{}
 export const hasPurchases=async c=>Boolean((await c.query("SELECT to_regclass('ledens.purchase_documents') name")).rows[0].name);
 const reject=reason=>{throw new PurchaseReviewError(reason);};
@@ -54,7 +54,7 @@ export async function purchaseDetails(c,documentId){
  if(family.length>200)throw new PurchaseReviewError('purchase_family_too_large');
  const ids=family.map(d=>d.document_id),links=(await c.query('SELECT * FROM ledens.purchase_settlements WHERE advance_document_id=ANY($1::uuid[])',[ids])).rows;
  const total=family.filter(d=>d.kind==='advance').reduce((s,d)=>s+cents(d.nominal_gross),0n),used=links.reduce((s,l)=>s+cents(l.gross_amount),0n);
- const refunds=[];for(const r of family.filter(d=>d.kind==='advance_refund')){const paid=(await c.query("SELECT coalesce(sum(b.allocated_amount),0)::text amount FROM ledens.bank_document_allocations b JOIN ledens.bank_movements m ON m.id=b.bank_movement_id AND m.state='COMPLETED' AND m.currency='EUR' WHERE b.document_id=$1 AND b.state='Confirmado'",[r.document_id])).rows[0].amount;refunds.push({document_id:r.document_id,expected:decimal(-cents(r.nominal_gross)),received:paid,status:cents(paid)===-cents(r.nominal_gross)?'matched':'pending_bank_refund'});}
+ const refunds=[];for(const r of family.filter(d=>d.kind==='advance_refund')){const paid=(await c.query("SELECT coalesce(sum(b.allocated_amount),0)::text amount FROM ledens.bank_document_allocations b JOIN ledens.bank_movements m ON m.id=b.bank_movement_id AND m.state='COMPLETED' AND "+bankCurrency('m')+"='EUR' WHERE b.document_id=$1 AND b.state='Confirmado'",[r.document_id])).rows[0].amount;refunds.push({document_id:r.document_id,expected:decimal(-cents(r.nominal_gross)),received:paid,status:cents(paid)===-cents(r.nominal_gross)?'matched':'pending_bank_refund'});}
  return {link_status:family.filter(d=>d.kind==='advance').length===0?'awaiting_advance':family.filter(d=>d.kind==='advance').length>1?'ambiguous_advance':'documented',order_reference:p.order_reference,currency:p.currency,document:p,family,settlements:links,advance_available:decimal(total-used),refunds};
 }
 

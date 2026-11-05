@@ -3,7 +3,7 @@ import {readObramatPdf,readObramatSalePdf} from '../ingestion/obramat.js';
 // Spanish UI facade: never writes source project_id or a parallel money ledger.
 import {createHash} from 'node:crypto';
 import {FinanceService,FinanceError,uuid} from '../finance/service.js';
-import {cents,decimal,bankFingerprint} from '../bridge/rules.js';
+import {cents,decimal,bankFingerprint,BANK_MOVEMENTS,bankCurrency} from '../bridge/rules.js';
 import {extractLines,storeInvoiceLines} from '../finance/ingestion.js';
 import {extractInvoice} from '../ingestion/ocr.js';
 import {pageTexts} from '../ingestion/validation.js';
@@ -54,7 +54,8 @@ export function bankLinkBlock(b,remaining){
  if(b.state!=='COMPLETED')return String(b.state??'').toUpperCase()==='PENDING'
   ?'El banco aún no ha completado este movimiento (pendiente). Podrás asignarle un documento en cuanto se complete.'
   :`El banco no ha completado este movimiento (estado ${b.state==null||b.state===''?'sin informar':b.state}). Solo se concilian movimientos completados.`;
- if(b.currency!=='EUR')return `El movimiento está en ${b.currency||'una divisa sin informar'}: solo se concilian movimientos en euros.`;
+ if(b.currency!=='EUR')return b.currency?`El movimiento está en ${b.currency}: solo se concilian movimientos en euros.`
+  :'El banco no informó la divisa del movimiento ni de qué cuenta es: no se puede conciliar hasta que la importación bancaria lo complete.';
  if(b.is_internal_transfer===true)return 'Es una transferencia entre cuentas de la empresa: no lleva documento.';
  if(Number(remaining)===0)return 'Ya está conciliado por completo.';
  return null;
@@ -537,7 +538,7 @@ export class FinanzasService {
   // on each bank movement of this inbox: it needs the movement as the Bridge sees it.
   const ids=rows.filter(r=>r.type==='movimiento').map(r=>r.id);
   if(ids.length){
-   const banks=new Map((await this.query('SELECT * FROM ledens.bank_movements WHERE id=ANY($1::uuid[])',[ids])).rows.map(b=>[b.id,b]));
+   const banks=new Map((await this.query('SELECT * FROM '+BANK_MOVEMENTS+' b WHERE id=ANY($1::uuid[])',[ids])).rows.map(b=>[b.id,b]));
    for(const r of rows){const b=r.type==='movimiento'&&banks.get(r.id);if(b)r.bank={id:b.id,description:b.description,reference:b.reference,total_amount:String(b.total_amount),
     remaining:r.por_conciliar,state:b.state,currency:b.currency,bank_fingerprint:bankFingerprint(b),bloqueo:bankLinkBlock(b,r.por_conciliar)};}
   }
