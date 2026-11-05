@@ -9,9 +9,11 @@ CREATE TABLE ledens.budget_lines(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),b
 CREATE TABLE ledens.documents(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),total numeric,tipo text,document_on date,
  numerodocumento text,tercero text,niftercero text,base_amount numeric,vat_amount numeric,review_state text,
  registered_on date,trimestre text,enlacearchivo text,observaciones text,estadopagocobro text);
+CREATE TABLE ledens.bank_accounts(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text,currency text NOT NULL);
 CREATE TABLE ledens.bank_movements(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),source_id text,amount numeric,total_amount numeric,
  completed_on date,type text,state text,description text,reference text,payer text,beneficiary_name text,currency text,
- bank_fee numeric,bill_amount numeric,bill_currency text,is_internal_transfer boolean);
+ bank_fee numeric,bill_amount numeric,bill_currency text,is_internal_transfer boolean,
+ bank_account_id uuid);
 CREATE TABLE ledens.bank_document_allocations(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),bank_movement_id uuid REFERENCES ledens.bank_movements(id),
  document_id uuid REFERENCES ledens.documents(id),allocated_amount numeric,state text,reconciled_on date,observaciones text,conciliacionid text,
  UNIQUE(bank_movement_id,document_id));
