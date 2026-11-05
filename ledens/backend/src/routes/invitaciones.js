@@ -77,6 +77,7 @@ export function createInvitacionesRouter({ authenticate, findUser, pool, origin 
   team.get('/:id', handle((req) => svc(req).list(req.params.id)));
   team.post('/:id', handle((req) => svc(req).invite(req.params.id, req.body || {}), 201));
   team.post('/:id/:invId/reenviar', handle((req) => svc(req).resend(req.params.id, req.params.invId)));
+  team.put('/:id/titular', handle((req) => svc(req).setTitular(req.params.id, req.body || {})));
   team.post('/:id/:invId/revocar', handle((req) => svc(req).revoke(req.params.id, req.params.invId)));
   router.use('/obras', team);
   return router;

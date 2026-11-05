@@ -40,7 +40,7 @@ before(async () => {
     CREATE TABLE ledens.work_items(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), source_id text, raw_id uuid, id_partida text, category_id uuid REFERENCES ledens.work_categories(id), categoria text, name text,
       definicion_partida text, unit_source text, sale_price_including_vat numeric, sale_price_excluding_vat numeric, incluye_materiales text, activa text, subcategoria text, palabrasclave text,
       observacionesagente text, rendimientovalidado text, observacionesplanificacion text, unit_id uuid);`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '022_obra_archivos.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql']) {
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '022_obra_archivos.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '037_estado_proyecto.sql']) {
     await db.exec(await fs.readFile(new URL('../src/db/migrations/' + m, import.meta.url), 'utf8'));
   }
   [admin, jefe, cliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES

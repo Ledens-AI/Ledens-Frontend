@@ -45,7 +45,7 @@ before(async () => {
     CREATE TABLE ledens.transaction_alerts (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), event_key text NOT NULL UNIQUE, event_type text NOT NULL, status text NOT NULL,
       reason text, document_id uuid, payload jsonb NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT now(), delivered_at timestamptz, lease_token uuid,
       lease_until timestamptz, attempts integer NOT NULL DEFAULT 0, next_attempt_at timestamptz NOT NULL DEFAULT now(), last_error text);`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '022_obra_archivos.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql']) {
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '022_obra_archivos.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '037_estado_proyecto.sql']) {
     await db.exec(await fs.readFile(new URL(`../src/db/migrations/${m}`, import.meta.url), 'utf8'));
   }
   [admin, jefe, otroJefe, cliente] = (await db.query(`INSERT INTO users(email,name,role,email_verified) VALUES
@@ -276,4 +276,48 @@ test('the link opens on the site the backend accepts (CORS_ORIGIN) unless PUBLIC
   } finally {
     for (const [k, v] of [['PUBLIC_APP_URL', saved.p], ['CORS_ORIGIN', saved.c]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
   }
+});
+
+test('the cliente principal is chosen among the clients with access; the previous one keeps following the obra', async () => {
+  const as = (u) => new PresupuestosService(pool, u);
+  const content = { title: 'Obra con cambio de titular', chapters: [{ name: 'Obra', items: [{ name: 'Solado', unit: 'm2', quantity: '10', unitPrice: '40' }] }] };
+  let d = await as(admin).create({ ...content, clientId: cliente.id, jefeId: jefe.id });
+  const id = d.id;
+  d = await as(admin).send(id);
+  await as(cliente).approve(id, { versionId: d.version.id });
+  const amp = await as(jefe).create({ parentId: id, ...content, title: 'Ampliación del titular' });
+  await as(jefe).send(amp.id);
+  assert.equal((await call(`/obras/${id}`, admin, { method: 'POST', body: { email: 'principal@inv.test', name: 'Nueva Principal' } })).status, 201);
+  // An unverified account with a password waits for the link: not selectable yet.
+  await db.query("INSERT INTO users(email,name,role,password_hash) VALUES ('espera@inv.test','Espera','client','x')");
+  assert.equal((await call(`/obras/${id}`, admin, { method: 'POST', body: { email: 'espera@inv.test' } })).status, 201);
+  await pending();
+  const nueva = await userByEmail('principal@inv.test'), espera = await userByEmail('espera@inv.test');
+
+  const list = await (await call(`/obras/${id}`, jefe)).json();
+  assert.deepEqual(list.clientes.map((c) => [c.email, c.principal]), [['titular@inv.test', true], ['principal@inv.test', false]]);
+  const put = (who, userId, extra) => call(`/obras/${id}/titular`, who, { method: 'PUT', body: { userId }, ...extra });
+  assert.equal((await put(cliente, nueva.id)).status, 403);
+  assert.equal((await put(otroJefe, nueva.id)).status, 404);
+  assert.equal((await put(admin, nueva.id, { as: jefe })).status, 403, '«Ver como» only reads');
+  assert.equal((await put(jefe, espera.id)).status, 409, 'no access to the obra yet');
+  assert.equal((await put(jefe, admin.id)).status, 409, 'never a non-client');
+  assert.equal((await call(`/obras/${amp.id}/titular`, jefe, { method: 'PUT', body: { userId: nueva.id } })).status, 400, 'set on the obra principal');
+
+  const r = await put(jefe, nueva.id);
+  assert.equal(r.status, 200);
+  const after = await r.json();
+  assert.equal(after.obra.titular.email, 'principal@inv.test');
+  assert.deepEqual(after.clientes.map((c) => [c.email, c.principal]), [['principal@inv.test', true], ['titular@inv.test', false]]);
+  assert.deepEqual((await db.query('SELECT client_id FROM presupuestos WHERE id=$1 OR parent_id=$1', [id])).rows.map((x) => x.client_id), [nueva.id, nueva.id], 'its ampliaciones follow');
+  // The new titular decides; the previous one still sees it but no longer decides.
+  const forNew = await as(nueva).get(amp.id);
+  assert.equal(forNew.can.decide, true);
+  const forOld = await as(cliente).get(amp.id);
+  assert.equal(forOld.can.decide, false);
+  // Her invitation can no longer be revoked while she is principal.
+  const inv = after.invitaciones.find((i) => i.email === 'principal@inv.test');
+  assert.equal((await call(`/obras/${id}/${inv.id}/revocar`, jefe, { method: 'POST' })).status, 409);
+  const a = (await db.query("SELECT detail FROM audit_log WHERE action='Cliente principal cambiado' ORDER BY id DESC LIMIT 1")).rows[0];
+  assert.match(a.detail, /titular@inv\.test → principal@inv\.test/);
 });

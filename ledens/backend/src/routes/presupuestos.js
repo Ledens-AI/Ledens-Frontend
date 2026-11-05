@@ -85,6 +85,8 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   // A project of Gestión financiera with the presupuestos linked to it (team only).
   router.get('/proyectos', handle(async (req) => ({ proyectos: await svc(req).projectsList() })));
   router.get('/proyectos/:projectId', handle((req) => svc(req).projectView(req.params.projectId)));
+  // Abierto / en estudio / cerrado (admins): only an abierto project declares progress.
+  router.put('/proyectos/:projectId/estado', handle((req) => svc(req).setProjectEstado(req.params.projectId, req.body || {})));
   // Planificación (Gantt) of a project with an approved presupuesto.
   const gantt = (req) => new GanttService(pool || getPool(), req.user);
   router.get('/proyectos/:projectId/gantt', handle((req) => gantt(req).get(req.params.projectId)));

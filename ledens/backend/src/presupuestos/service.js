@@ -129,6 +129,20 @@ export function projectIsOpen(code, name) {
   return !CLOSED_STATUS.test(`${code || ''} ${name || ''}`);
 }
 
+// Estado of a project in «Presupuestos y obras» (migration 037): the one an
+// admin set (proyecto_estados), else read from the accounting status. Only an
+// abierto project lets the team declare the progress of its obras.
+export const ESTADOS = ['abierto', 'en_estudio', 'cerrado'];
+const STUDY_STATUS = /estudi|ofert|presupuestand|study|quot|prospect/i;
+export function projectEstado(explicit, code, name) {
+  if (ESTADOS.includes(explicit)) return explicit;
+  if (!projectIsOpen(code, name)) return 'cerrado';
+  return STUDY_STATUS.test(`${code || ''} ${name || ''}`) ? 'en_estudio' : 'abierto';
+}
+const ESTADO_LABEL = { abierto: 'abierto', en_estudio: 'en estudio', cerrado: 'cerrado' };
+// SQL for the explicit estado of ledens.projects alias p.
+const ESTADO_SQL = '(SELECT e.estado FROM proyecto_estados e WHERE e.project_id=p.id) estado';
+
 export class PresupuestosService {
   constructor(pool, user) { this.pool = pool; this.user = user; }
 
@@ -291,7 +305,7 @@ export class PresupuestosService {
         FROM presupuesto_comentarios k LEFT JOIN users u ON u.id=k.author_id LEFT JOIN presupuesto_versiones v ON v.id=k.version_id
        WHERE k.presupuesto_id=$1 ORDER BY k.id`, [p.id])).rows;
     const people = (await this.pool.query('SELECT id, name, email FROM users WHERE id=ANY($1::uuid[])', [[p.client_id, p.jefe_id].filter(Boolean)])).rows;
-    const person = (pid) => { const u = people.find((x) => x.id === pid); return u ? { id: u.id, name: u.name || u.email } : null; };
+    const person = (pid) => { const u = people.find((x) => x.id === pid); return u ? { id: u.id, name: u.name || u.email, ...(team ? { email: u.email } : {}) } : null; };
     const parent = p.parent_id ? (await this.pool.query('SELECT id, ref, title FROM presupuestos WHERE id=$1', [p.parent_id])).rows[0] : null;
     const latestAll = versions[0];
     const latestSent = versions.find((v) => v.status !== 'draft');
@@ -301,6 +315,8 @@ export class PresupuestosService {
     const obra = !p.parent_id && approved ? await this.obra(p) : null;
     const projectId = !team ? null : p.parent_id ? (await this.pool.query('SELECT project_id FROM presupuestos WHERE id=$1', [p.parent_id])).rows[0]?.project_id : p.project_id;
     const project = projectId ? (await this.projectsById([projectId])).get(projectId) : null;
+    // Progress is declared while the obra's project is abierto (an obra with no project, always).
+    const projectOpen = !project || project.missing || project.estado === 'abierto';
     return {
       id: p.id, ref: p.ref, title: p.title, address: p.address, parent, client: person(p.client_id), jefe: person(p.jefe_id),
       startDate: p.start_date ? toDate(p.start_date) : null, endDate: p.end_date ? toDate(p.end_date) : null,
@@ -317,7 +333,8 @@ export class PresupuestosService {
         approveOnBehalf: this.user.role === 'admin' && !!latestAll && ['draft', 'sent', 'changes_requested'].includes(latestAll.status) && shown.id === latestAll.id,
         comment: team || isOwner,
         schedule: team && !p.parent_id && approved,
-        declare: team && !p.parent_id && approved && !!p.start_date,
+        // No start date yet: the first progress saved starts the obra today.
+        declare: team && !p.parent_id && approved && projectOpen,
         ampliar: team && !p.parent_id && approved,
         assignJefe: this.user.role === 'admin' && !p.parent_id,
         rename: team,
@@ -597,10 +614,11 @@ export class PresupuestosService {
       SELECT p.id, p.project_id code, p.name, p.address, to_jsonb(p)->>'municipio' municipio,
              coalesce(c.display_name, to_jsonb(p)->>'customer_name_source') cliente,
              to_jsonb(p)->>'start_date' start_date, to_jsonb(p)->>'end_date' end_date,
-             (SELECT s.name FROM ledens.project_statuses s WHERE s.id::text=to_jsonb(p)->>'status_id') status
+             (SELECT s.name FROM ledens.project_statuses s WHERE s.id::text=to_jsonb(p)->>'status_id') status,
+             (SELECT s.code FROM ledens.project_statuses s WHERE s.id::text=to_jsonb(p)->>'status_id') status_code, ${ESTADO_SQL}
         FROM ledens.projects p LEFT JOIN ledens.customers c ON c.id::text=to_jsonb(p)->>'customer_id'
        WHERE p.id=ANY($1::uuid[])`, [list])).rows;
-    for (const r of rows) out.set(r.id, { id: r.id, code: r.code, name: r.name, address: r.address, municipio: r.municipio, cliente: r.cliente, startDate: r.start_date, endDate: r.end_date, status: r.status });
+    for (const r of rows) out.set(r.id, { id: r.id, code: r.code, name: r.name, address: r.address, municipio: r.municipio, cliente: r.cliente, startDate: r.start_date, endDate: r.end_date, status: r.status, estado: projectEstado(r.estado, r.status_code, r.status) });
     // A link to a project the accounting import no longer has stays visible as such.
     for (const id of list) if (!out.has(id)) out.set(id, { id, code: null, name: 'Proyecto no encontrado', missing: true });
     return out;
@@ -617,12 +635,32 @@ export class PresupuestosService {
              coalesce(c.display_name, to_jsonb(p)->>'customer_name_source') cliente,
              to_jsonb(p)->>'start_date' start_date, to_jsonb(p)->>'end_date' end_date,
              (SELECT s.name FROM ledens.project_statuses s WHERE s.id::text=to_jsonb(p)->>'status_id') status,
-             (SELECT s.code FROM ledens.project_statuses s WHERE s.id::text=to_jsonb(p)->>'status_id') status_code
+             (SELECT s.code FROM ledens.project_statuses s WHERE s.id::text=to_jsonb(p)->>'status_id') status_code, ${ESTADO_SQL}
         FROM ledens.projects p LEFT JOIN ledens.customers c ON c.id::text=to_jsonb(p)->>'customer_id'
        WHERE $1 OR EXISTS (SELECT 1 FROM ledens.finance_project_permissions fp WHERE fp.user_id=$2 AND fp.project_id=p.id)
           OR EXISTS (SELECT 1 FROM presupuestos x WHERE x.project_id=p.id AND x.jefe_id=$2)
        ORDER BY p.project_id DESC NULLS LAST, p.name, p.id LIMIT 1000`, [this.user.role === 'admin', this.user.id])).rows;
-    return rows.map((r) => ({ id: r.id, code: r.code, name: r.name, address: r.address, municipio: r.municipio, cliente: r.cliente, startDate: r.start_date, endDate: r.end_date, status: r.status, statusCode: r.status_code, open: projectIsOpen(r.status_code, r.status) }));
+    return rows.map((r) => {
+      const estado = projectEstado(r.estado, r.status_code, r.status);
+      return { id: r.id, code: r.code, name: r.name, address: r.address, municipio: r.municipio, cliente: r.cliente, startDate: r.start_date, endDate: r.end_date, status: r.status, statusCode: r.status_code, estado, open: estado === 'abierto' };
+    });
+  }
+
+  // Abierto / en estudio / cerrado (migration 037): admins only; audited.
+  async setProjectEstado(projectId, body = {}) {
+    if (this.user.role !== 'admin') fail(403, 'Solo un administrador cambia el estado de un proyecto');
+    if (!isUuid(projectId)) fail(404, 'Proyecto no encontrado');
+    if (!ESTADOS.includes(body.estado)) fail(400, 'Estado no válido: abierto, en estudio o cerrado');
+    await this.tx(async (db) => {
+      const pr = (await this.projectsById([projectId], db)).get(projectId);
+      if (pr.missing) fail(404, 'Proyecto no encontrado');
+      await db.query(`INSERT INTO proyecto_estados (project_id, estado, updated_by) VALUES ($1,$2,$3)
+                      ON CONFLICT (project_id) DO UPDATE SET estado=excluded.estado, updated_by=excluded.updated_by, updated_at=now()`, [projectId, body.estado, this.user.id]);
+      if (pr.estado !== body.estado) {
+        await audit({ actor: this.actor(), action: 'Estado de proyecto', target: { label: pr.code || pr.name }, detail: `${[pr.code, pr.name].filter(Boolean).join(' · ')} · ${ESTADO_LABEL[pr.estado]} → ${ESTADO_LABEL[body.estado]}` }, db);
+      }
+    });
+    return this.projectView(projectId);
   }
 
   // A project the user may link a presupuesto to: an admin, any; a jefe, those
@@ -674,6 +712,7 @@ export class PresupuestosService {
     for (const r of obras) { ob.base += cents(r.obra.base); ob.executed += cents(r.obra.executedAmount); ob.consumed += cents(r.obra.consumed); }
     return {
       project,
+      can: { setEstado: this.user.role === 'admin' },
       presupuestos: rows,
       kpis: {
         obras: rows.filter((r) => !r.parent).length,
@@ -729,7 +768,10 @@ export class PresupuestosService {
       const p = await this.load(db, id, { lock: true });
       if (!this.isTeam(p)) fail(403, 'Solo el jefe de esta obra declara su producción');
       if (p.parent_id) fail(400, 'La producción se declara en la obra principal');
-      if (!p.start_date) fail(409, 'La obra aún no tiene fecha de inicio');
+      if (p.project_id) {
+        const pr = (await this.projectsById([p.project_id], db)).get(p.project_id);
+        if (!pr.missing && pr.estado !== 'abierto') fail(409, `El proyecto está ${ESTADO_LABEL[pr.estado]}: ábrelo para declarar el avance`);
+      }
       const lines = new Map((await this.obraLines([p.id], db)).map((l) => [l.id, l]));
       let changed = 0;
       for (const i of parsed) {
@@ -739,6 +781,12 @@ export class PresupuestosService {
         if (Number(i.executed) === Number(l.executed) && !i.note) continue;
         await db.query('INSERT INTO presupuesto_produccion (partida_id, executed, note, declared_by) VALUES ($1,$2,$3,$4)', [i.partidaId, i.executed, i.note, this.user.id]);
         changed++;
+      }
+      // An approved obra with no start date starts with its first progress.
+      if (changed && !p.start_date) {
+        const today = (await db.query('SELECT current_date::text d')).rows[0].d;
+        await db.query('UPDATE presupuestos SET start_date=$2, updated_at=now() WHERE id=$1', [p.id, today]);
+        await audit({ actor: this.actor(), action: 'Fechas de obra', target: { id: p.client_id, label: p.ref }, detail: `${p.ref} · inicio ${today} (primer avance declarado)` }, db);
       }
       if (changed) await audit({ actor: this.actor(), action: 'Producción declarada', target: { id: p.client_id, label: p.ref }, detail: `${p.ref} · ${changed} partida${changed === 1 ? '' : 's'}` }, db);
     });

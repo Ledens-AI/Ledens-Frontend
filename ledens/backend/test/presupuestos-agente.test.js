@@ -34,7 +34,7 @@ before(async () => {
     CREATE TABLE ledens.work_items(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), source_id text, raw_id uuid, id_partida text, category_id uuid REFERENCES ledens.work_categories(id), categoria text, name text,
       definicion_partida text, unit_source text, sale_price_including_vat numeric, sale_price_excluding_vat numeric, incluye_materiales text, activa text, subcategoria text, palabrasclave text,
       observacionesagente text, rendimientovalidado text, observacionesplanificacion text, unit_id uuid);`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql']) await db.exec(await fs.readFile(new URL('../src/db/migrations/' + m, import.meta.url), 'utf8'));
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '037_estado_proyecto.sql']) await db.exec(await fs.readFile(new URL('../src/db/migrations/' + m, import.meta.url), 'utf8'));
   for (const [code, name] of [...new Map(BASE.map((b) => [b.cat, b.catName]))]) await db.query('INSERT INTO ledens.work_categories(id_categoria,name) VALUES ($1,$2)', [code, name]);
   for (const b of BASE) {
     await db.query(`INSERT INTO ledens.work_items(id_partida,category_id,categoria,name,definicion_partida,unit_source,sale_price_including_vat,sale_price_excluding_vat,activa,subcategoria,palabrasclave)

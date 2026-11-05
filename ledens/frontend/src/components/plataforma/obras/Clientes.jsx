@@ -4,7 +4,8 @@ import { Badge, Dialog, Empty, ErrorBox } from '../finanzas/ui.jsx';
 import { fecha, fechaHora } from '../finanzas/format.js';
 
 /* «Clientes» of an obra (root presupuesto): the jefe de obra assigned or an
- * admin invites clients by email. The titular client approves and comments;
+ * admin invites clients by email and chooses the cliente principal among those
+ * who already see the obra. The cliente principal (titular) approves and comments;
  * whoever else is invited sees the obra without deciding on it. The email goes
  * out through the notification queue with a one-time link (/invitacion).
  * Team only, so Spanish only; readOnly is «Ver como». */
@@ -15,7 +16,7 @@ const STATUS = {
   revocada: { label: 'Revocada', bg: '#F8E1E1', fg: '#9E2F2F', icon: 'ri-close-circle-line' },
 };
 
-export default function Clientes({ obraId, readOnly, toast }) {
+export default function Clientes({ obraId, readOnly, toast, onChanged }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [form, setForm] = useState({ email: '', name: '', lang: 'es' });
@@ -23,8 +24,10 @@ export default function Clientes({ obraId, readOnly, toast }) {
   const [formError, setFormError] = useState('');
   const [revoking, setRevoking] = useState(null);
   const [rowError, setRowError] = useState({});
+  const [principal, setPrincipal] = useState('');
+  const [principalError, setPrincipalError] = useState('');
 
-  const load = useCallback(() => invitaciones.list(obraId).then((d) => { setData(d); setError(''); }, (e) => setError(e.message)), [obraId]);
+  const load = useCallback(() => invitaciones.list(obraId).then((d) => { setData(d); setError(''); setPrincipal(d.obra.titular?.id || ''); }, (e) => setError(e.message)), [obraId]);
   useEffect(() => { load(); }, [load]);
 
   if (error) return <ErrorBox message={error} onRetry={load} />;
@@ -47,14 +50,40 @@ export default function Clientes({ obraId, readOnly, toast }) {
     setBusy(false);
   };
   const { titular } = data.obra;
+  const clientes = data.clientes || [];
+  const savePrincipal = async () => {
+    setBusy(true); setPrincipalError('');
+    try {
+      const d = await invitaciones.setTitular(obraId, principal);
+      setData(d); setPrincipal(d.obra.titular?.id || '');
+      toast?.(`Cliente principal: ${d.obra.titular?.name || d.obra.titular?.email}`);
+      onChanged?.();
+    } catch (err) { setPrincipalError(err.message); }
+    setBusy(false);
+  };
 
   return (
     <div className="fin-stack">
       <div className="fin-card">
-        <div className="fin-card-head"><h2>Clientes de la obra</h2></div>
-        <p className="fin-muted obr-mb">
-          {`Titular: ${titular ? `${titular.name || titular.email} · ${titular.email}` : '—'}. El titular aprueba y comenta; los demás clientes invitados ven la obra (presupuesto, avance, fotos y documentos) sin decidir sobre ella.`}
-        </p>
+        <div className="fin-card-head"><h2>Cliente principal</h2></div>
+        <p className="obr-mb">{titular ? <><strong>{titular.name || titular.email}</strong>{titular.name && titular.name !== titular.email ? <span className="fin-muted">{` · ${titular.email}`}</span> : null}</> : '—'}</p>
+        <p className="fin-muted fin-small obr-mb">El cliente principal aprueba los presupuestos (también las ampliaciones), pide cambios, los rechaza y escribe en la conversación. Los demás clientes de la obra la ven (presupuesto, avance, fotos y documentos) sin decidir sobre ella.</p>
+        {readOnly ? null : (
+          <div className="fin-filters">
+            <label className="fin-field"><span>Cambiar cliente principal</span>
+              <select value={principal} onChange={(e) => { setPrincipal(e.target.value); setPrincipalError(''); }} disabled={busy || clientes.length < 2}>
+                {clientes.map((c) => <option key={c.id} value={c.id}>{`${c.name}${c.email && c.email !== c.name ? ` · ${c.email}` : ''}${c.principal ? ' (actual)' : ''}`}</option>)}
+              </select>
+            </label>
+            <button type="button" className="fin-btn is-primary" disabled={busy || !principal || principal === titular?.id} onClick={savePrincipal}><i className="ri-user-star-line"></i>Hacer cliente principal</button>
+          </div>
+        )}
+        {principalError ? <span className="fin-error-inline">{principalError}</span> : null}
+        {!readOnly ? <p className="fin-muted fin-small">{clientes.length < 2 ? 'Para elegir a otra persona, invítala abajo: aparecerá aquí en cuanto tenga acceso a la obra.' : 'Puedes elegir a cualquier cliente con acceso a la obra; el anterior la sigue viendo. Si alguien invitado no aparece, saldrá aquí en cuanto acepte su invitación.'}</p> : null}
+      </div>
+
+      <div className="fin-card">
+        <div className="fin-card-head"><h2>Invitar clientes</h2></div>
         {readOnly ? <p className="fin-warn"><i className="ri-eye-line"></i>Estás en «Ver como»: solo lectura.</p> : (
           <form className="fin-form" onSubmit={send}>
             <div className="fin-filters">

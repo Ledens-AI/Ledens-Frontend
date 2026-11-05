@@ -96,6 +96,8 @@ export const api = {
   setProject: (id, body) => request('PUT', `${base}/${id}/proyecto`, body),
   projects: () => request('GET', `${base}/proyectos`),
   project: (projectId) => request('GET', `${base}/proyectos/${projectId}`),
+  // Abierto / en estudio / cerrado (admins): only an abierto project declares progress.
+  setEstado: (projectId, estado) => request('PUT', `${base}/proyectos/${projectId}/estado`, { estado }),
   // Planificación (Gantt) of a project with an approved presupuesto (backend: presupuestos/gantt.js).
   gantt: (projectId) => request('GET', `${base}/proyectos/${projectId}/gantt`),
   saveGantt: (projectId, partidaId, body) => request('PUT', `${base}/proyectos/${projectId}/gantt/${partidaId}`, body),
@@ -139,6 +141,8 @@ export const invitaciones = {
   invite: (id, body) => request('POST', inv(id), body),
   resend: (id, invId) => request('POST', `${inv(id)}/${invId}/reenviar`),
   revoke: (id, invId) => request('POST', `${inv(id)}/${invId}/revocar`),
+  // The cliente principal (approves and comments), among the clients with access to the obra.
+  setTitular: (id, userId) => request('PUT', `${inv(id)}/titular`, { userId }),
 };
 
 // Labels and colours from the platform design.
@@ -149,6 +153,12 @@ export const PHASE = {
   rechazado: { label: 'Rechazado', bg: '#F8E1E1', fg: '#9E2F2F', icon: 'ri-close-circle-line' },
   aprobado: { label: 'Aprobado', bg: '#DEF3F0', fg: '#2F6B63', icon: 'ri-checkbox-circle-line' },
   en_curso: { label: 'Obra en curso', bg: '#E3E7F3', fg: '#3E4D85', icon: 'ri-building-2-line' },
+};
+// Estado of a project in «Presupuestos y obras» (backend: migration 037).
+export const ESTADO = {
+  abierto: { label: 'Abierto', bg: '#DEF3F0', fg: '#2F6B63', icon: 'ri-door-open-line' },
+  en_estudio: { label: 'En estudio', bg: '#FBF1DE', fg: '#7A4E0E', icon: 'ri-search-eye-line' },
+  cerrado: { label: 'Cerrado', bg: '#EDEDEA', fg: '#3A3A38', icon: 'ri-lock-line' },
 };
 export const VSTATUS = {
   draft: 'Borrador', sent: 'Enviada', changes_requested: 'Cambios pedidos', superseded: 'Sustituida', approved: 'Aprobada', rejected: 'Rechazada',

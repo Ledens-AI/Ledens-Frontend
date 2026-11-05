@@ -102,8 +102,47 @@ export class InvitacionesService {
     const { rows } = await this.pool.query(`
       SELECT i.*, u.name invited_by_name FROM invitaciones i LEFT JOIN users u ON u.id=i.invited_by
        WHERE i.presupuesto_id=$1 ORDER BY i.created_at DESC`, [p.id]);
-    const titular = (await this.pool.query('SELECT name, email FROM users WHERE id=$1', [p.client_id])).rows[0];
-    return { obra: { id: p.id, ref: p.ref, title: p.title, titular }, ttlDays: TTL_DAYS, invitaciones: rows.map((i) => this.dto(i)) };
+    const titular = (await this.pool.query('SELECT id, name, email FROM users WHERE id=$1', [p.client_id])).rows[0];
+    return { obra: { id: p.id, ref: p.ref, title: p.title, titular }, ttlDays: TTL_DAYS, invitaciones: rows.map((i) => this.dto(i)), clientes: await this.clientes(this.pool, p, titular) };
+  }
+
+  // Who may be the cliente principal: the titular and every client who already
+  // has access to the obra (obra_clientes). An invited person shows as the
+  // invitation was typed, never with the account's own data. Someone still
+  // waiting for the link is not here until they accept it.
+  async clientes(db, p, titular) {
+    const { rows } = await db.query(`
+      SELECT u.id, u.name, u.email, i.name inv_name, i.email inv_email FROM obra_clientes oc
+        JOIN users u ON u.id=oc.user_id LEFT JOIN invitaciones i ON i.id=oc.invitacion_id
+       WHERE oc.presupuesto_id=$1 AND u.role='client' AND u.id<>$2 ORDER BY oc.created_at`, [p.id, p.client_id]);
+    return [
+      ...(titular ? [{ id: titular.id, name: titular.name || titular.email, email: titular.email, principal: true }] : []),
+      ...rows.map((r) => ({ id: r.id, name: r.inv_email ? r.inv_name || r.inv_email : r.name || r.email, email: r.inv_email || r.email, principal: false })),
+    ];
+  }
+
+  // The cliente principal (presupuestos.client_id of the obra and its
+  // ampliaciones) approves, asks for changes, rejects and comments. Chosen
+  // among the clients who already see the obra; the previous one keeps
+  // following it. The assigned jefe or an admin; audited.
+  async setTitular(obraId, body = {}) {
+    if (!isUuid(body.userId)) fail(400, 'Elige el cliente principal');
+    await tx(this.pool, async (db) => {
+      const p = await this.obra(db, obraId, { lock: true });
+      if (body.userId === p.client_id) return;
+      const next = (await db.query(`SELECT u.id, u.name, u.email, coalesce(i.email, u.email) shown FROM obra_clientes oc JOIN users u ON u.id=oc.user_id
+                                      LEFT JOIN invitaciones i ON i.id=oc.invitacion_id
+                                     WHERE oc.presupuesto_id=$1 AND oc.user_id=$2 AND u.role='client'`, [p.id, body.userId])).rows[0];
+      if (!next) fail(409, 'Solo puede ser cliente principal un cliente con acceso a la obra: invítalo y, si hace falta, espera a que acepte la invitación');
+      const prev = (await db.query('SELECT name, email FROM users WHERE id=$1', [p.client_id])).rows[0];
+      await db.query('UPDATE presupuestos SET client_id=$2, updated_at=now() WHERE id=$1 OR parent_id=$1', [p.id, next.id]);
+      await db.query('DELETE FROM obra_clientes WHERE presupuesto_id=$1 AND user_id=$2', [p.id, next.id]);
+      await db.query(`INSERT INTO obra_clientes (presupuesto_id, user_id, added_by) VALUES ($1,$2,$3)
+                      ON CONFLICT (presupuesto_id, user_id) DO NOTHING`, [p.id, p.client_id, this.user.id]);
+      await audit({ actor: this.actor(), action: 'Cliente principal cambiado', target: { id: next.id, label: next.shown },
+        detail: `${p.ref} · ${p.title} · ${prev?.email || '—'} → ${next.shown}` }, db);
+    });
+    return this.list(obraId);
   }
 
   dto(i) {
@@ -191,7 +230,8 @@ export class InvitacionesService {
   async revoke(obraId, invId) {
     return tx(this.pool, async (db) => {
       const p = await this.obra(db, obraId, { lock: true });
-      await this.openInvitation(db, p, invId);
+      const open = await this.openInvitation(db, p, invId);
+      if (open.user_id === p.client_id) fail(409, 'Es el cliente principal de la obra: elige antes otro cliente principal');
       const inv = (await db.query('UPDATE invitaciones SET revoked_at=now(), revoked_by=$2, token_hash=NULL WHERE id=$1 RETURNING *', [invId, this.user.id])).rows[0];
       await db.query('DELETE FROM obra_clientes WHERE presupuesto_id=$1 AND invitacion_id=$2', [p.id, inv.id]);
       await audit({ actor: this.actor(), action: 'Invitación revocada', target: { id: inv.user_id, label: inv.email }, detail: `${p.ref} · ${p.title}` }, db);

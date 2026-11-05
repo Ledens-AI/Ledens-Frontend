@@ -43,6 +43,7 @@ test('migration 033 links the one Marbella obra to P2026-014 and audits it', asy
   await db.query(`INSERT INTO presupuestos(title,address,client_id,jefe_id) VALUES ('Casa Marbella','Marbella',$1,$2) `, [cliente.id, jefe.id]);
   await db.query(`INSERT INTO presupuestos(title,client_id) VALUES ('Baño Nerja',$1)`, [cliente.id]);
   await db.exec(await migration('033_presupuestos_proyecto.sql'));
+  await db.exec(await migration('037_estado_proyecto.sql'));
   const rows = (await db.query('SELECT title, project_id FROM presupuestos ORDER BY title')).rows;
   assert.deepEqual(rows, [{ title: 'Baño Nerja', project_id: null }, { title: 'Casa Marbella', project_id: marbella }]);
   assert.equal((await db.query("SELECT count(*)::int n FROM audit_log WHERE action='Presupuesto vinculado a proyecto'")).rows[0].n, 1);
@@ -122,4 +123,55 @@ test('the project carries its client: the customer of Gestión financiera, else 
   assert.equal((await as(admin).projectView(marbella)).project.cliente, 'María López');
   assert.equal((await as(admin).projectsList()).find((p) => p.id === marbella).cliente, 'María López');
   assert.equal((await as(admin).list()).find((r) => r.project?.id === marbella).project.cliente, 'María López');
+});
+
+test('estado of a project (migration 037): abierto, en estudio or cerrado; only abierto declares progress', async () => {
+  // Read from the accounting status when nobody set it.
+  const { projectEstado } = await import('../src/presupuestos/service.js');
+  assert.equal(projectEstado(null, 'EN_CURSO', 'En curso'), 'abierto');
+  assert.equal(projectEstado(null, 'CERRADO', 'Cerrado'), 'cerrado');
+  assert.equal(projectEstado(null, 'OFERTA', 'En estudio'), 'en_estudio');
+  assert.equal(projectEstado('cerrado', 'EN_CURSO', 'En curso'), 'cerrado', 'what an admin set wins');
+
+  // An approved obra with no start date in an open project.
+  const d0 = await as(admin).create(body({ title: 'Reforma Pietro', clientId: cliente.id, jefeId: jefe.id, projectId: velez }));
+  await as(admin).approveOnBehalf(d0.id, { versionId: d0.version.id, reason: 'Firmado en la visita' });
+  const d = await as(jefe).get(d0.id);
+  assert.equal(d.startDate, null);
+  assert.equal(d.project.estado, 'abierto');
+  assert.equal(d.can.declare, true, 'no start date needed');
+  assert.equal((await as(admin).projectsList()).find((p) => p.id === velez).open, true);
+
+  // Only an admin changes it; a closed or en estudio project does not declare.
+  await assert.rejects(as(jefe).setProjectEstado(velez, { estado: 'cerrado' }), { status: 403 });
+  await assert.rejects(as(admin).setProjectEstado(velez, { estado: 'pausado' }), { status: 400 });
+  await assert.rejects(as(admin).setProjectEstado('00000000-0000-0000-0000-0000000000ff', { estado: 'cerrado' }), { status: 404 });
+  const line = d.obra.chapters[0].items[0];
+  for (const estado of ['cerrado', 'en_estudio']) {
+    const v = await as(admin).setProjectEstado(velez, { estado });
+    assert.equal(v.project.estado, estado);
+    assert.equal((await as(jefe).get(d0.id)).can.declare, false);
+    await assert.rejects(as(jefe).declare(d0.id, { items: [{ partidaId: line.id, executed: '5' }] }), { status: 409, message: /ábrelo/ });
+  }
+  assert.equal((await as(admin).projectsList()).find((p) => p.id === velez).open, false);
+  const audits = (await db.query("SELECT detail FROM audit_log WHERE action='Estado de proyecto' ORDER BY id")).rows.map((r) => r.detail);
+  assert.deepEqual(audits, ['P2026-015 · Piso Vélez · abierto → cerrado', 'P2026-015 · Piso Vélez · cerrado → en estudio']);
+
+  // Open again: the first progress saved starts the obra today.
+  await as(admin).setProjectEstado(velez, { estado: 'abierto' });
+  const after = await as(jefe).declare(d0.id, { items: [{ partidaId: line.id, executed: '5' }] });
+  assert.equal(after.startDate, (await db.query('SELECT current_date::text d')).rows[0].d);
+  assert.equal(after.phase, 'en_curso');
+  assert.equal(after.obra.executionPct, 50);
+  assert.match((await db.query("SELECT detail FROM audit_log WHERE action='Fechas de obra' ORDER BY id DESC LIMIT 1")).rows[0].detail, /primer avance/);
+});
+
+test('migration 037 keeps every project with an approved obra abierto', async () => {
+  await db.query('DELETE FROM proyecto_estados');
+  await db.query("UPDATE ledens.project_statuses SET code='CERRADO', name='Cerrado'");
+  await db.query("UPDATE ledens.projects SET status_id='00000000-0000-0000-0000-000000000001' WHERE id=$1", [velez]);
+  assert.equal((await as(admin).projectView(velez)).project.estado, 'cerrado');
+  await db.exec(await migration('037_estado_proyecto.sql').then((s) => s.replace(/CREATE TABLE[\s\S]*?\);\n/, '')));
+  assert.equal((await as(admin).projectView(velez)).project.estado, 'abierto', 'Vélez has an approved obra');
+  await db.query("UPDATE ledens.project_statuses SET code='EN_CURSO', name='En curso'");
 });

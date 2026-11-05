@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { api, pctS } from './api.js';
+import { api, pctS, ESTADO } from './api.js';
 import { api as finApi } from '../finanzas/api.js';
 import { eur, fecha } from '../finanzas/format.js';
 import { Empty, ErrorBox, Kpi, Badge } from '../finanzas/ui.jsx';
@@ -51,14 +51,16 @@ function groups(list, projects) {
 // The project's client (Gestión financiera); else the clients its presupuestos were sent to.
 const clientOf = (g) => g.project?.cliente || [...new Set(g.rows.map((r) => r.client?.name).filter(Boolean))].join(', ');
 
+export const EstadoBadge = ({ estado }) => { const e = ESTADO[estado]; return e ? <Badge bg={e.bg} fg={e.fg} icon={e.icon}>{e.label}</Badge> : null; };
+
 const norm = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 export function ProjectsGrid({ list, projects, onOpenProject, onUnlinked }) {
   const [q, setQ] = useState('');
   const [estado, setEstado] = useState('');
   const all = groups(list, projects);
-  const statuses = [...new Set(all.map((g) => g.project?.status).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
-  const gs = all.filter((g) => (!estado || g.project?.status === estado)
+  const statuses = Object.keys(ESTADO).filter((k) => all.some((g) => g.project?.estado === k));
+  const gs = all.filter((g) => (!estado || g.project?.estado === estado)
     && (!q || norm([g.project?.code, g.project?.name, g.project?.municipio, g.project?.address, g.project?.cliente, ...g.rows.map((r) => r.title), ...g.rows.map((r) => r.client?.name)].join(' ')).includes(norm(q))));
   return (
     <div className="fin-stack">
@@ -71,7 +73,7 @@ export function ProjectsGrid({ list, projects, onOpenProject, onUnlinked }) {
             <label className="fin-field"><span>Estado</span>
               <select value={estado} onChange={(e) => setEstado(e.target.value)}>
                 <option value="">Todos</option>
-                {statuses.map((x) => <option key={x} value={x}>{x}</option>)}
+                {statuses.map((x) => <option key={x} value={x}>{ESTADO[x].label}</option>)}
               </select>
             </label>
           ) : null}
@@ -85,7 +87,7 @@ export function ProjectsGrid({ list, projects, onOpenProject, onUnlinked }) {
                 <span className="fin-muted fin-small">{g.project ? g.project.code || 'Sin código' : 'Pendiente de vincular'}</span>
                 {g.action ? <Badge bg="#FBE0EA" fg="#B84371" icon="ri-error-warning-line">{`${g.action} por hacer`}</Badge>
                   : g.enCurso ? <PhaseBadge phase="en_curso" />
-                    : g.project?.status ? <Badge bg="#EDEDEA" fg="#3A3A38">{g.project.status}</Badge> : null}
+                    : g.project?.estado ? <EstadoBadge estado={g.project.estado} /> : null}
               </span>
               <strong className="obr-card-title">{g.project ? g.project.name : 'Sin proyecto'}</strong>
               {g.project && clientOf(g) ? <span className="obr-card-client"><i className="ri-user-3-line" aria-hidden="true"></i>{clientOf(g)}</span> : null}
@@ -108,28 +110,31 @@ export function ProjectsGrid({ list, projects, onOpenProject, onUnlinked }) {
   );
 }
 
-// «Actualizar avance»: every open project the user may see, with or without
-// presupuestos, each with its obras en curso (button straight into the
-// progress editor). A project closed in Gestión financiera still shows while
-// it has an obra en curso; obras with no project go last. Projects with obras
-// en curso come first, then the rest, newest code first.
-export function AvanceProyectos({ obras, projects, readOnly, panel, onUpdate, onOpenProject }) {
+// «Actualizar avance»: every abierto project the user may see (migration 037),
+// with or without presupuestos, each with its obras: an approved one goes
+// straight into the progress editor (with no start date yet, the first
+// progress saved starts it today); one not approved yet says so and opens its
+// presupuesto. Obras with no project go last. Projects en estudio or cerrado
+// are left out: their progress is not declared.
+export function AvanceProyectos({ rows, projects, readOnly, panel, onUpdate, onOpen, onOpenProject }) {
   const [q, setQ] = useState('');
   const map = new Map();
   for (const pr of projects || []) map.set(pr.id, { project: pr, rows: [] });
-  for (const p of obras) {
+  for (const p of rows) {
+    if (p.parent || p.phase === 'rechazado') continue;
     const k = p.project?.id || '';
     const g = map.get(k) || { project: p.project || null, rows: [] };
     g.rows.push(p);
     map.set(k, g);
   }
   const code = (g) => String(g.project?.code || '');
+  const approved = (p) => ['aprobado', 'en_curso'].includes(p.phase);
   const all = [...map.values()]
-    .filter((g) => g.rows.length || g.project?.open !== false)
-    .sort((a, b) => (!a.project) - (!b.project) || (!a.rows.length) - (!b.rows.length) || code(b).localeCompare(code(a), 'es', { numeric: true }) || String(a.project?.name || '').localeCompare(String(b.project?.name || ''), 'es'));
+    .filter((g) => (g.project && !g.project.missing ? g.project.estado === 'abierto' : g.rows.some(approved)))
+    .sort((a, b) => (!a.project) - (!b.project) || (!a.rows.some(approved)) - (!b.rows.some(approved)) || code(b).localeCompare(code(a), 'es', { numeric: true }) || String(a.project?.name || '').localeCompare(String(b.project?.name || ''), 'es'));
   const gs = all.filter((g) => !q || norm([g.project?.code, g.project?.name, g.project?.municipio, g.project?.address, g.project?.cliente, ...g.rows.map((r) => r.title), ...g.rows.map((r) => r.client?.name)].join(' ')).includes(norm(q)));
   if (!all.length) {
-    return <Empty icon="ri-building-4-line" title="No hay proyectos abiertos" text={panel === 'admin' ? 'Los proyectos abiertos de Gestión financiera aparecen aquí, tengan o no presupuesto.' : 'Aquí verás los proyectos abiertos que tienes asignados y sus obras en curso.'} />;
+    return <Empty icon="ri-building-4-line" title="No hay proyectos abiertos" text={panel === 'admin' ? 'Los proyectos abiertos aparecen aquí, tengan o no presupuesto. Cambia el estado de un proyecto (abierto, en estudio o cerrado) desde su página.' : 'Aquí verás los proyectos abiertos que tienes asignados y sus obras.'} />;
   }
   return (
     <div className="fin-stack">
@@ -140,23 +145,41 @@ export function AvanceProyectos({ obras, projects, readOnly, panel, onUpdate, on
           </label>
         </div>
       ) : null}
-      {gs.length ? gs.map((g) => (
-        <section key={g.project?.id || 'none'} className="fin-stack obr-avance-proj">
-          <div className="obr-avance-head">
-            <div>
-              <span className="fin-muted fin-small">{g.project ? g.project.code || 'Sin código' : 'Pendiente de vincular'}</span>
-              <h3 className="obr-avance-title">{g.project ? g.project.name : 'Obras sin proyecto'}</h3>
-              <span className="fin-muted fin-small">{[g.project?.cliente || [...new Set(g.rows.map((r) => r.client?.name).filter(Boolean))].join(', '), g.project?.municipio].filter(Boolean).join(' · ') || ' '}</span>
+      {gs.length ? gs.map((g) => {
+        const ok = g.rows.filter(approved), waiting = g.rows.filter((p) => !approved(p));
+        return (
+          <section key={g.project?.id || 'none'} className="fin-stack obr-avance-proj">
+            <div className="obr-avance-head">
+              <div>
+                <span className="fin-muted fin-small">{g.project ? g.project.code || 'Sin código' : 'Pendiente de vincular'}</span>
+                <h3 className="obr-avance-title">{g.project ? g.project.name : 'Obras sin proyecto'}</h3>
+                <span className="fin-muted fin-small">{[g.project?.cliente || [...new Set(g.rows.map((r) => r.client?.name).filter(Boolean))].join(', '), g.project?.municipio].filter(Boolean).join(' · ') || ' '}</span>
+              </div>
+              <div className="obr-actions">
+                {g.project?.estado ? <EstadoBadge estado={g.project.estado} /> : null}
+                {g.project && !g.project.missing ? <button type="button" className="fin-btn is-small" onClick={() => onOpenProject(g.project.id)}>Ver proyecto<i className="ri-arrow-right-s-line"></i></button> : null}
+              </div>
             </div>
-            <div className="obr-actions">
-              {g.project?.status ? <Badge bg="#EDEDEA" fg="#3A3A38">{g.project.status}</Badge> : null}
-              {g.project && !g.project.missing ? <button type="button" className="fin-btn is-small" onClick={() => onOpenProject(g.project.id)}>Ver proyecto<i className="ri-arrow-right-s-line"></i></button> : null}
-            </div>
-          </div>
-          {g.rows.length ? <div className="obr-cards">{g.rows.map((p) => <ObraCard key={p.id} p={p} team cta={readOnly ? null : 'Actualizar avance'} onClick={() => onUpdate(p)} />)}</div>
-            : <p className="fin-muted fin-small obr-card-empty"><i className="ri-information-line" aria-hidden="true"></i> Sin obras en curso: una obra aparece aquí cuando su presupuesto está aprobado y tiene fecha de inicio.</p>}
-        </section>
-      )) : <Empty icon="ri-search-line" title="Ningún proyecto coincide" text="Prueba con otro código, nombre o cliente." />}
+            {ok.length ? <div className="obr-cards">{ok.map((p) => <ObraCard key={p.id} p={p} team cta={readOnly ? null : 'Actualizar avance'} onClick={() => onUpdate(p)} />)}</div> : null}
+            {waiting.length ? (
+              <ul className="obr-list">
+                {waiting.map((p) => (
+                  <li key={p.id}>
+                    <button type="button" className="fin-card obr-row" onClick={() => onOpen(p)}>
+                      <span className="obr-row-main">
+                        <strong>{p.title}</strong>
+                        <span className="fin-muted fin-small">{`${p.ref} · el avance se declara cuando el presupuesto está aprobado${panel === 'admin' ? ' (puedes aprobarlo en nombre del cliente)' : ''}`}</span>
+                      </span>
+                      <span className="obr-row-end"><PhaseBadge phase={p.phase} /><i className="ri-arrow-right-s-line" aria-hidden="true"></i></span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {!g.rows.length ? <p className="fin-muted fin-small obr-card-empty"><i className="ri-information-line" aria-hidden="true"></i> Sin presupuestos todavía: una obra aparece aquí en cuanto el proyecto tiene un presupuesto.</p> : null}
+          </section>
+        );
+      }) : <Empty icon="ri-search-line" title="Ningún proyecto coincide" text="Prueba con otro código, nombre o cliente." />}
     </div>
   );
 }
@@ -194,7 +217,7 @@ export function ObraCard({ p, onClick, team, cta }) {
   const started = p.startDate && p.startDate <= new Date().toISOString().slice(0, 10);
   return (
     <button type="button" className="fin-card obr-card" onClick={onClick}>
-      <span className="obr-card-top"><PhaseBadge phase="en_curso" /><span className="fin-muted fin-small">{started ? t.since(fmt(p.startDate)) : t.startsOn(fmt(p.startDate))}</span></span>
+      <span className="obr-card-top"><PhaseBadge phase={p.phase === 'aprobado' ? 'aprobado' : 'en_curso'} /><span className="fin-muted fin-small">{!p.startDate ? t.noStart : started ? t.since(fmt(p.startDate)) : t.startsOn(fmt(p.startDate))}</span></span>
       <strong className="obr-card-title">{p.title}</strong>
       <span className="fin-muted fin-small">{[p.ref, p.address, team ? p.client.name : p.jefe ? t.jefe(p.jefe.name) : null].filter(Boolean).join(' · ')}</span>
       <span className="obr-meter"><span>{t.execution}</span></span>
@@ -214,6 +237,8 @@ const pctOf = (part, whole) => (whole > 0 ? Math.round(part / whole * 1000) / 10
  * ingresos, costes and the latest movements assigned to it. */
 export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBack, onOpen }) {
   const [data, setData] = useState(null);
+  const [estadoBusy, setEstadoBusy] = useState(false);
+  const [estadoError, setEstadoError] = useState('');
   const [error, setError] = useState('');
   const [fin, setFin] = useState(null); // { totales, rows, materiales, trabajadores } | { error }
   const [gantt, setGantt] = useState(false); // Planificación (Gantt) open
@@ -238,6 +263,11 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
   if (gantt) return <Gantt projectId={projectId} readOnly={readOnly} onBack={() => { setGantt(false); load(); }} />;
 
   const { project: pr, kpis: k, presupuestos: rows } = data;
+  const changeEstado = async (estado) => {
+    setEstadoBusy(true); setEstadoError('');
+    try { setData(await api.setEstado(projectId, estado)); } catch (e) { setEstadoError(e.message); }
+    setEstadoBusy(false);
+  };
   const obras = rows.filter((r) => r.phase === 'en_curso');
   const approvedTotal = Number(k.aprobado.total), approvedBase = Number(k.aprobado.base);
   const t = fin?.totales;
@@ -256,6 +286,13 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
           <span className="fin-muted">{[pr.municipio, pr.address, pr.cliente ? `Cliente: ${pr.cliente}` : null, dates].filter(Boolean).join(' · ')}</span>
         </div>
         <div className="obr-actions">
+          {data.can?.setEstado && !readOnly ? (
+            <label className="fin-field obr-estado"><span>Estado del proyecto</span>
+              <select value={pr.estado} disabled={estadoBusy} onChange={(e) => changeEstado(e.target.value)}>
+                {Object.entries(ESTADO).map(([k, e]) => <option key={k} value={k}>{e.label}</option>)}
+              </select>
+            </label>
+          ) : <EstadoBadge estado={pr.estado} />}
           {pr.status ? <Badge bg="#E3E7F3" fg="#3E4D85" icon="ri-building-2-line">{pr.status}</Badge> : null}
           {k.aprobado.n ? <button type="button" className="fin-btn" onClick={() => setGantt(true)}><i className="ri-calendar-schedule-line"></i>Planificación (Gantt)</button> : null}
           {!readOnly && onNew ? <button type="button" className="fin-btn" onClick={() => onNew(pr)}><i className="ri-add-line"></i>Nuevo presupuesto</button> : null}
@@ -263,6 +300,9 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
           {!readOnly && onAgente ? <button type="button" className="fin-btn" onClick={() => onAgente(pr)}><i className="ri-magic-line"></i>Generar con la documentación de la visita</button> : null}
         </div>
       </div>
+
+      {estadoError ? <span className="fin-error-inline">{estadoError}</span> : null}
+      {pr.estado && pr.estado !== 'abierto' ? <p className="fin-warn"><i className="ri-lock-line"></i><span>{`Proyecto ${ESTADO[pr.estado].label.toLowerCase()}: no se declara el avance de sus obras. ${data.can?.setEstado ? 'Ponlo en «Abierto» para declararlo.' : 'Un administrador puede abrirlo.'}`}</span></p> : null}
 
       <h3 className="obr-h3">Presupuestos del proyecto</h3>
       <div className="fin-kpis">

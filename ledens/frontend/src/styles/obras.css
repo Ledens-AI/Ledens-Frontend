@@ -164,6 +164,7 @@
 .obr-avance-proj:first-child { border-top: 0; padding-top: 0; }
 .obr-avance-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .obr-avance-head > div:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.obr-estado { min-width: 160px; margin: 0; }
 .obr .obr-avance-title { font-size: 17px; font-weight: 700; letter-spacing: 0; text-transform: none; color: #0C062B; margin: 0; }
 
 /* Planificación (Gantt) of a project */

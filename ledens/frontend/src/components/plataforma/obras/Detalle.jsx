@@ -73,9 +73,9 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
   const options = v.chapters.flatMap((c) => c.items).filter((i) => i.kind === 'decision' || i.kind === 'opcion');
   const optionalChosen = options.filter((i) => selected.includes(i.id)).reduce((a, i) => a + Number(i.amount), 0);
   // Photos and documents belong to the obra: an approved root presupuesto.
-  // «Clientes» is the team's (jefe asignado or admin) on the root presupuesto; «Ver como» keeps it to read.
+  // «Clientes» and «Jefe de obra» are the team's (jefe asignado or admin) on the root presupuesto; «Ver como» keeps them to read.
   const tabs = [['presupuesto', t.tabBudget], ...(doc.obra ? [['obra', t.tabObra], ['archivos', t.tabFiles]] : []), ['conversacion', t.tabChat(doc.comments.length)],
-    ...(doc.can?.invite ? [['clientes', 'Clientes']] : [])];
+    ...(doc.can?.invite ? [['clientes', 'Clientes'], ['jefe', 'Jefe de obra']] : [])];
 
   return (
     <div className="fin-stack obr">
@@ -91,7 +91,6 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
       </div>
       {doc.can?.linkProject || doc.project ? <ProjectLink doc={doc} canEdit={!!can.linkProject} busy={busy} onOpenProject={onOpenProject}
         onSave={(projectId) => act(() => api.setProject(doc.id, { projectId }), projectId ? 'Obra vinculada al proyecto' : 'Obra desvinculada del proyecto')} error={dialog === null ? dialogError : ''} /> : null}
-      {can.assignJefe ? <JefePicker doc={doc} busy={busy} onSave={(jefeId) => act(() => api.assignJefe(doc.id, { jefeId }), 'Jefe de obra actualizado')} /> : null}
 
       {doc.parent ? <p className="fin-warn"><i className="ri-information-line"></i><span>{t.extensionNoteA}<button type="button" className="fin-link" onClick={() => onOpen?.(doc.parent.id)}>{`${doc.parent.ref} · ${doc.parent.title}`}</button>{t.extensionNoteB}</span></p> : null}
 
@@ -193,7 +192,10 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
 
       {tab === 'archivos' && doc.obra ? <Archivos obraId={doc.id} readOnly={readOnly} toast={toast} /> : null}
 
-      {tab === 'clientes' && doc.can?.invite ? <Clientes obraId={doc.id} readOnly={readOnly} toast={toast} /> : null}
+      {tab === 'clientes' && doc.can?.invite ? <Clientes obraId={doc.id} readOnly={readOnly} toast={toast} onChanged={() => { load(versionId); onChanged?.(); }} /> : null}
+
+      {tab === 'jefe' && doc.can?.invite ? <JefeTab doc={doc} canAssign={!!can.assignJefe} busy={busy} error={dialogError}
+        onSave={(jefeId) => act(() => api.assignJefe(doc.id, { jefeId }), jefeId ? 'Jefe de obra asignado' : 'Obra sin jefe de obra')} /> : null}
 
       {tab === 'conversacion' ? (
         <div className="fin-card">
@@ -365,7 +367,6 @@ function Schedule({ doc, busy, onSave, error }) {
   );
 }
 
-// Admins: who is in charge of the obra (team-only, in Spanish).
 // The project of Gestión financiera the obra belongs to (team only). An
 // ampliación shows the project of its obra and changes with it.
 function ProjectLink({ doc, canEdit, busy, onSave, onOpenProject, error }) {
@@ -401,24 +402,34 @@ function ProjectLink({ doc, canEdit, busy, onSave, onOpenProject, error }) {
   );
 }
 
-function JefePicker({ doc, busy, onSave }) {
-  const [open, setOpen] = useState(false);
+// «Jefe de obra» tab: who runs the obra (and its ampliaciones). Admins assign
+// any jefe de obra or administrador; the assigned jefe sees it. Team only: Spanish.
+function JefeTab({ doc, canAssign, busy, onSave, error }) {
   const [opts, setOpts] = useState(null);
   const [value, setValue] = useState(doc.jefe?.id || '');
-  const [error, setError] = useState('');
-  const show = () => { setOpen(true); setValue(doc.jefe?.id || ''); if (!opts) api.options().then((o) => setOpts(o.jefes), (e) => setError(e.message)); };
-  if (!open) return <div><button type="button" className="fin-btn is-small" onClick={show}><i className="ri-user-settings-line"></i>{doc.jefe ? 'Cambiar jefe de obra' : 'Asignar jefe de obra'}</button></div>;
+  const [loadError, setLoadError] = useState('');
+  useEffect(() => { setValue(doc.jefe?.id || ''); }, [doc.jefe?.id]);
+  useEffect(() => { if (canAssign) api.options().then((o) => setOpts(o.jefes), (e) => setLoadError(e.message)); }, [canAssign]);
   return (
-    <div className="fin-filters">
-      <label className="fin-field"><span>Jefe de obra</span>
-        <select value={value} onChange={(e) => setValue(e.target.value)}>
-          <option value="">{opts ? 'Sin asignar' : 'Cargando…'}</option>
-          {(opts || []).map((j) => <option key={j.id} value={j.id}>{`${j.name} · ${j.email}`}</option>)}
-        </select>
-      </label>
-      <button type="button" className="fin-btn" onClick={() => setOpen(false)} disabled={busy}>Cancelar</button>
-      <button type="button" className="fin-btn is-primary" disabled={busy || !opts} onClick={() => { setOpen(false); onSave(value || null); }}>Guardar</button>
-      {error ? <span className="fin-error-inline">{error}</span> : null}
+    <div className="fin-stack">
+      <div className="fin-card">
+        <div className="fin-card-head"><h2>Jefe de obra</h2></div>
+        <p className="obr-mb">{doc.jefe ? <><strong>{doc.jefe.name}</strong>{doc.jefe.email && doc.jefe.email !== doc.jefe.name ? <span className="fin-muted">{` · ${doc.jefe.email}`}</span> : null}</> : <span className="fin-muted">Esta obra no tiene jefe de obra asignado.</span>}</p>
+        <p className="fin-muted fin-small obr-mb">El jefe de obra ve la obra en su workspace, prepara versiones y ampliaciones, sube fotos y documentos, invita clientes y actualiza el avance. Las ampliaciones siguen al jefe de su obra.</p>
+        {canAssign ? (
+          <div className="fin-filters">
+            <label className="fin-field"><span>{doc.jefe ? 'Cambiar jefe de obra' : 'Asignar jefe de obra'}</span>
+              <select value={value} onChange={(e) => setValue(e.target.value)} disabled={!opts}>
+                <option value="">{opts ? 'Sin asignar' : 'Cargando…'}</option>
+                {(opts || []).map((j) => <option key={j.id} value={j.id}>{`${j.name} · ${j.email}`}</option>)}
+              </select>
+            </label>
+            <button type="button" className="fin-btn is-primary" disabled={busy || !opts || value === (doc.jefe?.id || '')} onClick={() => onSave(value || null)}><i className="ri-user-settings-line"></i>Guardar</button>
+          </div>
+        ) : <p className="fin-muted fin-small">Solo un administrador cambia el jefe de obra.</p>}
+        {canAssign ? <p className="fin-muted fin-small">En la lista salen los usuarios con rol jefe de obra o administrador. Si no ves a la persona, cambia antes su rol en Administración → Usuarios.</p> : null}
+        {loadError || error ? <span className="fin-error-inline">{loadError || error}</span> : null}
+      </div>
     </div>
   );
 }
@@ -453,9 +464,11 @@ function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
     if (!out.length) { setEditing(false); return; }
     onDeclare(out);
   };
-  if (!o.startDate) {
+  // Without a start date the team can still declare: the first progress saved starts the obra today.
+  if (!o.startDate && !can.declare) {
     return <Empty icon="ri-calendar-line" title={t.noStart} text={t.noStartText} />;
   }
+  const estado = doc.project && !doc.project.missing ? doc.project.estado : null;
   // Updating the progress is a team action (Spanish only, like the other team actions).
   const actions = can.declare ? (
     <div className="obr-actions obr-start">
@@ -472,9 +485,11 @@ function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
         <div className="fin-kpi"><span className="fin-kpi-label"><i className="ri-hammer-line"></i>{t.execution}</span><Progress value={o.executionPct} color="#5567AE" /><span className="fin-kpi-hint">{t.executed(eur(o.executedAmount))}</span></div>
         <div className="fin-kpi"><span className="fin-kpi-label"><i className="ri-pie-chart-line"></i>{t.consumed}</span><Progress value={o.consumedPct} color={o.consumedPct > 100 ? '#D14A4A' : '#55A89D'} /><span className="fin-kpi-hint">{t.ofExVat(eur(o.consumed), eur(o.base))}</span></div>
         <Kpi label={t.current} value={eur(o.total)} icon="ri-money-euro-circle-line" hint={t.currentHint(eur(o.base), eur(o.vat), doc.ampliaciones.some((a) => a.phase === 'aprobado'))} />
-        <Kpi label={t.dates} value={fecha(o.startDate)} icon="ri-calendar-line" hint={o.endDate ? t.plannedEnd(fecha(o.endDate)) : t.noEnd} />
+        <Kpi label={t.dates} value={o.startDate ? fecha(o.startDate) : '—'} icon="ri-calendar-line" hint={o.endDate ? t.plannedEnd(fecha(o.endDate)) : t.noEnd} />
       </div>
       <p className="fin-muted fin-small">{t.obraExplain}</p>
+      {!o.startDate ? <p className="fin-warn"><i className="ri-calendar-line"></i><span>La obra aún no tiene fecha de inicio: al guardar el primer avance empieza hoy y el cliente la verá en «Obra en curso». También puedes fijarla en la pestaña «Presupuesto».</span></p> : null}
+      {estado && estado !== 'abierto' && doc.can?.invite ? <p className="fin-warn"><i className="ri-lock-line"></i><span>{`El proyecto está ${estado === 'cerrado' ? 'cerrado' : 'en estudio'}: solo se declara el avance de las obras de proyectos abiertos. Un administrador lo cambia en la página del proyecto.`}</span></p> : null}
       {actions}
       {editing ? <p className="fin-warn"><i className="ri-information-line"></i>Indica el avance de cada partida de 0 a 100 %. Solo se guardan las que cambies, y el cliente lo verá al momento.</p> : null}
       {o.chapters.map((c) => (

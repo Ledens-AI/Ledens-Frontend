@@ -120,8 +120,8 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
     return (
       <div className="fin obr">
         <Head title="Actualizar avance" text="Todos los proyectos abiertos, tengan o no presupuesto. Elige la obra y actualiza el avance de cada partida en %. El cliente lo ve al momento." />
-        <AvanceProyectos obras={obras} projects={projects} readOnly={readOnly} panel={panel}
-          onUpdate={(p) => setOpen({ id: p.id, tab: 'obra', edit: true })} onOpenProject={setProject} />
+        <AvanceProyectos rows={list} projects={projects} readOnly={readOnly} panel={panel}
+          onUpdate={(p) => setOpen({ id: p.id, tab: 'obra', edit: true })} onOpen={(p) => setOpen({ id: p.id })} onOpenProject={setProject} />
       </div>
     );
   }
