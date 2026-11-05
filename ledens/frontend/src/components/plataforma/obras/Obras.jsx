@@ -4,6 +4,7 @@ import { Empty, ErrorBox, Kpi } from '../finanzas/ui.jsx';
 import Detalle, { PhaseBadge, Progress } from './Detalle.jsx';
 import Editor from './Editor.jsx';
 import Propuestas from './Propuestas.jsx';
+import Partidas from './Partidas.jsx';
 import { ObraCard, PresupuestosTable, ProjectsGrid, Proyecto } from './Proyectos.jsx';
 import AgenteForm from './AgenteForm.jsx';
 import AgenteChat from './AgenteChat.jsx';
@@ -50,6 +51,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
   if (importing) return <div className="fin obr"><PdfImport project={importing} toast={toast} onCancel={() => setImporting(null)} onDone={(id) => { setImporting(null); load(); setOpen({ id }); }} /></div>;
   if (agentando) return <div className="fin obr"><AgenteImport project={agentando} toast={toast} onCancel={() => setAgentando(null)} onDone={(id) => { setAgentando(null); load(); setOpen({ id }); }} /></div>;
   if (chatting) return <div className="fin obr"><AgenteChat toast={toast} onCancel={() => setChatting(false)} onDone={(id) => { setChatting(false); load(); setOpen({ id }); }} /></div>;
+  if (screen === 'partidas') return <Partidas toast={toast} readOnly={readOnly} />;
   if (screen === 'propuestas') return <Propuestas toast={toast} readOnly={readOnly} onCount={() => countRef.current?.()} />;
   if (open) {
     return (

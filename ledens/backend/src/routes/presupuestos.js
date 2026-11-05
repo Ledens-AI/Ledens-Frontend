@@ -8,6 +8,7 @@ import { pdfDraft, LayoutOcr } from '../presupuestos/pdf.js';
 import { translatorFromEnv } from '../presupuestos/translate.js';
 import { translateDoc } from '../presupuestos/traducciones.js';
 import { PropuestasService } from '../presupuestos/propuestas.js';
+import { PartidasService } from '../presupuestos/partidas.js';
 import { agenteDraft, agenteFromEnv } from '../presupuestos/agente.js';
 import { agenteChat } from '../presupuestos/agenteChat.js';
 import { getStorage } from '../obras/storage.js';
@@ -76,6 +77,10 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   router.get('/propuestas', handle((req) => propuestas(req).list({ status: req.query.estado || 'pending' })));
   router.post('/propuestas/:pid/aprobar', handle((req) => propuestas(req).approve(req.params.pid, req.body || {})));
   router.post('/propuestas/:pid/rechazar', handle((req) => propuestas(req).reject(req.params.pid, req.body || {})));
+  // The base de partidas (ledens.work_items): admins read and correct it.
+  const partidas = (req) => new PartidasService(pool || getPool(), req.user);
+  router.get('/partidas', handle((req) => partidas(req).list({ q: req.query.q, categoria: req.query.categoria, activa: req.query.activa, page: req.query.pagina })));
+  router.patch('/partidas/:wid', handle((req) => partidas(req).update(req.params.wid, req.body || {})));
   // A project of Gestión financiera with the presupuestos linked to it (team only).
   router.get('/proyectos', handle(async (req) => ({ proyectos: await svc(req).projectsList() })));
   router.get('/proyectos/:projectId', handle((req) => svc(req).projectView(req.params.projectId)));

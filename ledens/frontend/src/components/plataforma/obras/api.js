@@ -87,6 +87,9 @@ export const api = {
   propuestas: (estado) => request('GET', `${base}/propuestas?estado=${encodeURIComponent(estado || 'pending')}`),
   aprobarPropuesta: (id, body) => request('POST', `${base}/propuestas/${id}/aprobar`, body),
   rechazarPropuesta: (id, body) => request('POST', `${base}/propuestas/${id}/rechazar`, body),
+  // The base de partidas (admins; backend: presupuestos/partidas.js).
+  partidas: (params) => request('GET', `${base}/partidas?${new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v !== '' && v != null))}`),
+  guardarPartida: (id, body) => request('PATCH', `${base}/partidas/${id}`, body),
   assignJefe: (id, body) => request('PUT', `${base}/${id}/jefe`, body),
   rename: (id, body) => request('PUT', `${base}/${id}/nombre`, body),
   // Projects of Gestión financiera: the obra's link (team) and a project with its presupuestos.
