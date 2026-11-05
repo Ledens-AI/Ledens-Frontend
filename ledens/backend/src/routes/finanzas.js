@@ -8,6 +8,7 @@ import { FinanzasService, FinError, TYPES, isUuid, DETAIL_MAX_BYTES, ORDER_MAX_F
 import { InvoiceOcr } from '../ingestion/ocr.js';
 import { ProjectsService } from '../finanzas/projects.js';
 import { WorkersService } from '../finanzas/workers.js';
+import { PayablesService } from '../finanzas/payables.js';
 import { traced, RunLogService } from '../logs/runs.js';
 
 // Gestión financiera (/api/finanzas). Internal accounting data: admins and
@@ -18,7 +19,7 @@ export const FINANZAS_ROLES = ['admin', 'jefe'];
 
 // `authenticate` replaces only the session lookup (tests); the role check is
 // always the real one.
-export function createFinanzasRouter({ service, projects, workers, runLogs, authenticate, findUser, origin=process.env.CORS_ORIGIN, ocr } = {}) {
+export function createFinanzasRouter({ service, projects, workers, payables, runLogs, authenticate, findUser, origin=process.env.CORS_ORIGIN, ocr } = {}) {
   const router = Router();
   router.use((_req, res, next) => {
     if (!service && !isDbConfigured()) return res.status(503).json({ error: 'Gestión financiera no disponible todavía' });
@@ -305,6 +306,46 @@ export function createFinanzasRouter({ service, projects, workers, runLogs, auth
   router.put('/gestion-trabajadores/:id/estado', traced('trabajadores', 'Baja o reactivación', { entity: (req) => ({ type: 'trabajador', id: req.params.id }), summary: (b) => ({ message: b.worker?.activo ? 'Reactivado' : 'Dado de baja' }) })(async (req, res) => {
     const b = req.body || {};
     res.json({ worker: await workersSvc(req).setActive(req.params.id, { activo: b.activo, version: b.version, reason: b.reason }) });
+  }));
+
+  // Cuentas por pagar (admins): the jornales generated day by day and the manual
+  // payables. Every read first generates the jornales of the days already past.
+  const payablesSvc = (req) => payables || new PayablesService(getPool(), req.user);
+  const cxp = (step, message) => traced('cuentas_por_pagar', step, { summary: (b) => ({ message: message(b) }) });
+  router.get('/cuentas-por-pagar', handle(async (req, res) => {
+    const q = req.query;
+    res.json(await payablesSvc(req).list({ estado: q.estado ?? 'pendiente', origen: q.origen || '', trabajador: q.trabajador || '', proyecto: q.proyecto || '',
+      desde: q.desde || '', hasta: q.hasta || '', q: q.q || '', page: q.pagina, pageSize: q.tam }));
+  }));
+  router.get('/cuentas-por-pagar/opciones', handle(async (req, res) => { res.json(await payablesSvc(req).options()); }));
+  // ?desde=YYYY-MM-DD (any day of the week / month) &periodo=semana|mes
+  router.get('/cuentas-por-pagar/jornales', handle(async (req, res) => {
+    res.json(await payablesSvc(req).grid({ desde: req.query.desde || '', periodo: req.query.periodo || 'semana' }));
+  }));
+  // { items: [{ employeeId, date, works: true | false | null }] }
+  router.put('/cuentas-por-pagar/asistencia', cxp('Asistencia', (b) => `${b.updated} días · ${b.generated} jornales generados · ${b.annulled} anulados`)(async (req, res) => {
+    res.json(await payablesSvc(req).setAttendance(req.body?.items));
+  }));
+  // { frequency?: 'semanal' | 'mensual', accrues?: boolean }
+  router.put('/cuentas-por-pagar/trabajadores/:id/ajustes', cxp('Ajustes de pago', (b) => (b.changed ? 'Cambios guardados' : 'Sin cambios'))(async (req, res) => {
+    const b = req.body || {};
+    res.json(await payablesSvc(req).setSettings(req.params.id, { frequency: b.frequency, accrues: b.accrues }));
+  }));
+  // { ids, status: 'pagada' | 'pendiente' | 'anulada', paidOn? }
+  router.post('/cuentas-por-pagar/estado', cxp('Cambio de estado', (b) => `${b.updated} ${b.status === 'pagada' ? 'pagadas' : b.status === 'anulada' ? 'anuladas' : 'pendientes'} · ${b.importe} €`)(async (req, res) => {
+    const b = req.body || {};
+    res.json(await payablesSvc(req).setStatus({ ids: b.ids, status: b.status, paidOn: b.paidOn || undefined }));
+  }));
+  // { ids, projectId | null }
+  router.post('/cuentas-por-pagar/proyecto', cxp('Imputación a proyecto', (b) => `${b.updated} imputadas`)(async (req, res) => {
+    const b = req.body || {};
+    res.json(await payablesSvc(req).setProject({ ids: b.ids, projectId: b.projectId ?? null }));
+  }));
+  router.post('/cuentas-por-pagar', cxp('Alta manual', (b) => 'Alta: ' + (b.payable?.concept || ''))(async (req, res) => {
+    res.status(201).json({ payable: await payablesSvc(req).create(req.body || {}) });
+  }));
+  router.put('/cuentas-por-pagar/:id', cxp('Edición', (b) => (b.payable?.changed ? 'Cambios guardados' : 'Sin cambios'))(async (req, res) => {
+    res.json({ payable: await payablesSvc(req).update(req.params.id, req.body || {}) });
   }));
 
   // Logs de transacciones (admins). RunLogService errors carry an HTTP status.
