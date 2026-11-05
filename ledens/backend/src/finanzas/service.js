@@ -444,29 +444,41 @@ export class FinanzasService {
   return {proyectos:projects,totales:{movimientos:t.n,ingresos:t.ingresos,costes:t.costes,resultado:t.resultado},rows,total:t.n,page,pageSize};
  }
  // ------------------------------------------------------------- movimientos conciliados
- // Every record behind a reconciled movement (confirmed Bridge link of its
- // document, or the movement itself), with how it is classified. Admin, like the inbox.
- async reconciled({page=1,pageSize=25,q='',clase='',from='',to=''}={}){
+ // One row per reconciled movement (bank or cash), never split into its concepts:
+ // the documents it is reconciled with (confirmed Bridge links, else the documents
+ // of its own records), its class as «Concepto de movimientos» concludes it, and
+ // whether everything it registered is assigned to a project. Every reconciled
+ // movement has to be: `proyecto_estado` says when one is not, and `resumen`
+ // counts them. Admin, like the inbox.
+ async reconciled({page=1,pageSize=25,q='',clase='',proyecto='',from='',to=''}={}){
   if(this.user.role!=='admin')throw new FinError(403,'Los movimientos conciliados requieren administrador');
   const size=Math.min(100,Math.max(1,Number(pageSize)||25)),p=Math.max(1,Math.min(4000,Number(page)||1));
-  const params=[...this.params(),'%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',tercero,concepto,numerodocumento,movimiento) ILIKE $3"];
-  if(clase){if(![...Object.keys(CLASES),'sin_clasificar','otros'].includes(clase))throw new FinError(400,'Clasificación no válida');params.push(clase);where.push('clase=$'+params.length);}
-  for(const [v,op] of [[from,'>='],[to,'<=']])if(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v)))throw new FinError(400,'Fecha no válida');params.push(v);where.push('fecha_movimiento '+op+' $'+params.length+'::date');}
-  const sql=BASE+`, rec AS(SELECT l.*,${CLASE_SQL} clase,mv.fecha_movimiento,mv.movimiento,mv.origin,mv.pago,
-    CASE WHEN l.type='cliente' OR l.doc_tipo='Cobrar' THEN 'cobro' WHEN l.doc_tipo='Pagar' OR l.type IN ('material','trabajador') THEN 'pago'
-     WHEN mv.pago THEN 'pago' ELSE 'cobro' END sentido
-    FROM listed l JOIN LATERAL(SELECT count(*)::int n,max(t.occurred_on) fecha_movimiento,bool_or(t.amount<0) pago,
-     string_agg(DISTINCT coalesce(t.concept,t.source_id),' · ') movimiento,string_agg(DISTINCT t.origin,',') origin FROM ledens.treasury_movements t
-     WHERE CASE t.origin WHEN 'bank_movements' THEN t.id=l.bank_movement_id
-       OR t.id IN(SELECT a.bank_movement_id FROM ledens.bank_document_allocations a WHERE a.document_id=l.document_id AND a.state='Confirmado')
-      ELSE (l.type='material' AND t.material_id=l.id) OR (l.type='cliente' AND t.customer_payment_id=l.id)
-       OR (l.type='trabajador' AND EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb JOIN ledens.worker_payment_splits ws ON ws.batch_id=wb.id
-        WHERE wb.cash_movement_id=t.id AND ws.worker_payment_id=l.id)) END) mv ON mv.n>0)
-   SELECT record_id,type,version,category,clase,sentido,accounting_status,fecha,importe,tercero,concepto,numerodocumento,line_number,project_label,parts,estado,
-    fecha_movimiento::text fecha_movimiento,movimiento,origin FROM rec WHERE `+where.join(' AND ');
-  const rows=(await this.query(sql+` ORDER BY fecha_movimiento DESC NULLS LAST,numerodocumento,line_number NULLS FIRST,record_id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows;
-  const total=(await this.query('SELECT count(*)::int n FROM ('+sql+') x',params)).rows[0].n;
-  return {rows,total,page:p,pageSize:size};
+  const params=['%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',tercero,concepto,referencia,documentos,array_to_string(proyectos,' ')) ILIKE $1"];
+  for(const [v,op] of [[from,'>='],[to,'<=']])if(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v)))throw new FinError(400,'Fecha no válida');params.push(v);where.push('fecha '+op+' $'+params.length+'::date');}
+  const sql=(await this.movementsSql())+`,
+ asig AS(SELECT r.mov,count(*) FILTER(WHERE abs(f.gross_amount)>coalesce(u.used,0))::int sin_proyecto,
+   string_agg(DISTINCT d.numerodocumento,', ') docs_registros FROM recs r JOIN ledens.financial_records f ON f.id=r.id
+   LEFT JOIN ledens.documents d ON d.id=f.document_id
+   LEFT JOIN LATERAL(SELECT sum(abs(pa.allocated_amount)) used FROM ledens.project_financial_allocations pa WHERE pa.record_id=r.id) u ON true GROUP BY r.mov),
+ projs AS(SELECT x.mov,array_agg(DISTINCT concat_ws(' · ',nullif(btrim(pr.project_id),''),nullif(btrim(pr.name),''))) proyectos
+   FROM (SELECT DISTINCT mov,id FROM recs) x JOIN ledens.project_financial_allocations pa ON pa.record_id=x.id JOIN ledens.projects pr ON pr.id=pa.project_id GROUP BY x.mov),
+ conc AS(SELECT fin.id,fin.tipo,fin.origin,fin.fecha,fin.tercero,fin.concepto,fin.referencia,fin.importe,coalesce(fin.documentos,a.docs_registros) documentos,
+   fin.clase,fin.conocidas,fin.sentido,fin.version,fin.registros,fin.lote,fin.obramat,fin.propia,fin.n_docs,
+   CASE WHEN fin.transferencia THEN 'transferencia' WHEN fin.obramat AND fin.solo_compras THEN 'compra_obramat' WHEN fin.devolucion_anticipo THEN 'devolucion_anticipo'
+    WHEN fin.provisional THEN 'provisional' WHEN fin.reembolso THEN 'registro' WHEN fin.n_docs>0 THEN 'bridge' WHEN fin.lote THEN 'trabajadores' WHEN fin.registros>0 THEN 'registro' ELSE 'ninguno' END origen,
+   coalesce(a.sin_proyecto,0) sin_proyecto,coalesce(pj.proyectos,'{}'::text[]) proyectos,
+   CASE WHEN fin.registros=0 THEN 'sin_registros' WHEN coalesce(a.sin_proyecto,0)=0 THEN 'asignado' WHEN pj.proyectos IS NOT NULL THEN 'parcial' ELSE 'sin_proyecto' END proyecto_estado
+  FROM fin LEFT JOIN asig a ON a.mov=fin.id LEFT JOIN projs pj ON pj.mov=fin.id WHERE fin.n_docs>0 OR fin.registros>0)
+ SELECT id,tipo,origin,fecha::text fecha,tercero,concepto,referencia,importe::text importe,documentos,clase,conocidas,sentido,version,registros,lote,obramat,propia,origen,
+  sin_proyecto,proyectos,proyecto_estado FROM conc WHERE `;
+  const base=where.join(' AND ');
+  const t=(await this.query(`SELECT count(*)::int n,count(*) FILTER(WHERE proyecto_estado<>'asignado')::int sin_proyecto FROM (${sql}${base}) x`,params)).rows[0];
+  if(clase){if(!MOVEMENT_CLASSES.includes(clase))throw new FinError(400,'Clasificación no válida');params.push(clase);where.push('clase=$'+params.length);}
+  if(proyecto){if(!['asignado','sin_proyecto'].includes(proyecto))throw new FinError(400,'Filtro de proyecto no válido');where.push(proyecto==='asignado'?"proyecto_estado='asignado'":"proyecto_estado<>'asignado'");}
+  const filtered=sql+where.join(' AND ');
+  const rows=(await this.query(filtered+` ORDER BY fecha DESC NULLS LAST,id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows;
+  const total=(await this.query('SELECT count(*)::int n FROM ('+filtered+') x',params)).rows[0].n;
+  return {rows,total,resumen:{movimientos:t.n,sin_proyecto:t.sin_proyecto},page:p,pageSize:size};
  }
  async reclassify({recordId,clase,version,reason}={}){
   if(this.user.role!=='admin')throw new FinError(403,'Cambiar la clasificación requiere administrador');
