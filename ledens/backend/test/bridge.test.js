@@ -94,3 +94,16 @@ test('corroborated supplier may match without inflating its low raw field confid
  await db.query('UPDATE ledens.invoice_ingestions SET party_evidence=$2 WHERE document_id=$1',[d,JSON.stringify({...evidence,tax_id:'B00000000'})]);assert.equal((await service.evaluate(d,{force:true})).status,'pending');
  await db.query('UPDATE ledens.invoice_ingestions SET party_evidence=$2 WHERE document_id=$1',[d,JSON.stringify(evidence)]);assert.equal((await service.evaluate(d,{force:true})).status,'matched');assert.equal(Number((await db.query('SELECT party_confidence FROM ledens.invoice_ingestions WHERE document_id=$1',[d])).rows[0].party_confidence),.481);
 });
+test('a movement the import left without currency takes its account\'s, else EUR; never one whose account is in another currency',async()=>{
+ const account=async c=>(await db.query('INSERT INTO ledens.bank_accounts(name,currency) VALUES($1,$1) RETURNING id',[c])).rows[0].id;
+ const eur=await account('EUR'),usd=await account('USD');
+ const noCurrency=async(reference,total,acc)=>(await db.query("INSERT INTO ledens.bank_movements(amount,total_amount,state,type,completed_on,currency,reference,beneficiary_name,is_internal_transfer,bank_account_id) VALUES($1,$1,'COMPLETED','TRANSFER','2025-09-02',NULL,$2,'Proveedor Ejemplo',false,$3) RETURNING id",[total,reference,acc])).rows[0].id;
+ const linked=async d=>(await db.query('SELECT bank_movement_id FROM ledens.bank_document_allocations WHERE document_id=$1',[d])).rows[0]?.bank_movement_id;
+ const d1=await document('TEST-CUR-EUR','-60.18'),b1=await noCurrency('TEST-CUR-EUR','-60.18',eur);
+ assert.equal((await service.evaluate(d1,{force:true})).status,'matched');assert.equal(await linked(d1),b1);
+ assert.equal((await db.query('SELECT currency FROM ledens.bank_movements WHERE id=$1',[b1])).rows[0].currency,null,'the imported row is never written');
+ const d2=await document('TEST-CUR-USD','-60.19');await noCurrency('TEST-CUR-USD','-60.19',usd);
+ assert.notEqual((await service.evaluate(d2,{force:true})).status,'matched');assert.equal(await linked(d2),undefined);
+ const d3=await document('TEST-CUR-NONE','-60.20'),b3=await noCurrency('TEST-CUR-NONE','-60.20',null);
+ assert.equal((await service.evaluate(d3,{force:true})).status,'matched');assert.equal(await linked(d3),b3);
+});

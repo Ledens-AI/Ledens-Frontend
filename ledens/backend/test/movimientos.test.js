@@ -111,7 +111,8 @@ test('«Asignar documento» says why a bank movement cannot take a document; one
  const again=(await asAdmin().reconciliation({pageSize:100})).rows;
  const ok=again.find(x=>x.id===sinDivisa).bank;
  assert.deepEqual([ok.currency,ok.bloqueo],['EUR',null],'no currency: the account\'s EUR, so «Asignar documento» is enabled');
- assert.match(again.find(x=>x.id===huerfano).bank.bloqueo,/ni de qué cuenta/);
+ const orphan=again.find(x=>x.id===huerfano).bank;
+ assert.deepEqual([orphan.currency,orphan.bloqueo],['EUR',null],'no currency and no account (FactMovimientosBancarios): EUR');
  await db.query('DELETE FROM ledens.bank_movements WHERE id=ANY($1::uuid[])',[[sinDivisa,huerfano]]);
  assert.equal(find(revertido),undefined,'a reverted movement never moved money: nothing to reconcile');
  await db.query('DELETE FROM ledens.bank_movements WHERE id=ANY($1::uuid[])',[[pendiente,revertido,usd,sinEstado]]);
