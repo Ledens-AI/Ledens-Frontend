@@ -158,3 +158,10 @@
 .obr-chat-msg.is-user { align-self: flex-end; background: #3E4D85; color: #fff; }
 .obr-chat-msg.is-agent { align-self: flex-start; background: #F1F2F6; color: #0C062B; }
 .obr-chat-input { flex: 1 1 auto; font: inherit; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(12,6,43,0.12); }
+
+/* «Actualizar avance»: one block per open project */
+.obr-avance-proj { padding-top: 14px; border-top: 1px solid #E6E6E1; }
+.obr-avance-proj:first-child { border-top: 0; padding-top: 0; }
+.obr-avance-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.obr-avance-head > div:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.obr-avance-title { font-size: 16px; font-weight: 700; margin: 0; }

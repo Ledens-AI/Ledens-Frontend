@@ -107,6 +107,59 @@ export function ProjectsGrid({ list, projects, onOpenProject, onUnlinked }) {
   );
 }
 
+// «Actualizar avance»: every open project the user may see, with or without
+// presupuestos, each with its obras en curso (button straight into the
+// progress editor). A project closed in Gestión financiera still shows while
+// it has an obra en curso; obras with no project go last. Projects with obras
+// en curso come first, then the rest, newest code first.
+export function AvanceProyectos({ obras, projects, readOnly, panel, onUpdate, onOpenProject }) {
+  const [q, setQ] = useState('');
+  const map = new Map();
+  for (const pr of projects || []) map.set(pr.id, { project: pr, rows: [] });
+  for (const p of obras) {
+    const k = p.project?.id || '';
+    const g = map.get(k) || { project: p.project || null, rows: [] };
+    g.rows.push(p);
+    map.set(k, g);
+  }
+  const code = (g) => String(g.project?.code || '');
+  const all = [...map.values()]
+    .filter((g) => g.rows.length || g.project?.open !== false)
+    .sort((a, b) => (!a.project) - (!b.project) || (!a.rows.length) - (!b.rows.length) || code(b).localeCompare(code(a), 'es', { numeric: true }) || String(a.project?.name || '').localeCompare(String(b.project?.name || ''), 'es'));
+  const gs = all.filter((g) => !q || norm([g.project?.code, g.project?.name, g.project?.municipio, g.project?.address, g.project?.cliente, ...g.rows.map((r) => r.title), ...g.rows.map((r) => r.client?.name)].join(' ')).includes(norm(q)));
+  if (!all.length) {
+    return <Empty icon="ri-building-4-line" title="No hay proyectos abiertos" text={panel === 'admin' ? 'Los proyectos abiertos de Gestión financiera aparecen aquí, tengan o no presupuesto.' : 'Aquí verás los proyectos abiertos que tienes asignados y sus obras en curso.'} />;
+  }
+  return (
+    <div className="fin-stack">
+      {all.length > 6 ? (
+        <div className="fin-filters">
+          <label className="fin-field obr-grow"><span>Buscar proyecto</span>
+            <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Código, nombre, municipio, cliente u obra…" />
+          </label>
+        </div>
+      ) : null}
+      {gs.length ? gs.map((g) => (
+        <section key={g.project?.id || 'none'} className="fin-stack obr-avance-proj">
+          <div className="obr-avance-head">
+            <div>
+              <span className="fin-muted fin-small">{g.project ? g.project.code || 'Sin código' : 'Pendiente de vincular'}</span>
+              <h3 className="obr-avance-title">{g.project ? g.project.name : 'Obras sin proyecto'}</h3>
+              <span className="fin-muted fin-small">{[g.project?.cliente || [...new Set(g.rows.map((r) => r.client?.name).filter(Boolean))].join(', '), g.project?.municipio].filter(Boolean).join(' · ') || ' '}</span>
+            </div>
+            <div className="obr-actions">
+              {g.project?.status ? <Badge bg="#EDEDEA" fg="#3A3A38">{g.project.status}</Badge> : null}
+              {g.project && !g.project.missing ? <button type="button" className="fin-btn is-small" onClick={() => onOpenProject(g.project.id)}>Ver proyecto<i className="ri-arrow-right-s-line"></i></button> : null}
+            </div>
+          </div>
+          {g.rows.length ? <div className="obr-cards">{g.rows.map((p) => <ObraCard key={p.id} p={p} team cta={readOnly ? null : 'Actualizar avance'} onClick={() => onUpdate(p)} />)}</div>
+            : <p className="fin-muted fin-small obr-card-empty"><i className="ri-information-line" aria-hidden="true"></i> Sin obras en curso: una obra aparece aquí cuando su presupuesto está aprobado y tiene fecha de inicio.</p>}
+        </section>
+      )) : <Empty icon="ri-search-line" title="Ningún proyecto coincide" text="Prueba con otro código, nombre o cliente." />}
+    </div>
+  );
+}
+
 // The team's table of presupuestos (the project column is left out inside a project).
 export function PresupuestosTable({ rows, onOpen, showProject = true }) {
   const open = (p) => () => onOpen(p, p.phase === 'en_curso' ? 'obra' : undefined);
