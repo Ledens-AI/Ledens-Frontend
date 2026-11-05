@@ -45,7 +45,20 @@ const TREASURY_CANDIDATES=`candidates AS(SELECT x.id,CASE x.origin WHEN 'bank_mo
  WHERE x.validable AND CASE x.origin
   WHEN 'bank_movements' THEN NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=x.id)
    AND NOT EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=x.id) AND NOT x.marked_transfer
-  ELSE x.assigned_to IS NULL AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=x.id) END)`;
+  ELSE x.assigned_to IS NULL AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=x.id) END
+  AND NOT (x.origin='bank_movements' AND upper(coalesce(x.state,'')) IN ('REVERTED','DECLINED','FAILED','CANCELLED','CANCELED')))`;
+// Why «Asignar documento» cannot link a bank movement (the Bridge only takes
+// completed EUR movements with an amount left), in words for the screen.
+export function bankLinkBlock(b,remaining){
+ // Same test as the Bridge's confirm (bridge/service.js), so the button never offers what it refuses.
+ if(b.state!=='COMPLETED')return String(b.state??'').toUpperCase()==='PENDING'
+  ?'El banco aún no ha completado este movimiento (pendiente). Podrás asignarle un documento en cuanto se complete.'
+  :`El banco no ha completado este movimiento (estado ${b.state==null||b.state===''?'sin informar':b.state}). Solo se concilian movimientos completados.`;
+ if(b.currency!=='EUR')return `El movimiento está en ${b.currency||'una divisa sin informar'}: solo se concilian movimientos en euros.`;
+ if(b.is_internal_transfer===true)return 'Es una transferencia entre cuentas de la empresa: no lleva documento.';
+ if(Number(remaining)===0)return 'Ya está conciliado por completo.';
+ return null;
+}
 const CASH_TARGETS={trabajadores:'pago',materiales:'pago',clientes:'cobro'};
 const SCOPE=`($1 OR (NOT EXISTS(SELECT 1 FROM ledens.project_financial_allocations ax WHERE ax.record_id=f.id AND NOT EXISTS
  (SELECT 1 FROM ledens.finance_project_permissions fp WHERE fp.user_id=$2 AND fp.project_id=ax.project_id)) AND
@@ -526,7 +539,7 @@ export class FinanzasService {
   if(ids.length){
    const banks=new Map((await this.query('SELECT * FROM ledens.bank_movements WHERE id=ANY($1::uuid[])',[ids])).rows.map(b=>[b.id,b]));
    for(const r of rows){const b=r.type==='movimiento'&&banks.get(r.id);if(b)r.bank={id:b.id,description:b.description,reference:b.reference,total_amount:String(b.total_amount),
-    remaining:r.por_conciliar,state:b.state,currency:b.currency,bank_fingerprint:bankFingerprint(b)};}
+    remaining:r.por_conciliar,state:b.state,currency:b.currency,bank_fingerprint:bankFingerprint(b),bloqueo:bankLinkBlock(b,r.por_conciliar)};}
   }
   return {rows,total,page:p,pageSize:size};
  }

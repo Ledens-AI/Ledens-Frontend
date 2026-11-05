@@ -50,7 +50,10 @@ export default function Conciliacion({ toast,go,onChanged }) {
   // Bank movement whose «Asignar documento» panel is open (Bridge, inline).
   const [linking,setLinking]=useState(null);
   useEffect(()=>{setLinking(null);},[data]);
-  const canLink=(r)=>r.bank&&r.bank.state==='COMPLETED'&&r.bank.currency==='EUR'&&Number(r.bank.remaining)!==0;
+  // The backend says why a bank movement cannot take a document (bank.bloqueo); older answers fall back to the same rule.
+  const blocked=(r)=>r.bank&&(r.bank.bloqueo!==undefined?r.bank.bloqueo
+    :r.bank.state!=='COMPLETED'||r.bank.currency!=='EUR'||Number(r.bank.remaining)===0?'El movimiento debe estar completado, en euros y con importe pendiente.':null);
+  const canLink=(r)=>Boolean(r.bank)&&!blocked(r);
   const linked=()=>{setLinking(null);setReload(n=>n+1);onChanged?.();toast?.('Conciliación guardada. Los importes restantes siguen pendientes.');};
   const drop=(id)=>{setData(d=>d&&({...d,total:Math.max(0,d.total-1),rows:d.rows.filter(r=>r.id!==id)}));setSelected(s=>{const n=new Set(s);n.delete(id);return n;});};
   const removeCash=async(r)=>{
@@ -126,7 +129,8 @@ export default function Conciliacion({ toast,go,onChanged }) {
             <button type="button" className="fin-btn" onClick={()=>setAssigning(r)}>Asignar</button>
             {r.importado?<button type="button" className="fin-iconbtn" title="Descartar efectivo importado" aria-label="Descartar efectivo importado" onClick={()=>discardCash(r)}><i className="ri-close-circle-line"></i></button>
             :<button type="button" className="fin-iconbtn" title="Eliminar efectivo" aria-label="Eliminar efectivo" onClick={()=>removeCash(r)}><i className="ri-delete-bin-line"></i></button>}
-          </div>:r.bank?<button type="button" className="fin-btn" disabled={!canLink(r)} title={canLink(r)?undefined:'El movimiento debe estar completado, en euros y con importe pendiente'} aria-expanded={linking===r.id} onClick={()=>setLinking(linking===r.id?null:r.id)}>Asignar documento</button>:null}</td>
+          </div>:r.bank?<><button type="button" className="fin-btn" disabled={!canLink(r)} title={blocked(r)||undefined} aria-describedby={blocked(r)?'bloqueo-'+r.id:undefined} aria-expanded={linking===r.id} onClick={()=>setLinking(linking===r.id?null:r.id)}>Asignar documento</button>
+            {blocked(r)?<div id={'bloqueo-'+r.id} className="fin-muted fin-small">{blocked(r)}</div>:null}</>:null}</td>
         </tr>{linking===r.id&&r.bank?<tr><td colSpan={12}><Assignment bank={r.bank} onSaved={linked} onCancel={()=>setLinking(null)} onConflict={m=>{setLinking(null);setReload(n=>n+1);onChanged?.();toast?.(m+' Selecciona de nuevo el movimiento y el documento.');}} /></td></tr>:null}</React.Fragment>)}</tbody>
       </table></div><Pager page={page} pageSize={25} total={data.total} onPage={setPage} /></>:null}
     </div>
