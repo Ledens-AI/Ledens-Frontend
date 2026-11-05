@@ -184,8 +184,6 @@ const number=s=>String(s||'').replace(/[^0-9A-Z]/gi,'').toUpperCase();
 const supplierWord=s=>(String(s||'').match(/[A-Za-zÀ-ÿ]{4,}/)||[''])[0];
 const DETAIL_TYPES=[['application/pdf',b=>b.subarray(0,5).toString()==='%PDF-'],['image/png',b=>b.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))],
  ['image/jpeg',b=>b[0]===255&&b[1]===216&&b[2]===255]];
-// A supplier refund record: a material registered from a bank receipt (negative cost, no document).
-const isRefund=r=>r.type==='material'&&!r.document_id&&Boolean(r.bank_movement_id)&&cents(r.importe)<0n;
 const hasTransfers=async c=>Boolean((await c.query("SELECT to_regclass('ledens.internal_transfers') name")).rows[0].name);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const labels={work_period:'Periodo trabajado',reclassified:'Cambio de clasificación',replace_allocations:'Asignación a proyecto',recognition:'Validación contable',review_flag:'Revisión',source_changed:'Origen actualizado',document_changed:'Factura actualizada'};
@@ -352,28 +350,16 @@ export class FinanzasService {
   return {...r,typeLabel:TYPES[type].label,documento,movimiento,purchaseSettlement,distribucion:r.project_id?[]:full.allocations.map(a=>({project_id:a.project_id,label:a.project_name,amount:a.allocated_amount})),historial:await this.history(type,id),suggestion};
  }
  reason(r,reason,version){if(r.version===version&&(r.project_id||r.parts)&&(!reason||reason.trim().length<5))throw new FinError(400,'Escribe un motivo de al menos cinco caracteres');return reason?.trim()||'Asignación confirmada en gestión financiera';}
- // Assigning a record to an obra needs the concepts of every document reconciled
- // with its movement (its own bank movement, or the movements of its document):
- // this is where a document without concepts is reported, never when the
- // movement is classified in Concepto de movimientos.
- async missingConcepts(c,{bankMovementId=null,documentId=null,refund=false}){
-  // A supplier refund is registered from the movement itself and never uses its
-  // credit note's concepts (they are excluded on purpose, refund_replaced).
-  if(refund)return;
-  const d=(await c.query(`SELECT d.numerodocumento FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id
-   WHERE a.state='Confirmado' AND (a.bank_movement_id=$1 OR a.bank_movement_id IN(SELECT bank_movement_id FROM ledens.bank_document_allocations WHERE document_id=$2 AND state='Confirmado'))
-    AND NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded')
-   ORDER BY d.numerodocumento LIMIT 1`,[bankMovementId,documentId])).rows[0];
-  if(d)throw new FinError(409,`El documento ${d.numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta (o adjunta su detalle con «Segregar conceptos») antes de asignarlo a una obra`);
- }
+ // A document reconciled without concepts never blocks assigning a record to an
+ // obra: the provisional material keeps the obra and passes it to the concepts
+ // when they replace it (029, carried_project_id). It is reported only by
+ // «Segregar conceptos» (segregateMaterial).
  async assign({type,id,projectId,version,requestId,reason}){
   const r=await this.source(type,id);if(!Number.isInteger(version)||!uuid(requestId))throw new FinError(400,'Recarga el registro antes de asignarlo');
-  if(projectId!==null)await this.missingConcepts(this.pool,{bankMovementId:r.bank_movement_id,documentId:r.document_id,refund:isRefund(r)});
   await this.finance.bulk(this.user,{request_id:requestId,reason:this.reason(r,reason,version),records:[{record_id:r.record_id,version,allocations:projectId===null?[]:[{project_id:projectId,amount:r.importe}]}]});return {changed:true};
  }
  async distribute({type,id,parts,version,requestId,reason}){
   const r=await this.source(type,id);if(!Array.isArray(parts)||!parts.length||!Number.isInteger(version)||!uuid(requestId))throw new FinError(400,'Distribución no válida; recarga el registro');
-  await this.missingConcepts(this.pool,{bankMovementId:r.bank_movement_id,documentId:r.document_id,refund:isRefund(r)});
   await this.finance.bulk(this.user,{request_id:requestId,reason:this.reason(r,reason,version),records:[{record_id:r.record_id,version,allocations:parts.map(p=>({project_id:p.projectId,amount:p.amount}))}]});
   return {changed:true,exact:parts.reduce((s,p)=>s+cents(p.amount),0n)===cents(r.importe)};
  }
@@ -802,8 +788,7 @@ export class FinanzasService {
    // with nothing registered the movement enters through its usual flow (a
    // provisional material that waits for every invoice, 029; a worker batch; a
    // client receipt; a refund), and with records those are classified. What the
-   // document lacks is reported when its record is assigned to an obra
-   // (missingConcepts).
+   // document lacks is reported only by «Segregar conceptos».
    // A supplier refund is registered as a material from the movement itself. A
    // receipt that already has records (its reconciled document, a client receipt)
    // keeps them: those records carry the sign of revenue, so turning them into
@@ -1629,7 +1614,6 @@ export class FinanzasService {
       JOIN ledens.worker_payment_batches b ON b.id=s.batch_id LEFT JOIN ledens.bank_movements m ON m.id=b.bank_movement_id WHERE s.id=$1 FOR UPDATE OF s`,[it.splitId])).rows[0];
      if(!s)throw new FinError(404,'Pago no encontrado');
      if(s.worker_payment_id)throw new FinError(409,'Este pago ya está guardado');
-     if(s.bank_movement_id)await this.missingConcepts(c,{bankMovementId:s.bank_movement_id});
      const e=(await c.query('SELECT id,name FROM ledens.employees WHERE id=$1',[it.employeeId])).rows[0];
      if(!e)throw new FinError(400,'Trabajador no encontrado');
      const w=(await c.query(`INSERT INTO ledens.worker_payments(amount,occurred_on,bank_movement_id,employee_id,empleado)
