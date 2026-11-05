@@ -1289,13 +1289,38 @@ export class FinanzasService {
   if(!lines.length)throw new FinError(422,'No se han encontrado productos en el documento adjunto');
   return lines;
  }
+ // A transient answer (429 rate limit of the free tier, 5xx, network) never ends the
+ // read on its own: it waits (Retry-After when given) and tries again until the
+ // deadline, and polls slow down as the read goes on so they use few calls.
  async ocrResult(content,type,ocr,{timeoutMs,pollMs}){
-  let result;
-  try{
-   const url=await ocr.start(content,type),until=Date.now()+timeoutMs;
-   for(;;){result=await ocr.poll(url);if(!['running','notStarted'].includes(result.status))break;
-    if(Date.now()>until)throw new FinError(504,'El lector tarda más de lo normal; inténtalo de nuevo en un momento');await sleep(pollMs);}
-  }catch(e){if(e instanceof FinError)throw e;throw new FinError(e.transient===false?422:503,e.transient===false?'El lector no ha podido procesar el archivo':'El lector de documentos no está disponible; inténtalo de nuevo en un momento');}
+  const until=Date.now()+timeoutMs;let last=null;
+  const retry=async(fn)=>{
+   for(;;){
+    try{return await fn();}
+    catch(e){
+     if(e instanceof FinError)throw e;
+     last=e;
+     if(e.transient===false){console.error('[finanzas] lector OCR rechazó el archivo',e.status||e.message);throw new FinError(e.status===401||e.status===403?503:422,
+      e.status===401||e.status===403?'El lector de documentos no acepta la petición (clave o cuota mensual del plan gratuito agotada). Avisa al administrador de Azure.':'El lector no ha podido procesar el archivo');}
+     // The service's own Retry-After is honoured in full; only our fallback is capped.
+     const wait=e.retryAfter!=null?Math.max(e.retryAfter*1000,pollMs):Math.min(pollMs*2,10000);
+     if(Date.now()+wait>until)break;
+     await sleep(wait);
+    }
+   }
+   console.error('[finanzas] lector OCR no disponible',last?.status||last?.name||last?.message);
+   throw new FinError(last?.status===429?429:503,last?.status===429
+    ?'El lector de documentos ha alcanzado su límite de uso (plan gratuito: unas 20 lecturas por minuto). Espera un minuto y vuelve a intentarlo.'
+    :'El lector de documentos no está disponible; inténtalo de nuevo en un momento');
+  };
+  const url=await retry(()=>ocr.start(content,type));
+  let result,n=0;
+  for(;;){
+   await sleep(Math.min(pollMs*(1+n++*0.5),5000));
+   result=await retry(()=>ocr.poll(url));
+   if(!['running','notStarted'].includes(result.status))break;
+   if(Date.now()>until)throw new FinError(504,'El lector tarda más de lo normal; inténtalo de nuevo en un momento');
+  }
   if(result.status!=='succeeded')throw new FinError(422,'El lector no ha podido leer el documento');
   return result;
  }
