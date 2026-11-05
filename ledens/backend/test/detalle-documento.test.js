@@ -190,6 +190,10 @@ test('a rate-limited reader (429 of the free tier) is retried, not fatal; quota 
  assert.equal(polls,3);
  const limited={async start(){throw err(429,{retryAfter:0});},async poll(){}};
  await assert.rejects(attach(null,{ocr:limited,timeoutMs:20}),{status:429,message:/límite de uso/});
+ // A Retry-After beyond the deadline is never shortened: the limit error comes at once, without an early retry.
+ let starts=0;const longWait={async start(){starts++;throw err(429,{retryAfter:30});},async poll(){}};
+ await assert.rejects(attach(null,{ocr:longWait,timeoutMs:5000}),{status:429});
+ assert.equal(starts,1);
  const quota={async start(){throw err(403);},async poll(){}};
  await assert.rejects(attach(null,{ocr:quota}),{status:503,message:/cuota/});
  assert.deepEqual(await records(),[]);

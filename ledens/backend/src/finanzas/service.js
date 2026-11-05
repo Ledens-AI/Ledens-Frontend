@@ -1302,7 +1302,8 @@ export class FinanzasService {
      last=e;
      if(e.transient===false){console.error('[finanzas] lector OCR rechazó el archivo',e.status||e.message);throw new FinError(e.status===401||e.status===403?503:422,
       e.status===401||e.status===403?'El lector de documentos no acepta la petición (clave o cuota mensual del plan gratuito agotada). Avisa al administrador de Azure.':'El lector no ha podido procesar el archivo');}
-     const wait=Math.min(Math.max((e.retryAfter??0)*1000,pollMs*2),10000);
+     // The service's own Retry-After is honoured in full; only our fallback is capped.
+     const wait=e.retryAfter!=null?Math.max(e.retryAfter*1000,pollMs):Math.min(pollMs*2,10000);
      if(Date.now()+wait>until)break;
      await sleep(wait);
     }
