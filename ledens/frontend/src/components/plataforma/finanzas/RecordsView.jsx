@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from './api.js';
+import { api, financeErrorText } from './api.js';
 import { eur, num, fecha, TIPO, ESTADO } from './format.js';
 import ProjectPicker from './ProjectPicker.jsx';
 import RecordDrawer from './RecordDrawer.jsx';
@@ -113,9 +113,11 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
         const { record } = await api.assign(row.type, row.id, { projectId: project.id, version: row.version, expectedProjectId: null });
         unstage([key(row)]); settle(record); ok = 1;
       } catch (e) {
-        const stale = e.status === 409;
-        patchStaged([key(row)], { saving: false, error: stale ? 'El registro ha cambiado mientras tanto; se ha actualizado. Pulsa Guardar de nuevo.' : e.message });
-        if (stale) setReload((n) => n + 1);
+        // Only a version clash is fixed by saving again; any other refusal
+        // (document without concepts, amount already covered…) says why
+        // instead of asking to save again.
+        patchStaged([key(row)], { saving: false, error: e.message });
+        if (e.status === 409) setReload((n) => n + 1);
       }
     } else {
       // One bulk request per chosen project; the server answers per record.
@@ -127,7 +129,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
           for (const x of res.results) {
             const k = x.type + ':' + x.id, it = group.find((g) => key(g.row) === k);
             if (x.ok) { unstage([k]); settle({ ...it.row, project_id: projectId, project_label: it.project.label, estado: 'asignado' }); ok++; bulkOk = true; }
-            else patchStaged([k], { saving: false, error: x.error });
+            else patchStaged([k], { saving: false, error: financeErrorText(x.error) });
           }
         } catch (e) {
           patchStaged(group.map(({ row }) => key(row)), { saving: false, error: e.message });
