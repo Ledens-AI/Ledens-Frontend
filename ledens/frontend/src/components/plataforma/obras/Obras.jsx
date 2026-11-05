@@ -5,7 +5,7 @@ import Detalle, { PhaseBadge, Progress } from './Detalle.jsx';
 import Editor from './Editor.jsx';
 import Propuestas from './Propuestas.jsx';
 import Partidas from './Partidas.jsx';
-import { ObraCard, PresupuestosTable, ProjectsGrid, Proyecto } from './Proyectos.jsx';
+import { AvanceProyectos, ObraCard, PresupuestosTable, ProjectsGrid, Proyecto } from './Proyectos.jsx';
 import AgenteForm from './AgenteForm.jsx';
 import AgenteChat from './AgenteChat.jsx';
 import { useObrasI18n } from './i18n.js';
@@ -34,7 +34,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
   // Every project the team member may see (each one has its page, with or without presupuestos).
   const [projects, setProjects] = useState(null);
   useEffect(() => {
-    if (panel === 'client' || screen !== 'presupuestos') return;
+    if (panel === 'client' || !['presupuestos', 'avance'].includes(screen)) return;
     api.projects().then((d) => setProjects(d.proyectos), () => setProjects(null));
   }, [panel, screen]);
 
@@ -114,13 +114,14 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
     );
   }
 
-  // Team: obras en curso, straight into updating the progress of each line.
+  // Team: every open project (with or without presupuestos) and its obras en
+  // curso, straight into updating the progress of each line.
   if (screen === 'avance') {
     return (
       <div className="fin obr">
-        <Head title="Actualizar avance" text="Elige la obra y actualiza el avance de cada partida en %. El cliente lo ve al momento." />
-        {obras.length ? <div className="obr-cards">{obras.map((p) => <ObraCard key={p.id} p={p} team cta={readOnly ? null : 'Actualizar avance'} onClick={() => setOpen({ id: p.id, tab: 'obra', edit: true })} />)}</div>
-          : <Empty icon="ri-building-2-line" title="No hay obras en curso" text={panel === 'admin' ? 'Una obra aparece aquí cuando su presupuesto está aprobado y tiene fecha de inicio.' : 'Aquí verás las obras en curso de las que eres jefe de obra.'} />}
+        <Head title="Actualizar avance" text="Todos los proyectos abiertos, tengan o no presupuesto. Elige la obra y actualiza el avance de cada partida en %. El cliente lo ve al momento." />
+        <AvanceProyectos obras={obras} projects={projects} readOnly={readOnly} panel={panel}
+          onUpdate={(p) => setOpen({ id: p.id, tab: 'obra', edit: true })} onOpenProject={setProject} />
       </div>
     );
   }

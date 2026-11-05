@@ -121,6 +121,14 @@ function parseProposal(v, where) {
   };
 }
 
+// A project of Gestión financiera is open unless its status (ledens.project_statuses,
+// owned by the accounting import) says it is finished: closed, finished, cancelled,
+// archived, lost… A project with no status counts as open.
+const CLOSED_STATUS = /cerrad|finaliz|terminad|acabad|complet|cancel|anulad|archiv|perdid|rechaz|descart|entregad|closed|finish|done|lost/i;
+export function projectIsOpen(code, name) {
+  return !CLOSED_STATUS.test(`${code || ''} ${name || ''}`);
+}
+
 export class PresupuestosService {
   constructor(pool, user) { this.pool = pool; this.user = user; }
 
@@ -608,12 +616,13 @@ export class PresupuestosService {
       SELECT p.id, p.project_id code, p.name, p.address, to_jsonb(p)->>'municipio' municipio,
              coalesce(c.display_name, to_jsonb(p)->>'customer_name_source') cliente,
              to_jsonb(p)->>'start_date' start_date, to_jsonb(p)->>'end_date' end_date,
-             (SELECT s.name FROM ledens.project_statuses s WHERE s.id::text=to_jsonb(p)->>'status_id') status
+             (SELECT s.name FROM ledens.project_statuses s WHERE s.id::text=to_jsonb(p)->>'status_id') status,
+             (SELECT s.code FROM ledens.project_statuses s WHERE s.id::text=to_jsonb(p)->>'status_id') status_code
         FROM ledens.projects p LEFT JOIN ledens.customers c ON c.id::text=to_jsonb(p)->>'customer_id'
        WHERE $1 OR EXISTS (SELECT 1 FROM ledens.finance_project_permissions fp WHERE fp.user_id=$2 AND fp.project_id=p.id)
           OR EXISTS (SELECT 1 FROM presupuestos x WHERE x.project_id=p.id AND x.jefe_id=$2)
        ORDER BY p.project_id DESC NULLS LAST, p.name, p.id LIMIT 1000`, [this.user.role === 'admin', this.user.id])).rows;
-    return rows.map((r) => ({ id: r.id, code: r.code, name: r.name, address: r.address, municipio: r.municipio, cliente: r.cliente, startDate: r.start_date, endDate: r.end_date, status: r.status }));
+    return rows.map((r) => ({ id: r.id, code: r.code, name: r.name, address: r.address, municipio: r.municipio, cliente: r.cliente, startDate: r.start_date, endDate: r.end_date, status: r.status, statusCode: r.status_code, open: projectIsOpen(r.status_code, r.status) }));
   }
 
   // A project the user may link a presupuesto to: an admin, any; a jefe, those
