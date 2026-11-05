@@ -54,8 +54,7 @@ export function bankLinkBlock(b,remaining){
  if(b.state!=='COMPLETED')return String(b.state??'').toUpperCase()==='PENDING'
   ?'El banco aún no ha completado este movimiento (pendiente). Podrás asignarle un documento en cuanto se complete.'
   :`El banco no ha completado este movimiento (estado ${b.state==null||b.state===''?'sin informar':b.state}). Solo se concilian movimientos completados.`;
- if(b.currency!=='EUR')return b.currency?`El movimiento está en ${b.currency}: solo se concilian movimientos en euros.`
-  :'El banco no informó la divisa del movimiento ni de qué cuenta es: no se puede conciliar hasta que la importación bancaria lo complete.';
+ if(b.currency!=='EUR')return `El movimiento está en ${b.currency}: solo se concilian movimientos en euros.`;
  if(b.is_internal_transfer===true)return 'Es una transferencia entre cuentas de la empresa: no lleva documento.';
  if(Number(remaining)===0)return 'Ya está conciliado por completo.';
  return null;
