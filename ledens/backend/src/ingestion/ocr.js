@@ -228,7 +228,6 @@ export function extractInvoice(result, {businessTaxId=process.env.BRIDGE_BUSINES
   const directionField=sellerOwn||supplier?'VendorTaxId':'CustomerTaxId';
   const party=direction==='Cobrar'?'Customer':'Vendor';
   const multiplier=direction==='Pagar'?-1:1;
-  const signed=name=>money(name)==null?null:multiplier*money(name);
   // Total: the OCR's, confirmed by the text; or the text's when the OCR has none.
   const textTotal=pdfText?textTotals(pdfText):[];
   let total=money('InvoiceTotal'),totalConfidence=f.InvoiceTotal?.confidence||0,currency=f.InvoiceTotal?.valueCurrency?.currencyCode||null;
@@ -247,8 +246,17 @@ export function extractInvoice(result, {businessTaxId=process.env.BRIDGE_BUSINES
   else if(textSeller){directionConfidence=positive?textSeller.confidence:0;corroborated.direction='seller_tax_id_in_ocr_text';}
   else if(direction&&positive&&directionConfidence<INVOICE_MIN_CONFIDENCE&&directionId.length>=8&&pdfText&&compact(pdfText).includes(directionId)){
     directionConfidence=TEXT_CONFIDENCE;corroborated.direction=directionField;}
+  // Photos and scans have no text layer: the same tax id read as a word of the OCR's
+  // own text confirms it, with that word's confidence instead of the field's.
+  else if(direction&&positive&&directionConfidence<INVOICE_MIN_CONFIDENCE&&directionId.length>=8&&!pdfText){
+    const words=(result.analyzeResult?.pages||[]).flatMap(p=>p.words||[]).filter(w=>compact(w.content||'').includes(directionId));
+    const wordConfidence=words.length?Math.min(...words.map(w=>w.confidence)):0;
+    if(wordConfidence>directionConfidence){directionConfidence=wordConfidence;corroborated.direction=directionField+'_in_ocr_text';}}
+  // Base and VAT are parts of the total: one larger than it is a misread («24,793» €
+  // with three decimals read as 24.793 €), so it is left out rather than stored.
+  const part=name=>{const v=money(name);return v===null||total===null||Math.abs(v)>Math.abs(total)?null:multiplier*v;};
   return { date, confidence, quarter, number:text('InvoiceId'), vendor:text(party+'Name'),
-    taxId:text(party+'TaxId')||textBuyer?.supplierTaxId||textSeller?.taxId||null, subtotal:signed('SubTotal'), tax:signed('TotalTax'), total:total===null?null:multiplier*total,
+    taxId:text(party+'TaxId')||textBuyer?.supplierTaxId||textSeller?.taxId||null, subtotal:part('SubTotal'), tax:part('TotalTax'), total:total===null?null:multiplier*total,
     direction:refund?'Cobrar':direction,currency,totalConfidence,numberConfidence:f.InvoiceId?.confidence||0,
     partyConfidence:f[party+'Name']?.confidence||0,taxIdConfidence:f[party+'TaxId']?.confidence||0,partyEvidence:partyNameEvidence(result,party),
     directionConfidence,...(Object.keys(corroborated).length?{corroborated}:{}) };
