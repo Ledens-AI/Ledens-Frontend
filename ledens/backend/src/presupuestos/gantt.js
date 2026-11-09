@@ -181,9 +181,11 @@ export class GanttService {
     };
   }
 
-  // One task's choices: { duration: days | null, predecessors: [{ id, type, lag }] }.
-  async update(projectId, partidaId, body = {}) {
-    if (!isUuid(partidaId)) fail(404, 'Tarea no encontrada');
+  // Validates one task's choices (shared by update() and updateMany()):
+  // { id, duration: days | null, predecessors: [{ id, type, lag }] }.
+  normalize(body = {}, n = 1) {
+    const partidaId = body.id;
+    if (!isUuid(partidaId)) fail(404, `Tarea ${n} no encontrada`);
     let duration = body.duration;
     if (duration === '' || duration === undefined) duration = null;
     if (duration !== null) {
@@ -193,8 +195,8 @@ export class GanttService {
     const list = body.predecessors ?? [];
     if (!Array.isArray(list) || list.length > 50) fail(400, 'Predecesoras no válidas');
     const seen = new Set();
-    const preds = list.map((p, n) => {
-      if (!isUuid(p?.id)) fail(400, `Predecesora ${n + 1} no válida`);
+    const preds = list.map((p, i) => {
+      if (!isUuid(p?.id)) fail(400, `Predecesora ${i + 1} no válida`);
       if (p.id === partidaId) fail(400, 'Una tarea no puede ser su propia predecesora');
       if (seen.has(p.id)) fail(400, 'Esa predecesora está repetida');
       seen.add(p.id);
@@ -204,25 +206,48 @@ export class GanttService {
       if (!Number.isInteger(lag) || lag < -365 || lag > 365) fail(400, 'El desfase son días laborables enteros, de -365 a 365');
       return { id: p.id, type, lag };
     });
+    return { partidaId, duration, preds };
+  }
+
+  // One task's choices.
+  async update(projectId, partidaId, body = {}) {
+    return this.updateMany(projectId, [{ ...body, id: partidaId }]);
+  }
+
+  // Several tasks' choices at once, in one transaction: either every change
+  // applies and the whole plan is revalidated once (a cycle rolls back
+  // everything, nothing partially saved), or none of it does. Used both by
+  // a single task's save (update(), above) and by the «guardar en bloque»
+  // of the planning agent's suggestions (ganttAgente.js never writes here
+  // itself — only this method does, after the jefe has reviewed).
+  async updateMany(projectId, items = []) {
+    if (!Array.isArray(items) || !items.length) fail(400, 'No hay tareas que guardar');
+    if (items.length > 200) fail(400, 'Demasiadas tareas de una vez');
+    const prepared = items.map((body, n) => this.normalize(body, n + 1));
     const c = await this.pool.connect();
     try {
       await c.query('BEGIN');
       const { lines, obras } = await this.load(projectId, c);
-      const line = lines.find((l) => l.id === partidaId);
-      if (!line) fail(404, 'Esa partida no es una tarea de este proyecto');
-      const obra = obras.find((o) => o.id === line.obra_id);
-      if (this.user.role !== 'admin' && obra?.jefe?.id !== this.user.id) fail(403, 'Solo el jefe de esta obra o un administrador cambia su planificación');
       const inProject = new Set(lines.map((l) => l.id));
-      for (const p of preds) if (!inProject.has(p.id)) fail(400, 'La predecesora no es una tarea de este proyecto');
-      if (duration === null) await c.query('DELETE FROM gantt_tareas WHERE partida_id=$1', [partidaId]);
-      else await c.query(`INSERT INTO gantt_tareas (partida_id, duration_days, updated_by) VALUES ($1,$2,$3)
-                          ON CONFLICT (partida_id) DO UPDATE SET duration_days=EXCLUDED.duration_days, updated_by=EXCLUDED.updated_by, updated_at=now()`, [partidaId, duration, this.user.id]);
-      await c.query('DELETE FROM gantt_dependencias WHERE partida_id=$1', [partidaId]);
-      for (const p of preds) await c.query('INSERT INTO gantt_dependencias (partida_id, predecessor_id, type, lag_days) VALUES ($1,$2,$3,$4)', [partidaId, p.id, p.type, p.lag]);
-      const result = await this.get(projectId, c); // throws on a cycle → rollback
+      const obraOf = new Map(lines.map((l) => [l.id, obras.find((o) => o.id === l.obra_id)]));
       const name = (id) => { const l = lines.find((x) => x.id === id); return l ? (l.code || l.name) : id; };
-      await audit({ actor: { id: this.user.id, name: this.user.name || this.user.email }, action: 'Planificación modificada', target: { id: null, label: line.ref },
-        detail: `${line.ref} · ${line.code || line.name}: ${duration ? `${duration} días` : 'duración según rendimiento'}${preds.length ? ` · predecesoras ${preds.map((p) => `${name(p.id)} ${p.type}${p.lag ? (p.lag > 0 ? `+${p.lag}` : p.lag) : ''}`).join(', ')}` : ' · sin predecesoras'}` }, c);
+      const details = [];
+      for (const { partidaId, duration, preds } of prepared) {
+        if (!inProject.has(partidaId)) fail(404, 'Esa partida no es una tarea de este proyecto');
+        const obra = obraOf.get(partidaId);
+        if (this.user.role !== 'admin' && obra?.jefe?.id !== this.user.id) fail(403, 'Solo el jefe de esta obra o un administrador cambia su planificación');
+        for (const p of preds) if (!inProject.has(p.id)) fail(400, 'La predecesora no es una tarea de este proyecto');
+        if (duration === null) await c.query('DELETE FROM gantt_tareas WHERE partida_id=$1', [partidaId]);
+        else await c.query(`INSERT INTO gantt_tareas (partida_id, duration_days, updated_by) VALUES ($1,$2,$3)
+                            ON CONFLICT (partida_id) DO UPDATE SET duration_days=EXCLUDED.duration_days, updated_by=EXCLUDED.updated_by, updated_at=now()`, [partidaId, duration, this.user.id]);
+        await c.query('DELETE FROM gantt_dependencias WHERE partida_id=$1', [partidaId]);
+        for (const p of preds) await c.query('INSERT INTO gantt_dependencias (partida_id, predecessor_id, type, lag_days) VALUES ($1,$2,$3,$4)', [partidaId, p.id, p.type, p.lag]);
+        const line = lines.find((l) => l.id === partidaId);
+        details.push(`${line.ref} · ${line.code || line.name}: ${duration ? `${duration} días` : 'duración según rendimiento'}${preds.length ? ` · predecesoras ${preds.map((p) => `${name(p.id)} ${p.type}${p.lag ? (p.lag > 0 ? `+${p.lag}` : p.lag) : ''}`).join(', ')}` : ' · sin predecesoras'}`);
+      }
+      const result = await this.get(projectId, c); // throws on a cycle → rollback, nothing applied
+      const label = prepared.length === 1 ? lines.find((l) => l.id === prepared[0].partidaId)?.ref : `${prepared.length} tareas`;
+      await audit({ actor: { id: this.user.id, name: this.user.name || this.user.email }, action: 'Planificación modificada', target: { id: null, label }, detail: details.join('\n') }, c);
       await c.query('COMMIT');
       return result;
     } catch (e) {

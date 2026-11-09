@@ -180,4 +180,8 @@
 .obr-gantt-table .obr-gantt-pred select { max-width: 220px; }
 .obr-gantt-table td:nth-child(2) { min-width: 200px; }
 .obr-gantt-warn { color: #B26A00; }
+.obr-gantt-agente { display: flex; flex-direction: column; gap: 10px; }
+.obr-gantt-agente-warn { margin: 0; padding-left: 18px; color: #B26A00; }
+.obr-gantt-agente-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.obr-gantt-agente-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; background: #F8F8F5; border-radius: 10px; font-size: 14px; }
 @media (max-width: 720px) { .obr-gantt-labels { width: 120px !important; } }

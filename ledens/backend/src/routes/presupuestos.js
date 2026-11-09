@@ -10,6 +10,7 @@ import { translateDoc } from '../presupuestos/traducciones.js';
 import { PropuestasService } from '../presupuestos/propuestas.js';
 import { PartidasService } from '../presupuestos/partidas.js';
 import { GanttService } from '../presupuestos/gantt.js';
+import { ganttAgenteDraft } from '../presupuestos/ganttAgente.js';
 import { agenteDraft, agenteFromEnv } from '../presupuestos/agente.js';
 import { agenteChat } from '../presupuestos/agenteChat.js';
 import { getStorage } from '../obras/storage.js';
@@ -89,6 +90,14 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   const gantt = (req) => new GanttService(pool || getPool(), req.user);
   router.get('/proyectos/:projectId/gantt', handle((req) => gantt(req).get(req.params.projectId)));
   router.put('/proyectos/:projectId/gantt/:partidaId', handle((req) => gantt(req).update(req.params.projectId, req.params.partidaId, req.body || {})));
+  // Several tasks at once — «guardar en bloque» after reviewing the planning
+  // agent's suggestions (or any other multi-row edit): one transaction, the
+  // whole plan revalidated once, all of it saved or none of it.
+  router.put('/proyectos/:projectId/gantt', handle((req) => gantt(req).updateMany(req.params.projectId, req.body?.tasks || [])));
+  // Suggests predecessors for the tasks that have none yet; never saves them
+  // itself (src/presupuestos/ganttAgente.js). Same Anthropic client as /agente.
+  router.post('/proyectos/:projectId/gantt/agente', rateLimit({ windowMs: 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false }),
+    handle((req) => ganttAgenteDraft(req.user, req.params.projectId, { db: pool || getPool(), anthropic: agent })));
   router.get('/:id', handle((req) => svc(req).get(req.params.id, { versionId: req.query.version || undefined })));
   router.post('/', handle((req) => svc(req).create(req.body || {})));
   router.put('/:id', handle((req) => svc(req).saveDraft(req.params.id, req.body || {})));

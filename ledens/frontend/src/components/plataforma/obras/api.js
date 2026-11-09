@@ -101,6 +101,11 @@ export const api = {
   // Planificación (Gantt) of a project with an approved presupuesto (backend: presupuestos/gantt.js).
   gantt: (projectId) => request('GET', `${base}/proyectos/${projectId}/gantt`),
   saveGantt: (projectId, partidaId, body) => request('PUT', `${base}/proyectos/${projectId}/gantt/${partidaId}`, body),
+  // «Guardar en bloque»: several tasks' predecessors in one request, one
+  // transaction server-side (ganttAgente.js never saves by itself).
+  saveGanttMany: (projectId, tasks) => request('PUT', `${base}/proyectos/${projectId}/gantt`, { tasks }),
+  // Suggests predecessors for the tasks that still have none (presupuestos/ganttAgente.js). Saves nothing.
+  ganttAgente: (projectId) => request('POST', `${base}/proyectos/${projectId}/gantt/agente`),
   schedule: (id, body) => request('PUT', `${base}/${id}/fechas`, body),
   declare: (id, body) => request('PUT', `${base}/${id}/produccion`, body),
 };
