@@ -62,6 +62,7 @@ export default function Gantt({ projectId, readOnly, onBack }) {
       {missing ? <p className="fin-warn"><i className="ri-error-warning-line"></i><span>{`${missing} ${missing === 1 ? 'tarea no tiene' : 'tareas no tienen'} rendimiento en la base: cuentan 1 día hasta que indiques su duración.`}</span></p> : null}
       {saveError ? <ErrorBox message={saveError} /> : null}
       {tasks.length ? <Chart data={data} /> : <Empty icon="ri-calendar-line" title="Sin tareas" text="Los presupuestos aprobados de este proyecto no tienen partidas." />}
+      {!readOnly && tasks.length > 1 ? <Sugerencias projectId={projectId} tasks={tasks} onApplied={load} /> : null}
       {tasks.length ? <Tabla tasks={tasks} readOnly={readOnly} saving={saving} onSave={save} /> : null}
     </div>
   );
@@ -86,6 +87,77 @@ function Tabla({ tasks, readOnly, saving, onSave }) {
         </div>
       </div>
     </>
+  );
+}
+
+// El agente (backend: presupuestos/ganttAgente.js) solo propone — no guarda
+// nada él mismo. Aquí se revisa la propuesta (se puede quitar una a una) y
+// «guardar en bloque» aplica todas las que queden en una sola petición, en
+// vez de una petición por tarea como al editar la tabla a mano.
+function Sugerencias({ projectId, tasks, onApplied }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [proposal, setProposal] = useState(null); // { tasks: [{id, predecessors}], considered, accepted, warnings }
+  const [removed, setRemoved] = useState(new Set()); // `${tareaId}:${predId}` quitadas a mano antes de guardar
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState('');
+
+  const index = useMemo(() => new Map(tasks.map((t, i) => [t.id, i + 1])), [tasks]);
+  const label = (id) => { const t = tasks.find((x) => x.id === id); return t ? `${index.get(id)}. ${t.code ? `${t.code} · ` : ''}${t.name}` : '?'; };
+
+  const generate = async () => {
+    setLoading(true); setError(''); setProposal(null); setRemoved(new Set()); setDone('');
+    try { setProposal(await api.ganttAgente(projectId)); } catch (e) { setError(e.message); }
+    setLoading(false);
+  };
+
+  const kept = (proposal?.tasks || [])
+    .map((t) => ({ ...t, predecessors: t.predecessors.filter((p) => !removed.has(`${t.id}:${p.id}`)) }))
+    .filter((t) => t.predecessors.length);
+  const total = kept.reduce((a, t) => a + t.predecessors.length, 0);
+
+  const guardar = async () => {
+    setSaving(true); setError('');
+    try {
+      await api.saveGanttMany(projectId, kept.map((t) => ({ id: t.id, predecessors: t.predecessors.map((p) => ({ id: p.id, type: p.type, lag: p.lag })) })));
+      setDone(`${total} predecesora${total === 1 ? '' : 's'} guardada${total === 1 ? '' : 's'}.`);
+      setProposal(null);
+      onApplied();
+    } catch (e) { setError(e.message); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="fin-card obr-gantt-agente">
+      <div className="obr-actions obr-start">
+        <button type="button" className="fin-btn" onClick={generate} disabled={loading}><i className="ri-magic-line"></i>{loading ? 'Pensando…' : 'Generar predecesoras con el agente'}</button>
+        {proposal ? <span className="fin-muted fin-small">{`Propone ${proposal.accepted} relación${proposal.accepted === 1 ? '' : 'es'} de ${proposal.considered} que ha mirado.`}</span> : null}
+        {done ? <span className="fin-muted fin-small">{done}</span> : null}
+      </div>
+      {error ? <ErrorBox message={error} /> : null}
+      {proposal?.warnings?.length ? <ul className="obr-gantt-agente-warn fin-muted fin-small">{proposal.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul> : null}
+      {kept.length ? (
+        <>
+          <p className="fin-muted fin-small">Todavía no se ha guardado nada. Quita lo que no te cuadre y guarda el resto de una sola vez («en bloque»): una sola petición aplica todas las relaciones que queden, en vez de guardar tarea por tarea.</p>
+          <ul className="obr-gantt-agente-list">
+            {kept.flatMap((t) => t.predecessors.map((p) => (
+              <li key={`${t.id}:${p.id}`}>
+                <span>
+                  <strong>{label(t.id)}</strong> espera a <strong>{label(p.id)}</strong>
+                  {` · ${REL.find((r) => r[0] === p.type)?.[1]}`}{p.lag ? ` · ${p.lag > 0 ? '+' : ''}${p.lag} d` : ''}
+                  {p.motivo ? <span className="fin-muted"> — {p.motivo}</span> : null}
+                </span>
+                <button type="button" className="fin-btn is-ghost is-small" onClick={() => setRemoved(new Set([...removed, `${t.id}:${p.id}`]))} aria-label="Quitar esta relación"><i className="ri-close-line"></i></button>
+              </li>
+            )))}
+          </ul>
+          <div className="obr-actions obr-start">
+            <button type="button" className="fin-btn is-primary" onClick={guardar} disabled={saving}>{saving ? 'Guardando…' : `Guardar estas ${total} predecesora${total === 1 ? '' : 's'} en bloque`}</button>
+            <button type="button" className="fin-btn is-ghost" onClick={() => setProposal(null)}>Descartar la propuesta</button>
+          </div>
+        </>
+      ) : null}
+    </div>
   );
 }
 
