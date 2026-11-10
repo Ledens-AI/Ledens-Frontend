@@ -19,7 +19,9 @@ const REL = [
 const DAY = 86400000;
 const parse = (s) => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10));
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
-const COLORS = ['#5567AE', '#55A89D', '#C9822F', '#B84371', '#7A5BB5', '#3E8C82', '#9C6B3F', '#4A7FB8'];
+// Bar colours: red = no predecessor yet, blue = has one; the executed share
+// of the line (% de avance) fills the bar in green from the left.
+const BAR = { sinPredecesora: '#D14A4A', conPredecesora: '#4A7FB8', avance: '#3E9A5A' };
 const num = (v) => String(v).replace('.', ',');
 
 export default function Gantt({ projectId, readOnly, onBack }) {
@@ -225,8 +227,9 @@ function Fila({ t, n, tasks, label, editable, busy, onSave }) {
   );
 }
 
-// The chart: one bar per task on calendar days (weekends shaded), progress
-// inside the bar, arrows from each predecessor, today as a line.
+// The chart: one bar per task on calendar days (weekends shaded) — red with
+// no predecessor, blue with one —, green up to its % de avance, arrows from
+// each predecessor, today as a line.
 function Chart({ data }) {
   const { tasks } = data;
   const DW = 22, RH = 30, HEAD = 44, LABEL = 280;
@@ -235,8 +238,6 @@ function Chart({ data }) {
   const x = (s) => Math.round((parse(s) - t0) / DAY) * DW;
   const width = days * DW, height = HEAD + tasks.length * RH + 8;
   const row = new Map(tasks.map((t, i) => [t.id, i]));
-  const color = new Map();
-  for (const t of tasks) { const k = `${t.presupuesto.id}·${t.chapter}`; if (!color.has(k)) color.set(k, COLORS[color.size % COLORS.length]); }
   const today = new Date().toISOString().slice(0, 10);
   const scroller = useRef(null);
   useEffect(() => { // open on today when it falls inside the plan
@@ -265,6 +266,12 @@ function Chart({ data }) {
     }
   }
   return (
+    <>
+    <div className="obr-gantt-legend fin-small fin-muted">
+      <span><i style={{ background: BAR.sinPredecesora }}></i>Sin predecesora</span>
+      <span><i style={{ background: BAR.conPredecesora }}></i>Con predecesora</span>
+      <span><i style={{ background: BAR.avance }}></i>Avance ejecutado</span>
+    </div>
     <div className="fin-card is-flush obr-gantt">
       <div className="obr-gantt-labels" style={{ width: LABEL }}>
         <div style={{ height: HEAD }} className="obr-gantt-labels-head">Tarea</div>
@@ -293,17 +300,24 @@ function Chart({ data }) {
           {arrows.map((a) => <path key={a.key} d={a.d} fill="none" stroke="#8A8A86" strokeWidth="1.2" markerEnd="url(#obr-gantt-arrow)" />)}
           {tasks.map((t, i) => {
             const bx = x(t.start), bw = x(t.end) + DW - bx, by = HEAD + i * RH + 7, bh = RH - 14;
-            const c = color.get(`${t.presupuesto.id}·${t.chapter}`);
+            const c = t.predecessors.length ? BAR.conPredecesora : BAR.sinPredecesora;
+            const pct = Math.max(0, Math.min(100, Number(t.executionPct) || 0));
+            const clip = `obr-gantt-clip-${i}`;
             return (
               <g key={t.id}>
-                <title>{`${t.code ? `${t.code} · ` : ''}${t.name}\n${fecha(t.start)} → ${fecha(t.end)} · ${t.duration} ${t.duration === 1 ? 'día' : 'días'} laborables · ${num(t.executionPct)} % ejecutado`}</title>
-                <rect x={bx} y={by} width={bw} height={bh} rx="4" fill={c} opacity={t.warning ? 0.35 : 0.3} stroke={t.warning ? c : 'none'} strokeDasharray={t.warning ? '3 2' : undefined} />
-                <rect x={bx} y={by} width={Math.max(0, bw * Math.min(100, t.executionPct) / 100)} height={bh} rx="4" fill={c} />
+                <title>{`${t.code ? `${t.code} · ` : ''}${t.name}\n${fecha(t.start)} → ${fecha(t.end)} · ${t.duration} ${t.duration === 1 ? 'día' : 'días'} laborables · ${num(t.executionPct)} % ejecutado · ${t.predecessors.length ? `${t.predecessors.length} ${t.predecessors.length === 1 ? 'predecesora' : 'predecesoras'}` : 'sin predecesora'}`}</title>
+                <clipPath id={clip}><rect x={bx} y={by} width={bw} height={bh} rx="4" /></clipPath>
+                <g clipPath={`url(#${clip})`}>
+                  <rect x={bx} y={by} width={bw} height={bh} fill={c} />
+                  {pct > 0 ? <rect x={bx} y={by} width={bw * pct / 100} height={bh} fill={BAR.avance} /> : null}
+                </g>
+                {t.warning ? <rect x={bx + 0.5} y={by + 0.5} width={bw - 1} height={bh - 1} rx="4" fill="none" stroke="#3A3A38" strokeDasharray="3 2" /> : null}
               </g>
             );
           })}
         </svg>
       </div>
     </div>
+    </>
   );
 }
