@@ -58,31 +58,34 @@ export default function Gantt({ projectId, readOnly, onBack }) {
         <span className="fin-muted">{`${fecha(data.start)} → ${fecha(data.end)} · ${tasks.length} ${tasks.length === 1 ? 'tarea' : 'tareas'} · días laborables (lunes a viernes)`}</span>
       </div>
       <p className="fin-muted fin-small obr-hint-tight">
-        {data.rendimiento ? `Duración = cantidad ÷ rendimiento de la partida en la base («${data.rendimiento.column}», ${data.rendimiento.unit}), redondeada al día. ` : 'La base de partidas no tiene columna de rendimiento: cada tarea dura 1 día hasta que indiques su duración. '}
+        {data.rendimiento ? `Duración = cantidad ÷ rendimiento de la partida en la base («${data.rendimiento.column}», ${data.rendimiento.unit}), redondeada a la décima de día (dos tareas de 0,5 seguidas ocupan un día). ` : 'La base de partidas no tiene columna de rendimiento: cada tarea dura 1 día hasta que indiques su duración. '}
         Cada obra empieza en su fecha de inicio. Cambia una predecesora, su relación, el desfase o la duración y el Gantt se recalcula al momento.
       </p>
       {missing ? <p className="fin-warn"><i className="ri-error-warning-line"></i><span>{`${missing} ${missing === 1 ? 'tarea no tiene' : 'tareas no tienen'} rendimiento en la base: cuentan 1 día hasta que indiques su duración.`}</span></p> : null}
       {saveError ? <ErrorBox message={saveError} /> : null}
       {tasks.length ? <Chart data={data} /> : <Empty icon="ri-calendar-line" title="Sin tareas" text="Los presupuestos aprobados de este proyecto no tienen partidas." />}
       {!readOnly && tasks.length > 1 ? <Sugerencias projectId={projectId} tasks={tasks} onApplied={load} /> : null}
-      {tasks.length ? <Tabla tasks={tasks} readOnly={readOnly} saving={saving} onSave={save} /> : null}
+      {tasks.length ? <Tabla tasks={tasks} hitos={data.hitos || []} readOnly={readOnly} saving={saving} onSave={save} /> : null}
     </div>
   );
 }
 
-function Tabla({ tasks, readOnly, saving, onSave }) {
+// «Inicio de obra» (hitos: one per obra, id = the obra's id) can be chosen as a
+// predecessor like any task; it is listed first.
+function Tabla({ tasks, hitos, readOnly, saving, onSave }) {
   const index = useMemo(() => new Map(tasks.map((t, i) => [t.id, i + 1])), [tasks]);
-  const label = (t) => `${index.get(t.id)}. ${t.code ? `${t.code} · ` : ''}${t.name}`;
+  const label = (t) => (t.hito ? `◆ ${t.name}` : `${index.get(t.id)}. ${t.code ? `${t.code} · ` : ''}${t.name}`);
+  const choices = useMemo(() => [...hitos.map((h) => ({ ...h, hito: true })), ...tasks], [hitos, tasks]);
   return (
     <>
       <h3 className="obr-h3">Tareas y predecesoras</h3>
       <div className="fin-card is-flush">
         <div className="fin-table-wrap">
           <table className="fin-table obr-gantt-table">
-            <thead><tr><th>#</th><th>Partida</th><th className="fin-num">Cantidad</th><th className="fin-num">Rendimiento</th><th>Duración (días)</th><th>Predecesoras · relación · desfase (días)</th><th>Inicio</th><th>Fin</th></tr></thead>
+            <thead><tr><th>#</th><th>Partida</th><th className="fin-num">Cantidad</th><th className="fin-num">Rendimiento</th><th>Duración (días, 0,1)</th><th>Predecesoras · relación · desfase (días)</th><th>Inicio</th><th>Fin</th></tr></thead>
             <tbody>
               {tasks.map((t) => (
-                <Fila key={t.id} t={t} n={index.get(t.id)} tasks={tasks} label={label} editable={!readOnly && t.canEdit} busy={saving === t.id} onSave={onSave} />
+                <Fila key={t.id} t={t} n={index.get(t.id)} tasks={choices} label={label} editable={!readOnly && t.canEdit} busy={saving === t.id} onSave={onSave} />
               ))}
             </tbody>
           </table>
@@ -168,7 +171,7 @@ function Fila({ t, n, tasks, label, editable, busy, onSave }) {
   const [preds, setPreds] = useState(t.predecessors);
   useEffect(() => { setDur(t.durationOverride ?? ''); setPreds(t.predecessors); }, [t]);
   const commitDur = () => {
-    const v = dur === '' ? null : Number(dur);
+    const v = dur === '' ? null : Math.round(Number(String(dur).replace(',', '.')) * 10) / 10;
     if (v === (t.durationOverride ?? null)) return;
     onSave(t, { duration: v });
   };
@@ -188,10 +191,10 @@ function Fila({ t, n, tasks, label, editable, busy, onSave }) {
       <td className="fin-num fin-nowrap">{t.rendimiento !== null ? `${num(t.rendimiento)} ${t.unit}/jornada` : <span className="fin-muted">—</span>}</td>
       <td className="fin-nowrap">
         {editable ? (
-          <input type="number" min="1" step="1" className="obr-gantt-num" value={dur} placeholder={String(t.computedDuration ?? 1)}
+          <input type="number" min="0" step="0.1" className="obr-gantt-num" value={dur} placeholder={num(t.computedDuration ?? 1)}
             onChange={(e) => setDur(e.target.value)} onBlur={commitDur} onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} aria-label="Duración en días laborables" />
-        ) : <strong>{t.duration}</strong>}
-        <div className="fin-muted fin-small">{t.durationOverride ? `Base: ${t.computedDuration ?? '—'}` : t.computedDuration ? 'Según rendimiento' : <span className="obr-gantt-warn">Sin rendimiento</span>}</div>
+        ) : <strong>{num(t.duration)}</strong>}
+        <div className="fin-muted fin-small">{t.durationOverride != null ? `Base: ${t.computedDuration != null ? num(t.computedDuration) : '—'}` : t.computedDuration ? 'Según rendimiento' : <span className="obr-gantt-warn">Sin rendimiento</span>}</div>
       </td>
       <td>
         <div className="obr-gantt-preds">
@@ -218,7 +221,7 @@ function Fila({ t, n, tasks, label, editable, busy, onSave }) {
           {editable && tasks.length > 1 && preds.length < tasks.length - 1 && !preds.some((p) => !p.id) ? (
             <button type="button" className="fin-btn is-ghost is-small" onClick={() => setPreds([...preds, { id: '', type: 'FS', lag: 0 }])}><i className="ri-add-line"></i>Predecesora</button>
           ) : null}
-          {!editable && !preds.length ? <span className="fin-muted fin-small">Empieza con la obra</span> : null}
+          {!editable && !preds.length ? <span className="fin-muted fin-small">Sin predecesora</span> : null}
         </div>
       </td>
       <td className="fin-nowrap">{fecha(t.start)}</td>
@@ -231,7 +234,8 @@ function Fila({ t, n, tasks, label, editable, busy, onSave }) {
 // no predecessor, blue with one —, green up to its % de avance, arrows from
 // each predecessor, today as a line.
 function Chart({ data }) {
-  const { tasks } = data;
+  const hitos = (data.hitos || []).map((h) => ({ ...h, hito: true, start: h.date, end: h.date, predecessors: [] }));
+  const tasks = [...hitos, ...data.tasks];
   const DW = 22, RH = 30, HEAD = 44, LABEL = 280;
   const t0 = parse(data.start) - 2 * DAY;
   const days = Math.max(14, Math.round((parse(data.end) - t0) / DAY) + 5);
@@ -258,9 +262,10 @@ function Chart({ data }) {
     for (const p of t.predecessors) {
       const pt = tasks[row.get(p.id)];
       if (!pt) continue;
-      const fromEnd = p.type === 'FS' || p.type === 'FF', toEnd = p.type === 'FF' || p.type === 'SF';
-      const x1 = fromEnd ? x(pt.end) + DW : x(pt.start), y1 = HEAD + row.get(pt.id) * RH + RH / 2;
-      const x2 = toEnd ? x(t.end) + DW : x(t.start), y2 = HEAD + row.get(t.id) * RH + RH / 2;
+      const fromEnd = !pt.hito && (p.type === 'FS' || p.type === 'FF'), toEnd = p.type === 'FF' || p.type === 'SF';
+      const xs = (k) => x(k.start) + (k.startAt || 0) * DW, xe = (k) => x(k.end) + (k.endAt ?? 1) * DW;
+      const x1 = fromEnd ? xe(pt) : xs(pt), y1 = HEAD + row.get(pt.id) * RH + RH / 2;
+      const x2 = toEnd ? xe(t) : xs(t), y2 = HEAD + row.get(t.id) * RH + RH / 2;
       const mid = toEnd ? Math.max(x1, x2) + 8 : Math.min(x1 + 8, x2 - 8);
       arrows.push({ key: `${p.id}-${t.id}`, d: `M${x1},${y1} H${mid} V${y2} H${x2}`, toEnd });
     }
@@ -271,13 +276,15 @@ function Chart({ data }) {
       <span><i style={{ background: BAR.sinPredecesora }}></i>Sin predecesora</span>
       <span><i style={{ background: BAR.conPredecesora }}></i>Con predecesora</span>
       <span><i style={{ background: BAR.avance }}></i>Avance ejecutado</span>
+      <span><b className="obr-gantt-legend-hito"></b>Inicio de obra (se puede elegir como predecesora)</span>
     </div>
     <div className="fin-card is-flush obr-gantt">
       <div className="obr-gantt-labels" style={{ width: LABEL }}>
         <div style={{ height: HEAD }} className="obr-gantt-labels-head">Tarea</div>
         {tasks.map((t, i) => (
           <div key={t.id} className="obr-gantt-label" style={{ height: RH }} title={`${t.code || ''} ${t.name}`}>
-            <span className="fin-muted">{i + 1}</span> {t.code ? <strong>{t.code}</strong> : null} {t.name}
+            {t.hito ? <><span className="fin-muted">◆</span> <strong>{t.name}</strong></>
+              : <><span className="fin-muted">{i + 1 - hitos.length}</span> {t.code ? <strong>{t.code}</strong> : null} {t.name}</>}
           </div>
         ))}
       </div>
@@ -299,13 +306,24 @@ function Chart({ data }) {
           {parse(today) >= t0 && parse(today) < t0 + days * DAY ? <line x1={x(today) + DW / 2} x2={x(today) + DW / 2} y1={HEAD - 6} y2={height} stroke="#D14A4A" strokeDasharray="3 3" /> : null}
           {arrows.map((a) => <path key={a.key} d={a.d} fill="none" stroke="#8A8A86" strokeWidth="1.2" markerEnd="url(#obr-gantt-arrow)" />)}
           {tasks.map((t, i) => {
-            const bx = x(t.start), bw = x(t.end) + DW - bx, by = HEAD + i * RH + 7, bh = RH - 14;
+            if (t.hito) {
+              const cx = x(t.start), cy = HEAD + i * RH + RH / 2, r = 7;
+              return (
+                <g key={t.id}>
+                  <title>{`${t.name} · ${fecha(t.start)}`}</title>
+                  <path d={`M${cx},${cy - r} L${cx + r},${cy} L${cx},${cy + r} L${cx - r},${cy} Z`} fill="#3A3A38" />
+                </g>
+              );
+            }
+            // startAt / endAt: where in its first / last day the task starts and
+            // ends (tenths), so two tasks of 0,5 share one day.
+            const bx = x(t.start) + (t.startAt || 0) * DW, bw = Math.max(2, x(t.end) + (t.endAt ?? 1) * DW - bx), by = HEAD + i * RH + 7, bh = RH - 14;
             const c = t.predecessors.length ? BAR.conPredecesora : BAR.sinPredecesora;
             const pct = Math.max(0, Math.min(100, Number(t.executionPct) || 0));
             const clip = `obr-gantt-clip-${i}`;
             return (
               <g key={t.id}>
-                <title>{`${t.code ? `${t.code} · ` : ''}${t.name}\n${fecha(t.start)} → ${fecha(t.end)} · ${t.duration} ${t.duration === 1 ? 'día' : 'días'} laborables · ${num(t.executionPct)} % ejecutado · ${t.predecessors.length ? `${t.predecessors.length} ${t.predecessors.length === 1 ? 'predecesora' : 'predecesoras'}` : 'sin predecesora'}`}</title>
+                <title>{`${t.code ? `${t.code} · ` : ''}${t.name}\n${fecha(t.start)} → ${fecha(t.end)} · ${num(t.duration)} ${t.duration === 1 ? 'día' : 'días'} laborables · ${num(t.executionPct)} % ejecutado · ${t.predecessors.length ? `${t.predecessors.length} ${t.predecessors.length === 1 ? 'predecesora' : 'predecesoras'}` : 'sin predecesora'}`}</title>
                 <clipPath id={clip}><rect x={bx} y={by} width={bw} height={bh} rx="4" /></clipPath>
                 <g clipPath={`url(#${clip})`}>
                   <rect x={bx} y={by} width={bw} height={bh} fill={c} />

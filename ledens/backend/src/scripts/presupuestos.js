@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import { getPool, closePool } from '../db/pool.js';
 import { importApproved } from '../presupuestos/import.js';
+import { repararNombresDesdePdf } from '../presupuestos/repararNombres.js';
 
 // Operator tool: loads an already-approved presupuesto (with its progress so
 // far) as an obra en curso. Run it where DATABASE_URL points at the right
@@ -14,14 +15,20 @@ import { importApproved } from '../presupuestos/import.js';
 //   description?, quantity, unitPrice, kind? (confirmada…), progress (0–1),
 //   progressNote? }] }] }
 // The client (and jefe) accounts must exist: `npm run users -- create …`.
-const USAGE = 'Uso: npm run presupuestos -- importar <fichero.json>';
+// `reparar-nombres [--simular]`: re-reads the budget PDFs kept in obras and
+// restores partida names the old PDF reader cut (repararNombres.js).
+const USAGE = 'Uso: npm run presupuestos -- importar <fichero.json> | reparar-nombres [--simular]';
 
 const [command, file] = process.argv.slice(2);
 try {
-  if (command !== 'importar' || !file) throw new Error(USAGE);
-  const data = JSON.parse(await fs.readFile(file, 'utf8'));
-  const r = await importApproved(getPool(), data);
-  console.log(`Importado ${r.ref}: ${r.lines} partidas, ${r.declared} con avance.`);
+  if (command === 'reparar-nombres') {
+    await repararNombresDesdePdf(getPool(), { simulate: file === '--simular' });
+  } else {
+    if (command !== 'importar' || !file) throw new Error(USAGE);
+    const data = JSON.parse(await fs.readFile(file, 'utf8'));
+    const r = await importApproved(getPool(), data);
+    console.log(`Importado ${r.ref}: ${r.lines} partidas, ${r.declared} con avance.`);
+  }
 } catch (err) {
   console.error(err.message);
   process.exitCode = 1;

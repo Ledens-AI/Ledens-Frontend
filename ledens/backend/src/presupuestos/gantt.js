@@ -7,14 +7,20 @@ import { PresupuestoError, PresupuestosService, isUuid } from './service.js';
 // updates). Duration in working days (Mon–Fri):
 //   - the one the team set for the task, else
 //   - quantity ÷ rendimiento of its partida in the base (ledens.work_items,
-//     matched by base_code, else by the line's own PA-### code), rounded up;
+//     matched by base_code, else by the line's own PA-### code), rounded up
+//     to a tenth of a day (minimum 0,1);
 //     a rendimiento column measured in hours per unit (its name says «hora»)
 //     is turned into days of 8 h; else
 //   - 1 day, flagged so the team sets it.
 // Start: the obra's start date (else the project's, else today), pushed by its
 // predecessors — FS (fin → inicio), SS (inicio → inicio), FF (fin → fin) or
-// SF (inicio → fin), each with a lag in working days. Dates are never stored:
+// SF (inicio → fin), each with a lag in working days. Durations go in tenths
+// of a day from 0 (migration 040): the plan runs on a continuous working-day
+// axis, so two tasks of 0,5 in a row share one day. Dates are never stored:
 // every answer recalculates them, so a change in the table moves the chart.
+// «Inicio de obra» (migration 039): one milestone per obra, on its start date,
+// that any task may take as a predecessor (its id is the obra's own id; it
+// lasts 0 days, so FS 0 starts the task that same day).
 // Who: the team that may see the project reads it; the assigned jefe of the
 // obra (or an admin) changes its tasks.
 const fail = (status, message) => { throw new PresupuestoError(status, message); };
@@ -50,7 +56,9 @@ export function calendar(base) {
 
 // Forward pass over the dependencies. tasks: [{ id, earliest, duration }],
 // deps: [{ partida_id, predecessor_id, type, lag_days }]. Returns
-// Map id → { start, end } (working-day indexes, end inclusive), or throws on a cycle.
+// Map id → { start, end }: positions on the working-day axis (day n runs from
+// n to n + 1, end exclusive, so end = start + duration), in tenths, or throws
+// on a cycle. Computed in whole tenths so 0,1 + 0,2 never drifts.
 export function schedule(tasks, deps, names = new Map()) {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const preds = new Map(tasks.map((t) => [t.id, []]));
@@ -64,17 +72,17 @@ export function schedule(tasks, deps, names = new Map()) {
   const queue = tasks.filter((t) => !pending.get(t.id)).map((t) => t.id);
   const out = new Map();
   while (queue.length) {
-    const id = queue.shift(), t = byId.get(id), dur = t.duration;
-    let s = t.earliest;
+    const id = queue.shift(), t = byId.get(id), dur = tenths(t.duration);
+    let s = tenths(t.earliest);
     for (const d of preds.get(id)) {
-      const p = out.get(d.predecessor_id), lag = Number(d.lag_days) || 0;
-      const c = d.type === 'SS' ? p.start + lag
-        : d.type === 'FF' ? p.end + lag - dur + 1
-          : d.type === 'SF' ? p.start + lag - dur + 1
-            : p.end + 1 + lag;
+      const p = out.get(d.predecessor_id), ps = tenths(p.start), pe = tenths(p.end), lag = tenths(Number(d.lag_days) || 0);
+      const c = d.type === 'SS' ? ps + lag
+        : d.type === 'FF' ? pe + lag - dur
+          : d.type === 'SF' ? ps + lag - dur
+            : pe + lag;
       if (c > s) s = c;
     }
-    out.set(id, { start: s, end: s + dur - 1 });
+    out.set(id, { start: s / 10, end: (s + dur) / 10 });
     for (const n of succs.get(id)) {
       pending.set(n, pending.get(n) - 1);
       if (!pending.get(n)) queue.push(n);
@@ -87,13 +95,22 @@ export function schedule(tasks, deps, names = new Map()) {
   return out;
 }
 
+const tenths = (v) => Math.round(Number(v) * 10);
+// Calendar days a task occupies: [first index, last index] and where in them
+// it starts / ends (fraction of the day, 0–1). A 0-day task sits on its start.
+export function span({ start, end }) {
+  const first = Math.floor(start + 1e-9);
+  const last = end > start ? Math.ceil(end - 1e-9) - 1 : first;
+  return { first, last, from: Math.round((start - first) * 10) / 10, to: end > start ? Math.round((end - last) * 10) / 10 : Math.round((start - first) * 10) / 10 };
+}
+
 // Duration from the base: rendimiento in units per working day (or hours per
 // unit when the column says so).
 export function durationFrom(quantity, rendimiento, perHour) {
   const q = Number(quantity), r = Number(rendimiento);
   if (!(q > 0) || !(r > 0)) return null;
   const days = perHour ? q * r / HOURS_PER_DAY : q / r;
-  return Math.min(MAX_DAYS, Math.max(1, Math.ceil(days - 1e-9)));
+  return Math.min(MAX_DAYS, Math.max(0.1, Math.ceil(days * 10 - 1e-6) / 10));
 }
 
 const num = (v) => {
@@ -134,8 +151,11 @@ export class GanttService {
     const lines = await this.svc.obraLines(obras.map((o) => o.id), db);
     const ids = lines.map((l) => l.id);
     const extra = new Map((await db.query('SELECT id, base_code FROM presupuesto_partidas WHERE id = ANY($1::uuid[])', [ids])).rows.map((r) => [r.id, r.base_code]));
-    const overrides = new Map((await db.query('SELECT partida_id, duration_days FROM gantt_tareas WHERE partida_id = ANY($1::uuid[])', [ids])).rows.map((r) => [r.partida_id, r.duration_days]));
-    const deps = (await db.query('SELECT partida_id, predecessor_id, type, lag_days FROM gantt_dependencias WHERE partida_id = ANY($1::uuid[]) ORDER BY predecessor_id', [ids])).rows;
+    const overrides = new Map((await db.query('SELECT partida_id, duration_days FROM gantt_tareas WHERE partida_id = ANY($1::uuid[]) AND duration_days IS NOT NULL', [ids])).rows.map((r) => [r.partida_id, Number(r.duration_days)]));
+    const deps = (await db.query(`SELECT partida_id, predecessor_id, type, lag_days FROM gantt_dependencias WHERE partida_id = ANY($1::uuid[])
+                                  UNION ALL
+                                  SELECT partida_id, obra_id, type, lag_days FROM gantt_inicio_dependencias WHERE partida_id = ANY($1::uuid[]) AND obra_id = ANY($2::uuid[])
+                                  ORDER BY 2`, [ids, obras.map((o) => o.id)])).rows;
     return { view, obras, lines, extra, overrides, deps };
   }
 
@@ -152,20 +172,22 @@ export class GanttService {
       const code = codeOf(l), r = code ? rend.get(code) ?? null : null;
       const computed = durationFrom(l.quantity, r, col?.perHour);
       const override = overrides.get(l.id) ?? null;
-      return { l, code, r, computed, override, id: l.id, earliest: cal.index(obraStart.get(l.obra_id)), duration: override || computed || 1 };
+      return { l, code, r, computed, override, id: l.id, earliest: cal.index(obraStart.get(l.obra_id)), duration: override ?? computed ?? 1 };
     });
-    const sched = schedule(tasks, deps, names);
+    const hitos = obras.map((o) => ({ id: o.id, earliest: cal.index(obraStart.get(o.id)), duration: 0 }));
+    for (const o of obras) names.set(o.id, obras.length > 1 ? `Inicio de obra ${o.ref}` : 'Inicio de obra');
+    const sched = schedule([...hitos, ...tasks], deps, names);
     const obraOf = new Map(obras.map((o) => [o.id, o]));
     const canEdit = (obraId) => this.user.role === 'admin' || obraOf.get(obraId)?.jefe?.id === this.user.id;
     const out = tasks.map((t) => {
-      const s = sched.get(t.id), l = t.l;
+      const s = sched.get(t.id), l = t.l, sp = span(s);
       const q = Number(l.quantity), ex = Number(l.executed);
       return {
         id: l.id, obraId: l.obra_id, presupuesto: { id: l.presupuesto_id, ref: l.ref, title: l.title, ampliacion: !!l.parent_id },
         chapter: l.chapter_name, code: l.code, baseCode: t.code, name: l.name, unit: l.unit, quantity: l.quantity,
         rendimiento: t.r, computedDuration: t.computed, durationOverride: t.override, duration: t.duration,
-        warning: t.override ? null : !t.code ? 'Partida sin código de la base: 1 día; indica la duración' : t.r === null ? 'Sin rendimiento en la base: 1 día; indica la duración' : null,
-        start: cal.date(s.start), end: cal.date(s.end),
+        warning: t.override !== null ? null : !t.code ? 'Partida sin código de la base: 1 día; indica la duración' : t.r === null ? 'Sin rendimiento en la base: 1 día; indica la duración' : null,
+        start: cal.date(sp.first), end: cal.date(sp.last), startAt: sp.from, endAt: sp.to,
         executionPct: q > 0 ? Math.round(Math.min(ex, q) / q * 1000) / 10 : 0,
         predecessors: deps.filter((d) => d.partida_id === l.id).map((d) => ({ id: d.predecessor_id, type: d.type, lag: d.lag_days })),
         canEdit: canEdit(l.obra_id),
@@ -175,6 +197,8 @@ export class GanttService {
     return {
       project: { id: view.project.id, code: view.project.code, name: view.project.name },
       obras: obras.map((o) => ({ id: o.id, ref: o.ref, title: o.title, startDate: o.startDate, plannedStart: obraStart.get(o.id) })),
+      // Milestones a task may take as predecessor (id = the obra's id).
+      hitos: obras.map((o) => ({ id: o.id, obraId: o.id, ref: o.ref, name: names.get(o.id), date: obraStart.get(o.id) })),
       start: starts[0] || base, end: ends[ends.length - 1] || base,
       rendimiento: col ? { column: col.name, unit: col.perHour ? 'h por unidad' : 'unidades por jornada' } : null,
       tasks: out,
@@ -190,7 +214,8 @@ export class GanttService {
     if (duration === '' || duration === undefined) duration = null;
     if (duration !== null) {
       duration = Number(duration);
-      if (!Number.isInteger(duration) || duration < 1 || duration > MAX_DAYS) fail(400, `La duración son días laborables enteros, de 1 a ${MAX_DAYS}`);
+      if (!Number.isFinite(duration) || duration < 0 || duration > MAX_DAYS || Math.abs(duration * 10 - Math.round(duration * 10)) > 1e-6) fail(400, `La duración son días laborables con un decimal como mucho, de 0 a ${MAX_DAYS}`);
+      duration = Math.round(duration * 10) / 10;
     }
     const list = body.predecessors ?? [];
     if (!Array.isArray(list) || list.length > 50) fail(400, 'Predecesoras no válidas');
@@ -229,21 +254,26 @@ export class GanttService {
       await c.query('BEGIN');
       const { lines, obras } = await this.load(projectId, c);
       const inProject = new Set(lines.map((l) => l.id));
+      const hitoIds = new Set(obras.map((o) => o.id));
       const obraOf = new Map(lines.map((l) => [l.id, obras.find((o) => o.id === l.obra_id)]));
-      const name = (id) => { const l = lines.find((x) => x.id === id); return l ? (l.code || l.name) : id; };
+      const name = (id) => { const l = lines.find((x) => x.id === id); return l ? (l.code || l.name) : hitoIds.has(id) ? 'Inicio de obra' : id; };
       const details = [];
       for (const { partidaId, duration, preds } of prepared) {
         if (!inProject.has(partidaId)) fail(404, 'Esa partida no es una tarea de este proyecto');
         const obra = obraOf.get(partidaId);
         if (this.user.role !== 'admin' && obra?.jefe?.id !== this.user.id) fail(403, 'Solo el jefe de esta obra o un administrador cambia su planificación');
-        for (const p of preds) if (!inProject.has(p.id)) fail(400, 'La predecesora no es una tarea de este proyecto');
+        for (const p of preds) if (!inProject.has(p.id) && !hitoIds.has(p.id)) fail(400, 'La predecesora no es una tarea de este proyecto');
         if (duration === null) await c.query('DELETE FROM gantt_tareas WHERE partida_id=$1', [partidaId]);
         else await c.query(`INSERT INTO gantt_tareas (partida_id, duration_days, updated_by) VALUES ($1,$2,$3)
                             ON CONFLICT (partida_id) DO UPDATE SET duration_days=EXCLUDED.duration_days, updated_by=EXCLUDED.updated_by, updated_at=now()`, [partidaId, duration, this.user.id]);
         await c.query('DELETE FROM gantt_dependencias WHERE partida_id=$1', [partidaId]);
-        for (const p of preds) await c.query('INSERT INTO gantt_dependencias (partida_id, predecessor_id, type, lag_days) VALUES ($1,$2,$3,$4)', [partidaId, p.id, p.type, p.lag]);
+        await c.query('DELETE FROM gantt_inicio_dependencias WHERE partida_id=$1', [partidaId]);
+        for (const p of preds) {
+          if (hitoIds.has(p.id)) await c.query('INSERT INTO gantt_inicio_dependencias (partida_id, obra_id, type, lag_days) VALUES ($1,$2,$3,$4)', [partidaId, p.id, p.type, p.lag]);
+          else await c.query('INSERT INTO gantt_dependencias (partida_id, predecessor_id, type, lag_days) VALUES ($1,$2,$3,$4)', [partidaId, p.id, p.type, p.lag]);
+        }
         const line = lines.find((l) => l.id === partidaId);
-        details.push(`${line.ref} · ${line.code || line.name}: ${duration ? `${duration} días` : 'duración según rendimiento'}${preds.length ? ` · predecesoras ${preds.map((p) => `${name(p.id)} ${p.type}${p.lag ? (p.lag > 0 ? `+${p.lag}` : p.lag) : ''}`).join(', ')}` : ' · sin predecesoras'}`);
+        details.push(`${line.ref} · ${line.code || line.name}: ${duration !== null ? `${String(duration).replace('.', ',')} días` : 'duración según rendimiento'}${preds.length ? ` · predecesoras ${preds.map((p) => `${name(p.id)} ${p.type}${p.lag ? (p.lag > 0 ? `+${p.lag}` : p.lag) : ''}`).join(', ')}` : ' · sin predecesoras'}`);
       }
       const result = await this.get(projectId, c); // throws on a cycle → rollback, nothing applied
       const label = prepared.length === 1 ? lines.find((l) => l.id === prepared[0].partidaId)?.ref : `${prepared.length} tareas`;

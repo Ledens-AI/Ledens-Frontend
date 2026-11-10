@@ -136,6 +136,18 @@ const FOOTER = /p[aá]gina\s+\d+\s+de\s+\d+|page\s+\d+\s+of\s+\d+/i;
 // column it falls in.
 const chapterTitle = (f) => Object.entries(f).filter(([k, v]) => !['quantity', 'unitPrice', 'total'].includes(k) && v && !/^[\d.,\s€%]+$/.test(v))
   .map(([, v]) => v.trim()).sort((a, b) => b.length - a.length)[0] || '';
+// A numbered row without an amount is a chapter only when nothing else is
+// written beside it: in a table whose chapter column repeats on every line
+// («2. Demoliciones y / desmontajes» wrapped next to each partida), the first
+// wrapped line of a partida's name starts with that number too, and taking it
+// for a chapter dropped that part of the name.
+const NUMBERED = /^\s*\d+(\.\d+)*\.?\s+\S/;
+const TEXT_FIELDS = ['chapter', 'code', 'name', 'description', 'unit'];
+export const isChapterRow = (f, total) => {
+  const numbered = ['chapter', 'code', 'name'].find((k) => NUMBERED.test(f[k] || ''));
+  if (total != null) return true;
+  return !!numbered && !TEXT_FIELDS.some((k) => k !== numbered && String(f[k] || '').trim());
+};
 const columnOf = (cols, cx) => cols.reduce((best, c) => (Math.abs(c.cx - cx) < Math.abs(best.cx - cx) ? c : best), cols[0]).key;
 
 function fromText(pages, fullText) {
@@ -160,7 +172,7 @@ function fromText(pages, fullText) {
       if (q != null && q > 0 && (p != null || t != null)) {
         r.anchor = { quantity: q, unitPrice: p, total: t, parts: {} };
         anchors.push(r);
-      } else if (q == null && p == null && (t != null || /^\s*\d+(\.\d+)*\.?\s+\S/.test(r.f.chapter || r.f.code || r.f.name || '')) && !FOOTER.test(r.text) && chapterTitle(r.f)) {
+      } else if (q == null && p == null && isChapterRow(r.f, t) && !FOOTER.test(r.text) && chapterTitle(r.f)) {
         r.chapterHeader = chapterTitle(r.f);
       }
     }
@@ -262,7 +274,7 @@ export function fromLayout(result) {
       if (q != null && q > 0 && (p != null || t != null)) {
         last = { chapter: f.chapter, code: f.code, name: f.name, description: f.description, unit: f.unit, quantity: q, unitPrice: p, total: t };
         records.push(last);
-      } else if (q == null && p == null && (t != null || /^\s*\d+(\.\d+)*\.?\s+\S/.test(f.chapter || f.code || f.name || '')) && chapterTitle(f)) {
+      } else if (q == null && p == null && isChapterRow(f, t) && chapterTitle(f)) {
         records.push({ chapterHeader: chapterTitle(f) }); last = null;
       } else if (last) {
         for (const k of ['name', 'description']) if (f[k]) last[k] = `${last[k] || ''} ${f[k]}`.trim();
