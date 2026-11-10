@@ -8,11 +8,12 @@ import {AlertService} from '../notifications/service.js';
 import {BridgeService} from '../bridge/service.js';
 import {FinanzasService} from '../finanzas/service.js';
 import {traced,startRun,finishRun} from '../logs/runs.js';
+import {CaixabankStatements,validateStatement,statementSettings} from '../ingestion/caixabank.js';
 
 // Logs de transacciones: what each automation call did, without file names or contents.
 const OCR_RESULT={ready:'Datos extraídos',review:'Requiere revisión manual',archived:'Ya archivada'};
 
-export function createIngestionRouter({service,config,tokenHash}={}) {
+export function createIngestionRouter({service,config,tokenHash,statements,statementConfig}={}) {
   const router=express.Router();
   router.use((req,res,next)=>{
     const expected=tokenHash ?? process.env.INGEST_TOKEN_SHA256;
@@ -20,7 +21,7 @@ export function createIngestionRouter({service,config,tokenHash}={}) {
     const token=req.get('authorization')?.match(/^Bearer ([A-Za-z0-9_-]{43,128})$/)?.[1] || '';
     const actual=createHash('sha256').update(token).digest();
     if(!token || !timingSafeEqual(actual,Buffer.from(expected,'hex'))) return res.status(401).json({error:'unauthorized'});
-    if(!service && !isDbConfigured()) return res.status(503).json({error:'database_not_configured'});
+    if(!service && !statements && !isDbConfigured()) return res.status(503).json({error:'database_not_configured'});
     next();
   });
   // Parse only after authentication. Do not increase the public API's body limit.
@@ -39,6 +40,16 @@ export function createIngestionRouter({service,config,tokenHash}={}) {
     const file=await validateInvoice(req.body,settings());
     const result=await getService().receive(file);
     res.status(result.replay||result.duplicate?200:202).json(result);
+  }));
+  // CaixaBank statement (Norma 43 .txt) from «datasource/Caixabank/Landing»: its movements
+  // join ledens.bank_movements. 200 = processed (the flow then moves the file to Archive);
+  // a file that does not add up answers 422 and stays in Landing.
+  router.post('/extractos/caixabank',traced('extractos','Extracto de CaixaBank',{entity:req=>({type:'elemento_sharepoint',id:req.body?.item_id}),
+    summary:b=>({message:b.replay?'Reintento: el extracto ya estaba procesado':`${b.movements} movimientos · ${b.inserted} nuevos · ${b.duplicates} ya existentes`,
+      detail:{fichero_id:b.file_id,movimientos:b.movements,nuevos:b.inserted,existentes:b.duplicates,desde:b.period_from,hasta:b.period_to}})})(async(req,res)=>{
+    const cfg=statementConfig || statementSettings();
+    const file=validateStatement(req.body,cfg);
+    res.json(await (statements || new CaixabankStatements(getPool(),cfg)).receive(file));
   }));
   router.post('/bridge/run',traced('bridge','Conciliación periódica',{
     summary:b=>({message:`${b.evaluated} evaluados · ${b.matched} conciliados · ${b.pending} pendientes · ${b.errors} con error`,
