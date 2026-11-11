@@ -7,7 +7,11 @@ import crypto from 'node:crypto';
 // (migration 032). Only fields are added (`nameEn`, `descriptionEn`,
 // `notesEn`): the Spanish stays as it is, so the team's editor never saves a
 // translation. Without a translator, or if it fails, the Spanish is shown.
-export const LANGS = ['en'];
+// Some lines are typed in another language (an ampliación written in
+// English), so Spanish is a target too (`nameEs`, …): a text the translator
+// already finds Spanish is kept as written and only cached, never rewritten.
+export const LANGS = ['en', 'es'];
+const SUFFIX = { en: 'En', es: 'Es' };
 const hash = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 // Every [object, field] of the doc a client reads.
@@ -43,12 +47,13 @@ export async function translateDoc(db, translator, doc, lang) {
     } catch (e) { errors.push(`caché: ${e.message || e}`); }
   }
   const missing = texts.filter((t) => !known.has(t));
-  if (missing.length && !translator) errors.push('traductor no configurado (AZURE_TRANSLATOR_KEY)');
+  // Spanish without a translator is the text as written: nothing to report.
+  if (missing.length && !translator && lang !== 'es') errors.push('traductor no configurado (AZURE_TRANSLATOR_KEY)');
   if (missing.length && translator) {
     let fresh = [];
     try {
       const res = await translator.translate(missing, { to: lang });
-      fresh = missing.map((t, n) => [t, res[n]?.text]).filter(([, x]) => typeof x === 'string' && x.trim());
+      fresh = missing.map((t, n) => [t, res[n]?.from === lang ? t : res[n]?.text]).filter(([, x]) => typeof x === 'string' && x.trim());
       for (const [t, x] of fresh) known.set(t, x);
     } catch (e) { errors.push(`traductor: ${e.message || e}`); }
     if (fresh.length) {
@@ -60,8 +65,12 @@ export async function translateDoc(db, translator, doc, lang) {
     }
   }
   if (errors.length) console.error('[traducciones]', doc.ref || doc.id, errors.join(' · '));
-  for (const [o, k] of list) if (known.has(o[k])) o[`${k}En`] = known.get(o[k]);
+  // A text already in the target language adds nothing.
+  for (const [o, k] of list) if (known.has(o[k]) && known.get(o[k]) !== o[k]) o[`${k}${SUFFIX[lang]}`] = known.get(o[k]);
   const complete = texts.every((t) => known.has(t));
+  // Budgets are written in Spanish, so an untranslated Spanish screen is
+  // still readable: only the English screen reports what is missing.
+  if (lang === 'es') return doc;
   doc.translation = { lang, complete, ...(!complete && doc.can?.rename ? { error: errors.join(' · ') || 'traducción incompleta' } : {}) };
   return doc;
 }

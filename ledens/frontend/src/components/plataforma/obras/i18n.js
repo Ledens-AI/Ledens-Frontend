@@ -157,8 +157,9 @@ const TXT = {
 };
 
 // A budget text (chapter or line name, description, notes) in the screen's
-// language: the backend adds `<field>En` when asked in English.
-const trEs = (o, k) => o?.[k];
+// language: the backend adds `<field>En` / `<field>Es` (X-Ledens-Lang) when the
+// text was written in another language; otherwise it is shown as written.
+const trEs = (o, k) => o?.[`${k}Es`] || o?.[k];
 const trEn = (o, k) => o?.[`${k}En`] || o?.[k];
 function build(lang) {
   if (lang === 'en') {
