@@ -1,5 +1,5 @@
 import {BridgeError} from './service.js';
-import {bankFingerprint,documentFingerprint,day} from './rules.js';
+import {bankFingerprint,documentFingerprint,day,BANK_MOVEMENTS} from './rules.js';
 
 const page=f=>{
  const limit=Number(f.limit??25),offset=Number(f.offset??0);
@@ -27,9 +27,9 @@ export class BridgeWorkspace {
    AND concat_ws(' ',b.description,b.reference,b.payer,b.beneficiary_name,x.documents) ILIKE $2
    AND ($3::date IS NULL OR b.completed_on>=$3) AND ($4::date IS NULL OR b.completed_on<=$4)`;
   const params=[filters.pending!==false,f.q,f.from,f.to];
-  const total=(await this.pool.query(`SELECT count(*)::int n FROM ledens.bank_movements b ${totals} WHERE ${where}`,params)).rows[0].n;
+  const total=(await this.pool.query(`SELECT count(*)::int n FROM ${BANK_MOVEMENTS} b ${totals} WHERE ${where}`,params)).rows[0].n;
   const rows=(await this.pool.query(`SELECT b.*,x.links,x.review_links,x.confirmed::text confirmed,x.documents,
-   (b.total_amount-x.confirmed)::text remaining FROM ledens.bank_movements b ${totals} WHERE ${where}
+   (b.total_amount-x.confirmed)::text remaining FROM ${BANK_MOVEMENTS} b ${totals} WHERE ${where}
    ORDER BY b.completed_on DESC NULLS LAST,b.id LIMIT $5 OFFSET $6`,[...params,f.limit,f.offset])).rows;
   return {rows:rows.map(b=>({...b,bank_fingerprint:bankFingerprint(b)})),total,limit:f.limit,offset:f.offset};
  }

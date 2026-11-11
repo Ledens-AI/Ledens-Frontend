@@ -6,9 +6,9 @@
 import {getPool,isDbConfigured} from '../db/pool.js';
 
 export const PROCESSES={
- ingesta:'Ingesta de facturas',ocr:'Extracción (OCR)',archivo:'Archivo del original',bridge:'Conciliación Bridge',
+ ingesta:'Ingesta de facturas',ocr:'Extracción (OCR)',archivo:'Archivo del original',extractos:'Extractos bancarios',bridge:'Conciliación Bridge',
  alertas:'Alertas por correo',imputacion:'Imputación a proyectos',validacion:'Validación contable',
- pago_trabajadores:'Pago a trabajadores',cobros_clientes:'Cobros de clientes',proyectos:'Proyectos',trabajadores:'Trabajadores',permisos:'Permisos de finanzas',efectivo:'Efectivo',
+ pago_trabajadores:'Pago a trabajadores',cobros_clientes:'Cobros de clientes',proyectos:'Proyectos',trabajadores:'Trabajadores',permisos:'Permisos de finanzas',efectivo:'Efectivo',cuentas_por_pagar:'Cuentas por pagar',
 };
 export const STATUSES=['en_curso','ok','rechazado','error'];
 // A run still «en_curso» after this long did not finish (crash, timeout, restart).

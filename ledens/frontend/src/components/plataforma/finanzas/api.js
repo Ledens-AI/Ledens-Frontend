@@ -1,8 +1,39 @@
 // Calls to /api/finanzas (backend: ledens/backend/src/routes/finanzas.js).
 // Same-origin relative paths, session cookie travels by itself.
 export class ApiError extends Error {
-  constructor(status, message, data) { super(message); this.status = status; this.data = data; }
+  constructor(status, message, data, code) { super(message); this.status = status; this.data = data; this.code = code; }
 }
+
+// The canonical finance engine (backend src/finance/*) answers with codes, not
+// text: show each one as a sentence. Unknown text (already Spanish) passes as is.
+const FINANCE_ERRORS = {
+  stale_record: 'El registro ha cambiado mientras tanto; se ha actualizado. Pulsa Guardar de nuevo.',
+  source_requires_correction: 'El origen de este registro necesita corrección antes de asignarlo (revisa su documento o movimiento).',
+  allocation_exceeds_source: 'Lo asignado supera el importe del registro.',
+  document_amount_exceeded: 'El documento ya tiene asignado todo su importe: esta línea lo superaría. Revisa si está duplicada o si el documento no cuadra con sus conceptos.',
+  bank_amount_exceeded: 'El movimiento bancario ya tiene asignado todo su importe: este registro lo superaría. Revisa si está duplicado.',
+  recognition_requires_document: 'Este movimiento bancario no tiene documento (factura o ticket) conciliado; concílialo antes de asignarlo.',
+  refund_requires_bank_receipt: 'Una devolución necesita el cobro bancario conciliado.',
+  document_direction_requires_review: 'El documento no indica si es a pagar o a cobrar; revísalo antes de asignarlo.',
+  document_direction_mismatch: 'El documento es de sentido contrario (a pagar / a cobrar) al registro.',
+  duplicate_document_representation: 'El documento está registrado a la vez por líneas y por total; hay que revisar su ingesta.',
+  source_category_mismatch: 'La categoría no corresponde al origen del registro.',
+  customer_receipt_is_not_revenue: 'Un cobro de cliente solo puede registrarse como anticipo.',
+  unsupported_currency: 'Solo se pueden asignar registros en euros.',
+  line_already_registered: 'Esta línea ya está registrada con otro importe.',
+  idempotency_conflict: 'Esta operación ya se envió con otros datos; recarga la página.',
+  project_not_found: 'El proyecto ya no existe.',
+  record_not_found: 'El registro ya no existe; recarga la página.',
+  document_not_found: 'El documento no existe.',
+  finance_forbidden: 'No tienes permiso sobre este proyecto o registro.',
+  invalid_allocation: 'Importe de asignación no válido.',
+  invalid_assignment: 'Asignación no válida; recarga el registro.',
+  invalid_bulk_request: 'Lote no válido; recarga la página.',
+  budget_not_approved: 'El presupuesto no está aprobado.',
+  budget_version_not_found: 'No se encuentra la versión del presupuesto.',
+  invalid_budget_lines: 'El presupuesto no tiene líneas válidas.',
+};
+export const financeErrorText = (msg) => FINANCE_ERRORS[msg] || msg;
 
 // «Ver como» (admins): every request then answers as that user, read-only.
 let viewAsId = null;
@@ -25,7 +56,7 @@ async function request(method, url, body, headers = {}) {
       : r.status === 403 ? 'No tienes permiso para esta acción.'
       : r.status === 429 ? 'Demasiadas operaciones seguidas. Espera un momento.'
       : 'No se pudo completar la operación.';
-    throw new ApiError(r.status, data.error || fallback, data);
+    throw new ApiError(r.status, data.error ? financeErrorText(data.error) : fallback, data, data.error);
   }
   return data;
 }
@@ -110,6 +141,16 @@ export const api = {
   createWorker: (body) => request('POST', '/api/finanzas/gestion-trabajadores', body),
   updateWorker: (id, body) => request('PUT', `/api/finanzas/gestion-trabajadores/${id}`, body),
   setWorkerActive: (id, body) => request('PUT', `/api/finanzas/gestion-trabajadores/${id}/estado`, body),
+  // Cuentas por pagar (backend: finanzas/payables.js; admins only).
+  payables: (f) => request('GET', '/api/finanzas/cuentas-por-pagar' + qs(f)),
+  payablesOptions: () => request('GET', '/api/finanzas/cuentas-por-pagar/opciones'),
+  payablesGrid: (f) => request('GET', '/api/finanzas/cuentas-por-pagar/jornales' + qs(f)),
+  setAttendance: (items) => request('PUT', '/api/finanzas/cuentas-por-pagar/asistencia', { items }),
+  setPaySettings: (id, body) => request('PUT', `/api/finanzas/cuentas-por-pagar/trabajadores/${id}/ajustes`, body),
+  createPayable: (body) => request('POST', '/api/finanzas/cuentas-por-pagar', body),
+  updatePayable: (id, body) => request('PUT', `/api/finanzas/cuentas-por-pagar/${id}`, body),
+  setPayableStatus: (body) => request('POST', '/api/finanzas/cuentas-por-pagar/estado', body),
+  setPayableProject: (body) => request('POST', '/api/finanzas/cuentas-por-pagar/proyecto', body),
   saveWorkerSplits: (items) => request('POST', '/api/finanzas/pendiente-trabajador/guardar', { items }),
   returnWorkerBatch: (batchId) => request('DELETE', `/api/finanzas/pendiente-trabajador/${batchId}`),
 };

@@ -6,6 +6,7 @@ import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { readBudgetPdf, pdfDraft, parseNumber, classifyHeader, fromLayout } from '../src/presupuestos/pdf.js';
 import { PresupuestosService } from '../src/presupuestos/service.js';
 import { createPresupuestosRouter } from '../src/routes/presupuestos.js';
+import { capituloEnDosLineas } from './fixtures/pdf-capitulo-en-dos-lineas.js';
 // Budget PDFs read into chapters and lines. The PDFs are generated here with
 // fictitious data in the two layouts the company uses: the budget PDF
 // (chapter column, two-line header, names wrapped above and below the figures,
@@ -256,4 +257,17 @@ test('a PDF budget can join an existing obra of the client: one more presupuesto
   assert.equal(mine.find((x) => x.id === p.id).phase, 'pendiente');
   assert.equal(mine.find((x) => x.id === p.id).parent.id, obra.id);
   assert.equal((await new PresupuestosService(pool, cliente).get(obra.id)).obra.base, '100.00', 'it adds to the obra only once approved');
+});
+
+// The chapter column wraps beside each partida («2. Demoliciones y» /
+// «desmontajes») on the same line as the first line of the name: that line is
+// part of the partida, not a chapter (it used to be dropped, leaving
+// «(aseo pequeño y entrada)» as the name).
+test('a name wrapped beside a numbered chapter cell keeps its first line', async () => {
+  const b = await readBudgetPdf(await capituloEnDosLineas());
+  assert.deepEqual(b.chapters.map((c) => [c.name, c.items.map((i) => i.name)]), [
+    ['Demoliciones y desmontajes', ['Retirada de tela existente en techo (aseo pequeño y entrada)', 'Desmontaje inodoro en baño']],
+    ['Albañilería', ['Regularización de paredes']],
+  ]);
+  assert.equal(b.chapters[0].items[0].description, 'Retirada de la tela que cubre el techo, con limpieza del soporte.');
 });

@@ -12,6 +12,7 @@ import Logs from './Logs.jsx';
 import Rentabilidad from './Rentabilidad.jsx';
 import ConceptoMovimientos from './ConceptoMovimientos.jsx';
 import DocumentosSinAsignar from './DocumentosSinAsignar.jsx';
+import CuentasPorPagar from './CuentasPorPagar.jsx';
 import { FIN_TABS } from './tabs.js';
 import '../../../styles/finanzas.css';
 
@@ -23,13 +24,14 @@ const INTRO = {
   cliente: 'Cobros recibidos de clientes. Son cobros, no ingresos reconocidos: un anticipo no es facturación.',
   'documentos-sin-asignar': 'Documentos procesados (facturas recibidas y emitidas) que todavía no tienen ningún movimiento asignado en el Bridge. Las entregas de Obramat ya pagadas con su anticipo no aparecen.',
   concepto: 'Todos los movimientos, bancarios y en efectivo, clasificados como pago de materiales, pago a trabajadores o cobro de clientes. La clasificación sale de los documentos conciliados en el Bridge; si no se puede deducir, el movimiento queda «Pendiente de clasificación». La rentabilidad por proyecto solo es completa cuando no queda ninguno pendiente.',
-  conciliados: 'Movimientos ya conciliados con su factura y cómo está clasificado cada concepto: materiales, pagos a trabajadores o cobro de clientes. Si no estás de acuerdo, pulsa «Cambiar» e indica el motivo.',
+  conciliados: 'Cada movimiento ya conciliado, en una sola fila: con qué número de documento está conciliado, su clasificación y el proyecto al que está asignado. Todo movimiento conciliado tiene que estar asignado a un proyecto: los que no lo están se marcan como «Sin proyecto». Si no estás de acuerdo con la clasificación, pulsa «Cambiar» e indica el motivo.',
   conciliacion: 'Movimientos bancarios pendientes de conciliar con sus documentos. Pulsa «Asignar documento» para conciliar un movimiento con una factura existente, o selecciona los pagos de nóminas y pulsa «Pago a trabajadores» para segregarlos.',
   bridge:'Enlaces entre movimientos y documentos existentes, con importes, estado y motivo de conciliación.',
   'pendiente-trabajador': 'Pagos a trabajadores segregados de un movimiento bancario: más de 450 € en pagos de 100 € (Oficial), 450 € o menos en pagos de 60 € (Ayudante). Asigna trabajador y proyecto a cada uno y guárdalo.',
   rentabilidad: 'Resultado (ingresos − costes) de cada proyecto a partir de los movimientos asignados, validados o no. Pulsa una barra o elige un proyecto para ver solo sus movimientos.',
   proyectos: 'Alta y edición de proyectos: código, cliente, dirección, estado y fechas. Los cambios quedan en la auditoría.',
   logs: 'Cada ejecución de los procesos de transacciones: cuándo empieza, si termina bien, si se rechaza o si falla, con su duración y el registro afectado.',
+  'cuentas-por-pagar': 'Lo que hay que pagar y todavía no está pagado. Cada día que pasa se genera el jornal de cada trabajador con su pago diario; los añadidos a mano se imputan a un proyecto. Arriba, el dinero que necesitarás a fin de semana (trabajadores semanales) y a fin de mes (mensuales).',
   trabajadores: 'Alta, edición, baja y reactivación de trabajadores. Una baja no borra nada: el trabajador conserva sus pagos y deja de ofrecerse para pagos nuevos.',
 };
 
@@ -86,6 +88,7 @@ export default function GestionFinanciera({ tab, go, toast, onPending, onBridgeP
       {tab === 'pendiente-trabajador' ? <PendienteTrabajador toast={toast} onChanged={changed} /> : null}
       {tab === 'proyectos' ? <Proyectos toast={toast} /> : null}
       {tab === 'trabajadores' ? <Trabajadores toast={toast} /> : null}
+      {tab === 'cuentas-por-pagar' ? <CuentasPorPagar toast={toast} /> : null}
       {tab === 'logs' ? <Logs /> : null}
       {tab === 'rentabilidad' ? (
         <Rentabilidad project={rentProject} onProject={setRentProject} version={version} toast={toast} />

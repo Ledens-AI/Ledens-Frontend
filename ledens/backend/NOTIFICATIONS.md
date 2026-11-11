@@ -42,4 +42,4 @@ Para las alertas no hay nuevas variables de entorno de backend (las invitaciones
 
 ## Estado de activación
 
-La conexión Outlook se ha creado pero requiere inicio de sesión. La revisión automática bloqueó la concesión del secreto hasta autorización explícita. No se ha activado ni verificado envío real. La plantilla con `To` dinámico (invitaciones) está en el repositorio pero no desplegada: se aplica al activar la Logic App, con confirmación del usuario. Hasta entonces las invitaciones quedan en la cola sin enviarse; su caducidad (7 días) cuenta desde el envío, así que conviene reenviarlas al activar el correo.
+Activo y verificado (4 Nov 2026): la conexión Outlook `office365-ledens-alerts` está `Connected`, la Logic App `ledens-transaction-alerts` está `Enabled` y corre cada 5 minutos; una entrega real de `password_link` se comprobó de extremo a extremo (`Claim_messages` → `Send_email` → `Mark_delivered`, los tres `Succeeded`). Las invitaciones de cliente usan la misma cola y Logic App, así que también deberían entregarse — si una parece no haber llegado, reenviarla cuenta como una entrega nueva, no hace falta reactivar nada.

@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import express from 'express';
 import { agenteDraft } from '../src/presupuestos/agente.js';
 import { createPresupuestosRouter } from '../src/routes/presupuestos.js';
+import { PresupuestosService } from '../src/presupuestos/service.js';
 // A draft generated from the loose documentation of a client visit (notes,
 // transcribed voice notes, photos, plans), matched against the same
 // fictitious base de partidas as presupuestos-dimpartida.test.js. The model
@@ -33,7 +34,7 @@ before(async () => {
     CREATE TABLE ledens.work_items(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), source_id text, raw_id uuid, id_partida text, category_id uuid REFERENCES ledens.work_categories(id), categoria text, name text,
       definicion_partida text, unit_source text, sale_price_including_vat numeric, sale_price_excluding_vat numeric, incluye_materiales text, activa text, subcategoria text, palabrasclave text,
       observacionesagente text, rendimientovalidado text, observacionesplanificacion text, unit_id uuid);`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql']) await db.exec(await fs.readFile(new URL('../src/db/migrations/' + m, import.meta.url), 'utf8'));
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql']) await db.exec(await fs.readFile(new URL('../src/db/migrations/' + m, import.meta.url), 'utf8'));
   for (const [code, name] of [...new Map(BASE.map((b) => [b.cat, b.catName]))]) await db.query('INSERT INTO ledens.work_categories(id_categoria,name) VALUES ($1,$2)', [code, name]);
   for (const b of BASE) {
     await db.query(`INSERT INTO ledens.work_items(id_partida,category_id,categoria,name,definicion_partida,unit_source,sale_price_including_vat,sale_price_excluding_vat,activa,subcategoria,palabrasclave)
@@ -69,10 +70,9 @@ test('a confirmed line is matched and priced from the base; a pending one is fla
   assert.equal(d.source, 'agente');
   assert.equal(d.title, 'Reforma baño cliente de prueba');
   assert.equal(d.chapters.length, 1);
-  assert.equal(d.chapters[0].items.length, 2, 'the no_incluida line never becomes a billable item');
-  const [pintura, pendiente] = d.chapters[0].items;
-  assert.deepEqual([pintura.baseCode, pintura.quantity, pintura.unitPrice, pintura.check], ['PA-200', '12', net(8), false]);
-  assert.deepEqual([pendiente.quantity, pendiente.check, pendiente.kind], ['0', true, 'confirmada']);
+  assert.equal(d.chapters[0].items.length, 1, 'neither the no_incluida nor the unmeasured pending line become a billable item — a line always needs quantity > 0');
+  const [pintura] = d.chapters[0].items;
+  assert.deepEqual([pintura.baseCode, pintura.quantity, pintura.unitPrice], ['PA-200', '12', net(8)]);
   assert.match(d.warnings.find((w) => w.includes('pasillo')), /Falta medición.*largo y ancho del pasillo/);
   assert.match(d.warnings.find((w) => w.includes('Fuera de alcance')), /bañera por plato de ducha/);
   assert.match(d.notes, /Reforma de baño/);
@@ -88,6 +88,22 @@ test('nothing in the base covers a line: a proposal, never a guessed price', asy
   assert.ok(item.proposal, 'queued for an admin to approve, like the PDF-import flow');
   assert.equal(item.proposal.priceInclVat, null, 'never a guessed price');
   assert.equal(item.unitPrice, '0');
+});
+
+test('the draft actually saves: presupuesto_partidas never accepts quantity 0, so a pending line must never reach it', async () => {
+  const draft = {
+    resumen: 'x', titulo: 'Guardable',
+    capitulos: [{
+      nombre: 'Pintura',
+      partidas: [
+        { nombre: 'Pintura de paredes del baño', descripcion: 'x', unidad: 'm²', cantidad: 12, estado: 'confirmada' },
+        { nombre: 'Pintura del pasillo', descripcion: 'x', unidad: 'm²', cantidad: null, estado: 'pendiente_medicion', motivoPendiente: 'Falta medir.' },
+      ],
+    }],
+  };
+  const d = await agenteDraft({ role: 'jefe' }, { notes: 'x' }, { db: pool, anthropic: fakeAnthropic(draft) });
+  const saved = await new PresupuestosService(pool, jefe).create({ ...d, clientId: cliente.id });
+  assert.equal(saved.version.chapters[0].items.length, 1, 'only the line with a real quantity was saved');
 });
 
 test('through the API: a jefe generates a draft from the agent, a client cannot', async () => {

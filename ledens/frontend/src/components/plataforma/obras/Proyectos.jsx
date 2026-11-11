@@ -5,6 +5,7 @@ import { eur, fecha } from '../finanzas/format.js';
 import { Empty, ErrorBox, Kpi, Badge } from '../finanzas/ui.jsx';
 import { PhaseBadge, Progress } from './Detalle.jsx';
 import { useObrasI18n } from './i18n.js';
+import Gantt from './Gantt.jsx';
 
 /* «Presupuestos y obras» by project: every presupuesto belongs to a project of
  * Gestión financiera (ledens.projects) through its obra. The team (admin and
@@ -107,6 +108,59 @@ export function ProjectsGrid({ list, projects, onOpenProject, onUnlinked }) {
   );
 }
 
+// «Actualizar avance»: every open project the user may see, with or without
+// presupuestos, each with its obras en curso (button straight into the
+// progress editor). A project closed in Gestión financiera still shows while
+// it has an obra en curso; obras with no project go last. Projects with obras
+// en curso come first, then the rest, newest code first.
+export function AvanceProyectos({ obras, projects, readOnly, panel, onUpdate, onOpenProject }) {
+  const [q, setQ] = useState('');
+  const map = new Map();
+  for (const pr of projects || []) map.set(pr.id, { project: pr, rows: [] });
+  for (const p of obras) {
+    const k = p.project?.id || '';
+    const g = map.get(k) || { project: p.project || null, rows: [] };
+    g.rows.push(p);
+    map.set(k, g);
+  }
+  const code = (g) => String(g.project?.code || '');
+  const all = [...map.values()]
+    .filter((g) => g.rows.length || g.project?.open !== false)
+    .sort((a, b) => (!a.project) - (!b.project) || (!a.rows.length) - (!b.rows.length) || code(b).localeCompare(code(a), 'es', { numeric: true }) || String(a.project?.name || '').localeCompare(String(b.project?.name || ''), 'es'));
+  const gs = all.filter((g) => !q || norm([g.project?.code, g.project?.name, g.project?.municipio, g.project?.address, g.project?.cliente, ...g.rows.map((r) => r.title), ...g.rows.map((r) => r.client?.name)].join(' ')).includes(norm(q)));
+  if (!all.length) {
+    return <Empty icon="ri-building-4-line" title="No hay proyectos abiertos" text={panel === 'admin' ? 'Los proyectos abiertos de Gestión financiera aparecen aquí, tengan o no presupuesto.' : 'Aquí verás los proyectos abiertos que tienes asignados y sus obras en curso.'} />;
+  }
+  return (
+    <div className="fin-stack">
+      {all.length > 6 ? (
+        <div className="fin-filters">
+          <label className="fin-field obr-grow"><span>Buscar proyecto</span>
+            <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Código, nombre, municipio, cliente u obra…" />
+          </label>
+        </div>
+      ) : null}
+      {gs.length ? gs.map((g) => (
+        <section key={g.project?.id || 'none'} className="fin-stack obr-avance-proj">
+          <div className="obr-avance-head">
+            <div>
+              <span className="fin-muted fin-small">{g.project ? g.project.code || 'Sin código' : 'Pendiente de vincular'}</span>
+              <h3 className="obr-avance-title">{g.project ? g.project.name : 'Obras sin proyecto'}</h3>
+              <span className="fin-muted fin-small">{[g.project?.cliente || [...new Set(g.rows.map((r) => r.client?.name).filter(Boolean))].join(', '), g.project?.municipio].filter(Boolean).join(' · ') || ' '}</span>
+            </div>
+            <div className="obr-actions">
+              {g.project?.status ? <Badge bg="#EDEDEA" fg="#3A3A38">{g.project.status}</Badge> : null}
+              {g.project && !g.project.missing ? <button type="button" className="fin-btn is-small" onClick={() => onOpenProject(g.project.id)}>Ver proyecto<i className="ri-arrow-right-s-line"></i></button> : null}
+            </div>
+          </div>
+          {g.rows.length ? <div className="obr-cards">{g.rows.map((p) => <ObraCard key={p.id} p={p} team cta={readOnly ? null : 'Actualizar avance'} onClick={() => onUpdate(p)} />)}</div>
+            : <p className="fin-muted fin-small obr-card-empty"><i className="ri-information-line" aria-hidden="true"></i> Sin obras en curso: una obra aparece aquí cuando su presupuesto está aprobado y tiene fecha de inicio.</p>}
+        </section>
+      )) : <Empty icon="ri-search-line" title="Ningún proyecto coincide" text="Prueba con otro código, nombre o cliente." />}
+    </div>
+  );
+}
+
 // The team's table of presupuestos (the project column is left out inside a project).
 export function PresupuestosTable({ rows, onOpen, showProject = true }) {
   const open = (p) => () => onOpen(p, p.phase === 'en_curso' ? 'obra' : undefined);
@@ -162,6 +216,7 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [fin, setFin] = useState(null); // { totales, rows, materiales, trabajadores } | { error }
+  const [gantt, setGantt] = useState(false); // Planificación (Gantt) open
 
   const load = useCallback(() => api.project(projectId).then((d) => { setData(d); setError(''); }, (e) => setError(e.message)), [projectId]);
   useEffect(() => { load(); }, [load]);
@@ -180,6 +235,7 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
   const back = <div><button type="button" className="fin-btn is-ghost is-small" onClick={onBack}><i className="ri-arrow-left-line"></i>Todos los proyectos</button></div>;
   if (error) return <div className="fin-stack">{back}<ErrorBox message={error} onRetry={load} /></div>;
   if (!data) return <div className="fin-loading fin-muted">Cargando el proyecto…</div>;
+  if (gantt) return <Gantt projectId={projectId} readOnly={readOnly} onBack={() => { setGantt(false); load(); }} />;
 
   const { project: pr, kpis: k, presupuestos: rows } = data;
   const obras = rows.filter((r) => r.phase === 'en_curso');
@@ -201,6 +257,7 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
         </div>
         <div className="obr-actions">
           {pr.status ? <Badge bg="#E3E7F3" fg="#3E4D85" icon="ri-building-2-line">{pr.status}</Badge> : null}
+          {k.aprobado.n ? <button type="button" className="fin-btn" onClick={() => setGantt(true)}><i className="ri-calendar-schedule-line"></i>Planificación (Gantt)</button> : null}
           {!readOnly && onNew ? <button type="button" className="fin-btn" onClick={() => onNew(pr)}><i className="ri-add-line"></i>Nuevo presupuesto</button> : null}
           {!readOnly && onImport ? <button type="button" className="fin-btn is-primary" onClick={() => onImport(pr)}><i className="ri-file-upload-line"></i>Subir PDF de presupuesto</button> : null}
           {!readOnly && onAgente ? <button type="button" className="fin-btn" onClick={() => onAgente(pr)}><i className="ri-magic-line"></i>Generar con la documentación de la visita</button> : null}

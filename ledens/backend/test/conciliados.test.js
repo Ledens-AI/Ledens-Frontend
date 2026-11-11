@@ -11,7 +11,7 @@ before(async()=>{
  const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
  await db.exec('ALTER TABLE users ADD COLUMN name text');
- for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','027_transferencias_internas.sql','028_treasury_movements.sql','030_efectivo_importado.sql'])
+ for(const name of ['004_invoice_ingestion.sql','005_bank_bridge.sql','006_project_finance.sql','010_finanzas_imputacion.sql','013_pago_trabajadores.sql','016_cash_movements.sql','026_materiales_provisionales.sql','029_provisional_todas_las_facturas.sql','027_transferencias_internas.sql','028_treasury_movements.sql','030_efectivo_importado.sql'])
   await db.exec(await fs.readFile(new URL('../src/db/migrations/'+name,import.meta.url),'utf8'));
  [admin,jefe]=(await db.query("INSERT INTO users(email,role,name) VALUES('admin@cc.test','admin','Admin'),('jefe@cc.test','jefe','Jefe') RETURNING id,role")).rows;
  const bank=async(amount,description)=>(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
@@ -31,38 +31,61 @@ before(async()=>{
  await line(await doc(-75,'Pagar','F-SIN-CONCILIAR'),1,'75','Sin conciliar');
 });
 after(()=>db?.close());
-const rowOf=async(id)=>(await asAdmin().reconciled({pageSize:100})).rows.find(r=>r.record_id===id);
+const movOf=async(doc)=>(await asAdmin().reconciled({pageSize:100})).rows.find(r=>r.documentos===doc);
 const version=async(id)=>(await db.query('SELECT version FROM ledens.financial_records WHERE id=$1',[id])).rows[0].version;
 const change=async(id,clase,reason='Revisado con la factura')=>asAdmin().reclassify({recordId:id,clase,version:await version(id),reason});
 
-test('lists every record behind a reconciled movement with its class, direction and movement; nothing unreconciled',async()=>{
- const all=(await asAdmin().reconciled({pageSize:100})).rows;
- assert.deepEqual(all.map(r=>r.concepto).sort(),['Azulejos','Cemento','Certificación 1','Montaje']);
- const az=await rowOf(lines[0]);
- assert.deepEqual([az.clase,az.sentido,az.numerodocumento,az.movimiento,az.fecha_movimiento],['sin_clasificar','pago','F-PAGO','Pago ferretería','2026-10-10']);
- assert.deepEqual([(await rowOf(mat)).clase,(await rowOf(mat)).type],['materiales','material']);
- const cobro=all.find(r=>r.concepto==='Certificación 1');assert.equal(cobro.sentido,'cobro');
+test('one row per reconciled movement with its documents and class, never split into concepts; nothing unreconciled',async()=>{
+ const {rows,total,resumen}=await asAdmin().reconciled({pageSize:100});
+ assert.equal(total,3);
+ assert.deepEqual(rows.map(r=>r.documentos).sort(),['F-COBRO','F-MAT','F-PAGO']);
+ const pago=await movOf('F-PAGO');
+ assert.deepEqual([pago.concepto,pago.fecha,pago.importe,pago.sentido,pago.registros,pago.origin],['Pago ferretería','2026-10-10','-200','pago',2,'bank_movements']);
+ assert.equal((await movOf('F-MAT')).clase,'materiales');
+ assert.equal((await movOf('F-COBRO')).sentido,'cobro');
  assert.equal((await asAdmin().reconciled({clase:'materiales'})).total,1);
- assert.equal((await asAdmin().reconciled({q:'ferretería'})).total,2);
+ assert.equal((await asAdmin().reconciled({q:'ferretería'})).total,1);
  await assert.rejects(asAdmin().reconciled({clase:'nada'}),{status:400});
+ await assert.rejects(asAdmin().reconciled({proyecto:'nada'}),{status:400});
  await assert.rejects(new FinanzasService(pool,jefe).reconciled(),{status:403});
+ // None is assigned to a project yet: every one is flagged.
+ assert.deepEqual(rows.map(r=>r.proyecto_estado),['sin_proyecto','sin_proyecto','sin_proyecto']);
+ assert.deepEqual(resumen,{movimientos:3,sin_proyecto:3});
+});
+
+test('every reconciled movement has to be assigned to a project: partial and full assignment',async()=>{
+ const p=(await db.query("INSERT INTO ledens.projects(project_id,name) VALUES('P2026-001','Reforma Centro') RETURNING id")).rows[0].id;
+ const alloc=(record,amount)=>db.query('INSERT INTO ledens.project_financial_allocations(record_id,project_id,allocated_amount) VALUES($1,$2,$3)',[record,p,amount]);
+ await alloc(lines[0],120);
+ const parcial=await movOf('F-PAGO');
+ assert.deepEqual([parcial.proyecto_estado,parcial.sin_proyecto,parcial.proyectos],['parcial',1,['P2026-001 · Reforma Centro']]);
+ await alloc(lines[1],80);
+ const asignado=await movOf('F-PAGO');
+ assert.deepEqual([asignado.proyecto_estado,asignado.sin_proyecto],['asignado',0]);
+ const {resumen}=await asAdmin().reconciled();assert.deepEqual(resumen,{movimientos:3,sin_proyecto:2});
+ assert.deepEqual((await asAdmin().reconciled({proyecto:'asignado'})).rows.map(r=>r.documentos),['F-PAGO']);
+ assert.equal((await asAdmin().reconciled({proyecto:'sin_proyecto'})).total,2);
+ assert.equal((await asAdmin().reconciled({q:'Reforma Centro'})).total,1);
+ await db.query('DELETE FROM ledens.project_financial_allocations WHERE project_id=$1',[p]);
 });
 
 test('an invoice line is reclassified, moves tab, and the change is audited with its reason',async()=>{
  const res=await change(lines[0],'trabajadores','Es mano de obra del alicatado');
  assert.deepEqual([res.category,res.clase],['labor','trabajadores']);
- assert.equal((await rowOf(lines[0])).clase,'trabajadores');
+ // The movement keeps one row: with a concept still unclassified it stays pending.
+ assert.equal((await movOf('F-PAGO')).clase,'pendiente');
  const tab=async(type)=>(await asAdmin().listRecords({type,pageSize:100})).rows.map(r=>r.record_id);
  assert.ok((await tab('trabajador')).includes(lines[0]));assert.ok(!(await tab('material')).includes(lines[0]));
  await change(lines[1],'materiales');
  assert.ok((await tab('material')).includes(lines[1]));
+ assert.equal((await movOf('F-PAGO')).clase,'mixto');
  const ev=(await db.query("SELECT reason,before_value->>'category' b,after_value->>'category' a,actor_id FROM ledens.finance_events WHERE record_id=$1 AND action='reclassified'",[lines[0]])).rows;
  assert.deepEqual(ev,[{reason:'Es mano de obra del alicatado',b:'unclassified',a:'labor',actor_id:admin.id}]);
 });
 
 test('the direction and the version guard the change',async()=>{
  await assert.rejects(change(lines[1],'clientes'),{status:409,message:/Un pago/});
- const cobro=(await asAdmin().reconciled({q:'Certificación'})).rows[0].record_id;
+ const cobro=(await db.query("SELECT id FROM ledens.financial_records WHERE description='Certificación 1'")).rows[0].id;
  await assert.rejects(change(cobro,'materiales'),{status:409,message:/Un cobro/});
  assert.equal((await change(cobro,'clientes')).category,'revenue');
  await assert.rejects(change(lines[1],'materiales'),{status:409,message:/Ya está/});
@@ -87,7 +110,7 @@ test('HTTP: the change needs an admin and the allowed origin',async()=>{
  const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
  const base=`http://127.0.0.1:${server.address().port}/api/finanzas/conciliados`;
  try{
-  const list=await (await fetch(base+'?clase=trabajadores')).json();assert.ok(list.rows.length>=2);
+  const list=await (await fetch(base+'?proyecto=sin_proyecto')).json();assert.ok(list.rows.length>=1);
   const put=async(headers)=>fetch(`${base}/${lines[1]}/clasificacion`,{method:'PUT',headers:{'content-type':'application/json',origin:'https://ledens.test',...headers},body:JSON.stringify({clase:'trabajadores',version:await version(lines[1]),reason:'Cambio por HTTP'})});
   assert.equal((await put({origin:'https://evil.test'})).status,403);
   assert.equal((await put({'x-role':'client'})).status,403);

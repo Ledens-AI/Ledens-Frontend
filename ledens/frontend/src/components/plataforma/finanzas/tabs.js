@@ -15,6 +15,7 @@ export const FIN_TABS = [
   ['cliente', 'Pagos de clientes', 'ri-hand-coin-line'],
   ['trabajadores', 'Trabajadores', 'ri-team-line'],
   ['trabajador', 'Pagos a trabajadores', 'ri-user-settings-line'],
+  ['cuentas-por-pagar', 'Cuentas por pagar', 'ri-calendar-check-line', true],
   ['pendiente-trabajador', 'Pendiente de trabajador', 'ri-user-follow-line'],
   ['material', 'Materiales', 'ri-hammer-line'],
   ['pendientes', 'Materiales pendiente de asignación', 'ri-inbox-line'],

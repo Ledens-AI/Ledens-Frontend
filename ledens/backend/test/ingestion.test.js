@@ -171,6 +171,23 @@ test('a low-confidence OCR date is confirmed when it is the only full date print
   assert.equal(soleDateConfidence(ticket('03-11-2026 y 2026-11-03'),'2026-11-03'),.994,'the same date in two formats is one date');
 });
 
+test('on a photo, the supplier tax id is confirmed by the OCR word that reads it; base and VAT larger than the total are left out',async()=>{
+  const {archiveIssue}=await import('../src/ingestion/completeness.js');
+  const photo=(word,{sub=33.07,tax=6.94}={})=>({analyzeResult:{content:'Emisor AREA DE SERVICIO LA PEÑA, S.L. B92572643 Cliente B19753805',documents:[{fields:{InvoiceDate:{valueDate:'2026-11-06',confidence:.97},
+    VendorName:{valueString:'AREA DE SERVICIO LA PEÑA, S.L.',confidence:.89},VendorTaxId:{valueString:'B92572643',confidence:.347},CustomerName:{valueString:'SOCIEDAD INVERSORA NAVARRO ROBINSON',confidence:.92},
+    InvoiceTotal:{valueCurrency:{amount:40.01,currencyCode:'EUR'},confidence:.75},SubTotal:{valueCurrency:{amount:sub,currencyCode:'EUR'},confidence:.44},TotalTax:{valueCurrency:{amount:tax,currencyCode:'EUR'},confidence:.54}}}],
+    pages:[{words:word?[{content:'B92572643',confidence:word,span:{offset:38,length:9}}]:[]}]}});
+  const r=extractInvoice(photo(.98));
+  assert.deepEqual([r.direction,r.total,r.directionConfidence,r.corroborated.direction,r.subtotal,r.tax],['Pagar',-40.01,.98,'VendorTaxId_in_ocr_text',-33.07,-6.94]);
+  assert.equal(archiveIssue({document_on:r.date,total:r.total,tipo:r.direction,invoice_currency:r.currency,date_confidence:r.confidence,total_confidence:r.totalConfidence,direction_confidence:r.directionConfidence}),null);
+  // Not printed, or poorly read: the field's confidence stands and it stays in review.
+  assert.equal(extractInvoice(photo(null)).directionConfidence,.347);
+  assert.equal(extractInvoice(photo(.3)).directionConfidence,.347);
+  // «24,793» € read as 24.793 €: base and VAT above the total are dropped, the total is kept.
+  const big=extractInvoice(photo(.98,{sub:24793,tax:5207}));
+  assert.deepEqual([big.subtotal,big.tax,big.total],[null,null,-40.01]);
+});
+
 test('supplier corroboration uses only high-confidence words inside the vendor field and a verified vendor NIF',()=>{
  const result={analyzeResult:{documents:[{fields:{VendorName:{valueString:'OBRAMAT',confidence:.481,spans:[{offset:0,length:7}]},VendorTaxId:{valueString:'B84406289',confidence:.82},CustomerName:{valueString:'Company'}}}],pages:[{words:[{content:'OBRAMAT',confidence:.989,span:{offset:0,length:7}},{content:'OBRAMAT',confidence:.999,span:{offset:100,length:7}}]}]}};
  const e=partyNameEvidence(result,'Vendor');assert.equal(e.name_field_confidence,.481);assert.equal(e.word_confidence,.989);assert.equal(e.tax_id_confidence,.82);

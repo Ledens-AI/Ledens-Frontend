@@ -3,7 +3,7 @@ import {readObramatPdf,readObramatSalePdf} from '../ingestion/obramat.js';
 // Spanish UI facade: never writes source project_id or a parallel money ledger.
 import {createHash} from 'node:crypto';
 import {FinanceService,FinanceError,uuid} from '../finance/service.js';
-import {cents,decimal,bankFingerprint} from '../bridge/rules.js';
+import {cents,decimal,bankFingerprint,BANK_MOVEMENTS,bankCurrency} from '../bridge/rules.js';
 import {extractLines,storeInvoiceLines} from '../finance/ingestion.js';
 import {extractInvoice} from '../ingestion/ocr.js';
 import {pageTexts} from '../ingestion/validation.js';
@@ -45,7 +45,20 @@ const TREASURY_CANDIDATES=`candidates AS(SELECT x.id,CASE x.origin WHEN 'bank_mo
  WHERE x.validable AND CASE x.origin
   WHEN 'bank_movements' THEN NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.bank_movement_id=x.id)
    AND NOT EXISTS(SELECT 1 FROM ledens.customer_payments cp WHERE cp.bank_movement_id=x.id) AND NOT x.marked_transfer
-  ELSE x.assigned_to IS NULL AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=x.id) END)`;
+  ELSE x.assigned_to IS NULL AND NOT EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb WHERE wb.cash_movement_id=x.id) END
+  AND NOT (x.origin='bank_movements' AND upper(coalesce(x.state,'')) IN ('REVERTED','DECLINED','FAILED','CANCELLED','CANCELED')))`;
+// Why «Asignar documento» cannot link a bank movement (the Bridge only takes
+// completed EUR movements with an amount left), in words for the screen.
+export function bankLinkBlock(b,remaining){
+ // Same test as the Bridge's confirm (bridge/service.js), so the button never offers what it refuses.
+ if(b.state!=='COMPLETED')return String(b.state??'').toUpperCase()==='PENDING'
+  ?'El banco aún no ha completado este movimiento (pendiente). Podrás asignarle un documento en cuanto se complete.'
+  :`El banco no ha completado este movimiento (estado ${b.state==null||b.state===''?'sin informar':b.state}). Solo se concilian movimientos completados.`;
+ if(b.currency!=='EUR')return `El movimiento está en ${b.currency}: solo se concilian movimientos en euros.`;
+ if(b.is_internal_transfer===true)return 'Es una transferencia entre cuentas de la empresa: no lleva documento.';
+ if(Number(remaining)===0)return 'Ya está conciliado por completo.';
+ return null;
+}
 const CASH_TARGETS={trabajadores:'pago',materiales:'pago',clientes:'cobro'};
 const SCOPE=`($1 OR (NOT EXISTS(SELECT 1 FROM ledens.project_financial_allocations ax WHERE ax.record_id=f.id AND NOT EXISTS
  (SELECT 1 FROM ledens.finance_project_permissions fp WHERE fp.user_id=$2 AND fp.project_id=ax.project_id)) AND
@@ -184,8 +197,6 @@ const number=s=>String(s||'').replace(/[^0-9A-Z]/gi,'').toUpperCase();
 const supplierWord=s=>(String(s||'').match(/[A-Za-zÀ-ÿ]{4,}/)||[''])[0];
 const DETAIL_TYPES=[['application/pdf',b=>b.subarray(0,5).toString()==='%PDF-'],['image/png',b=>b.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))],
  ['image/jpeg',b=>b[0]===255&&b[1]===216&&b[2]===255]];
-// A supplier refund record: a material registered from a bank receipt (negative cost, no document).
-const isRefund=r=>r.type==='material'&&!r.document_id&&Boolean(r.bank_movement_id)&&cents(r.importe)<0n;
 const hasTransfers=async c=>Boolean((await c.query("SELECT to_regclass('ledens.internal_transfers') name")).rows[0].name);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const labels={work_period:'Periodo trabajado',reclassified:'Cambio de clasificación',replace_allocations:'Asignación a proyecto',recognition:'Validación contable',review_flag:'Revisión',source_changed:'Origen actualizado',document_changed:'Factura actualizada'};
@@ -352,28 +363,16 @@ export class FinanzasService {
   return {...r,typeLabel:TYPES[type].label,documento,movimiento,purchaseSettlement,distribucion:r.project_id?[]:full.allocations.map(a=>({project_id:a.project_id,label:a.project_name,amount:a.allocated_amount})),historial:await this.history(type,id),suggestion};
  }
  reason(r,reason,version){if(r.version===version&&(r.project_id||r.parts)&&(!reason||reason.trim().length<5))throw new FinError(400,'Escribe un motivo de al menos cinco caracteres');return reason?.trim()||'Asignación confirmada en gestión financiera';}
- // Assigning a record to an obra needs the concepts of every document reconciled
- // with its movement (its own bank movement, or the movements of its document):
- // this is where a document without concepts is reported, never when the
- // movement is classified in Concepto de movimientos.
- async missingConcepts(c,{bankMovementId=null,documentId=null,refund=false}){
-  // A supplier refund is registered from the movement itself and never uses its
-  // credit note's concepts (they are excluded on purpose, refund_replaced).
-  if(refund)return;
-  const d=(await c.query(`SELECT d.numerodocumento FROM ledens.bank_document_allocations a JOIN ledens.documents d ON d.id=a.document_id
-   WHERE a.state='Confirmado' AND (a.bank_movement_id=$1 OR a.bank_movement_id IN(SELECT bank_movement_id FROM ledens.bank_document_allocations WHERE document_id=$2 AND state='Confirmado'))
-    AND NOT EXISTS(SELECT 1 FROM ledens.financial_records r WHERE r.document_id=d.id AND r.source_valid AND r.status<>'excluded')
-   ORDER BY d.numerodocumento LIMIT 1`,[bankMovementId,documentId])).rows[0];
-  if(d)throw new FinError(409,`El documento ${d.numerodocumento||'conciliado'} no tiene conceptos registrados; revisa su ingesta (o adjunta su detalle con «Segregar conceptos») antes de asignarlo a una obra`);
- }
+ // A document reconciled without concepts never blocks assigning a record to an
+ // obra: the provisional material keeps the obra and passes it to the concepts
+ // when they replace it (029, carried_project_id). It is reported only by
+ // «Segregar conceptos» (segregateMaterial).
  async assign({type,id,projectId,version,requestId,reason}){
   const r=await this.source(type,id);if(!Number.isInteger(version)||!uuid(requestId))throw new FinError(400,'Recarga el registro antes de asignarlo');
-  if(projectId!==null)await this.missingConcepts(this.pool,{bankMovementId:r.bank_movement_id,documentId:r.document_id,refund:isRefund(r)});
   await this.finance.bulk(this.user,{request_id:requestId,reason:this.reason(r,reason,version),records:[{record_id:r.record_id,version,allocations:projectId===null?[]:[{project_id:projectId,amount:r.importe}]}]});return {changed:true};
  }
  async distribute({type,id,parts,version,requestId,reason}){
   const r=await this.source(type,id);if(!Array.isArray(parts)||!parts.length||!Number.isInteger(version)||!uuid(requestId))throw new FinError(400,'Distribución no válida; recarga el registro');
-  await this.missingConcepts(this.pool,{bankMovementId:r.bank_movement_id,documentId:r.document_id,refund:isRefund(r)});
   await this.finance.bulk(this.user,{request_id:requestId,reason:this.reason(r,reason,version),records:[{record_id:r.record_id,version,allocations:parts.map(p=>({project_id:p.projectId,amount:p.amount}))}]});
   return {changed:true,exact:parts.reduce((s,p)=>s+cents(p.amount),0n)===cents(r.importe)};
  }
@@ -444,29 +443,41 @@ export class FinanzasService {
   return {proyectos:projects,totales:{movimientos:t.n,ingresos:t.ingresos,costes:t.costes,resultado:t.resultado},rows,total:t.n,page,pageSize};
  }
  // ------------------------------------------------------------- movimientos conciliados
- // Every record behind a reconciled movement (confirmed Bridge link of its
- // document, or the movement itself), with how it is classified. Admin, like the inbox.
- async reconciled({page=1,pageSize=25,q='',clase='',from='',to=''}={}){
+ // One row per reconciled movement (bank or cash), never split into its concepts:
+ // the documents it is reconciled with (confirmed Bridge links, else the documents
+ // of its own records), its class as «Concepto de movimientos» concludes it, and
+ // whether everything it registered is assigned to a project. Every reconciled
+ // movement has to be: `proyecto_estado` says when one is not, and `resumen`
+ // counts them. Admin, like the inbox.
+ async reconciled({page=1,pageSize=25,q='',clase='',proyecto='',from='',to=''}={}){
   if(this.user.role!=='admin')throw new FinError(403,'Los movimientos conciliados requieren administrador');
   const size=Math.min(100,Math.max(1,Number(pageSize)||25)),p=Math.max(1,Math.min(4000,Number(page)||1));
-  const params=[...this.params(),'%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',tercero,concepto,numerodocumento,movimiento) ILIKE $3"];
-  if(clase){if(![...Object.keys(CLASES),'sin_clasificar','otros'].includes(clase))throw new FinError(400,'Clasificación no válida');params.push(clase);where.push('clase=$'+params.length);}
-  for(const [v,op] of [[from,'>='],[to,'<=']])if(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v)))throw new FinError(400,'Fecha no válida');params.push(v);where.push('fecha_movimiento '+op+' $'+params.length+'::date');}
-  const sql=BASE+`, rec AS(SELECT l.*,${CLASE_SQL} clase,mv.fecha_movimiento,mv.movimiento,mv.origin,mv.pago,
-    CASE WHEN l.type='cliente' OR l.doc_tipo='Cobrar' THEN 'cobro' WHEN l.doc_tipo='Pagar' OR l.type IN ('material','trabajador') THEN 'pago'
-     WHEN mv.pago THEN 'pago' ELSE 'cobro' END sentido
-    FROM listed l JOIN LATERAL(SELECT count(*)::int n,max(t.occurred_on) fecha_movimiento,bool_or(t.amount<0) pago,
-     string_agg(DISTINCT coalesce(t.concept,t.source_id),' · ') movimiento,string_agg(DISTINCT t.origin,',') origin FROM ledens.treasury_movements t
-     WHERE CASE t.origin WHEN 'bank_movements' THEN t.id=l.bank_movement_id
-       OR t.id IN(SELECT a.bank_movement_id FROM ledens.bank_document_allocations a WHERE a.document_id=l.document_id AND a.state='Confirmado')
-      ELSE (l.type='material' AND t.material_id=l.id) OR (l.type='cliente' AND t.customer_payment_id=l.id)
-       OR (l.type='trabajador' AND EXISTS(SELECT 1 FROM ledens.worker_payment_batches wb JOIN ledens.worker_payment_splits ws ON ws.batch_id=wb.id
-        WHERE wb.cash_movement_id=t.id AND ws.worker_payment_id=l.id)) END) mv ON mv.n>0)
-   SELECT record_id,type,version,category,clase,sentido,accounting_status,fecha,importe,tercero,concepto,numerodocumento,line_number,project_label,parts,estado,
-    fecha_movimiento::text fecha_movimiento,movimiento,origin FROM rec WHERE `+where.join(' AND ');
-  const rows=(await this.query(sql+` ORDER BY fecha_movimiento DESC NULLS LAST,numerodocumento,line_number NULLS FIRST,record_id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows;
-  const total=(await this.query('SELECT count(*)::int n FROM ('+sql+') x',params)).rows[0].n;
-  return {rows,total,page:p,pageSize:size};
+  const params=['%'+String(q).slice(0,100)+'%'],where=["concat_ws(' ',tercero,concepto,referencia,documentos,array_to_string(proyectos,' ')) ILIKE $1"];
+  for(const [v,op] of [[from,'>='],[to,'<=']])if(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v)))throw new FinError(400,'Fecha no válida');params.push(v);where.push('fecha '+op+' $'+params.length+'::date');}
+  const sql=(await this.movementsSql())+`,
+ asig AS(SELECT r.mov,count(*) FILTER(WHERE abs(f.gross_amount)>coalesce(u.used,0))::int sin_proyecto,
+   string_agg(DISTINCT d.numerodocumento,', ') docs_registros FROM recs r JOIN ledens.financial_records f ON f.id=r.id
+   LEFT JOIN ledens.documents d ON d.id=f.document_id
+   LEFT JOIN LATERAL(SELECT sum(abs(pa.allocated_amount)) used FROM ledens.project_financial_allocations pa WHERE pa.record_id=r.id) u ON true GROUP BY r.mov),
+ projs AS(SELECT x.mov,array_agg(DISTINCT concat_ws(' · ',nullif(btrim(pr.project_id),''),nullif(btrim(pr.name),''))) proyectos
+   FROM (SELECT DISTINCT mov,id FROM recs) x JOIN ledens.project_financial_allocations pa ON pa.record_id=x.id JOIN ledens.projects pr ON pr.id=pa.project_id GROUP BY x.mov),
+ conc AS(SELECT fin.id,fin.tipo,fin.origin,fin.fecha,fin.tercero,fin.concepto,fin.referencia,fin.importe,coalesce(fin.documentos,a.docs_registros) documentos,
+   fin.clase,fin.conocidas,fin.sentido,fin.version,fin.registros,fin.lote,fin.obramat,fin.propia,fin.n_docs,
+   CASE WHEN fin.transferencia THEN 'transferencia' WHEN fin.obramat AND fin.solo_compras THEN 'compra_obramat' WHEN fin.devolucion_anticipo THEN 'devolucion_anticipo'
+    WHEN fin.provisional THEN 'provisional' WHEN fin.reembolso THEN 'registro' WHEN fin.n_docs>0 THEN 'bridge' WHEN fin.lote THEN 'trabajadores' WHEN fin.registros>0 THEN 'registro' ELSE 'ninguno' END origen,
+   coalesce(a.sin_proyecto,0) sin_proyecto,coalesce(pj.proyectos,'{}'::text[]) proyectos,
+   CASE WHEN fin.registros=0 THEN 'sin_registros' WHEN coalesce(a.sin_proyecto,0)=0 THEN 'asignado' WHEN pj.proyectos IS NOT NULL THEN 'parcial' ELSE 'sin_proyecto' END proyecto_estado
+  FROM fin LEFT JOIN asig a ON a.mov=fin.id LEFT JOIN projs pj ON pj.mov=fin.id WHERE fin.n_docs>0 OR fin.registros>0)
+ SELECT id,tipo,origin,fecha::text fecha,tercero,concepto,referencia,importe::text importe,documentos,clase,conocidas,sentido,version,registros,lote,obramat,propia,origen,
+  sin_proyecto,proyectos,proyecto_estado FROM conc WHERE `;
+  const base=where.join(' AND ');
+  const t=(await this.query(`SELECT count(*)::int n,count(*) FILTER(WHERE proyecto_estado<>'asignado')::int sin_proyecto FROM (${sql}${base}) x`,params)).rows[0];
+  if(clase){if(!MOVEMENT_CLASSES.includes(clase))throw new FinError(400,'Clasificación no válida');params.push(clase);where.push('clase=$'+params.length);}
+  if(proyecto){if(!['asignado','sin_proyecto'].includes(proyecto))throw new FinError(400,'Filtro de proyecto no válido');where.push(proyecto==='asignado'?"proyecto_estado='asignado'":"proyecto_estado<>'asignado'");}
+  const filtered=sql+where.join(' AND ');
+  const rows=(await this.query(filtered+` ORDER BY fecha DESC NULLS LAST,id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows;
+  const total=(await this.query('SELECT count(*)::int n FROM ('+filtered+') x',params)).rows[0].n;
+  return {rows,total,resumen:{movimientos:t.n,sin_proyecto:t.sin_proyecto},page:p,pageSize:size};
  }
  async reclassify({recordId,clase,version,reason}={}){
   if(this.user.role!=='admin')throw new FinError(403,'Cambiar la clasificación requiere administrador');
@@ -526,9 +537,9 @@ export class FinanzasService {
   // on each bank movement of this inbox: it needs the movement as the Bridge sees it.
   const ids=rows.filter(r=>r.type==='movimiento').map(r=>r.id);
   if(ids.length){
-   const banks=new Map((await this.query('SELECT * FROM ledens.bank_movements WHERE id=ANY($1::uuid[])',[ids])).rows.map(b=>[b.id,b]));
+   const banks=new Map((await this.query('SELECT * FROM '+BANK_MOVEMENTS+' b WHERE id=ANY($1::uuid[])',[ids])).rows.map(b=>[b.id,b]));
    for(const r of rows){const b=r.type==='movimiento'&&banks.get(r.id);if(b)r.bank={id:b.id,description:b.description,reference:b.reference,total_amount:String(b.total_amount),
-    remaining:r.por_conciliar,state:b.state,currency:b.currency,bank_fingerprint:bankFingerprint(b)};}
+    remaining:r.por_conciliar,state:b.state,currency:b.currency,bank_fingerprint:bankFingerprint(b),bloqueo:bankLinkBlock(b,r.por_conciliar)};}
   }
   return {rows,total,page:p,pageSize:size};
  }
@@ -790,8 +801,7 @@ export class FinanzasService {
    // with nothing registered the movement enters through its usual flow (a
    // provisional material that waits for every invoice, 029; a worker batch; a
    // client receipt; a refund), and with records those are classified. What the
-   // document lacks is reported when its record is assigned to an obra
-   // (missingConcepts).
+   // document lacks is reported only by «Segregar conceptos».
    // A supplier refund is registered as a material from the movement itself. A
    // receipt that already has records (its reconciled document, a client receipt)
    // keeps them: those records carry the sign of revenue, so turning them into
@@ -1277,13 +1287,38 @@ export class FinanzasService {
   if(!lines.length)throw new FinError(422,'No se han encontrado productos en el documento adjunto');
   return lines;
  }
+ // A transient answer (429 rate limit of the free tier, 5xx, network) never ends the
+ // read on its own: it waits (Retry-After when given) and tries again until the
+ // deadline, and polls slow down as the read goes on so they use few calls.
  async ocrResult(content,type,ocr,{timeoutMs,pollMs}){
-  let result;
-  try{
-   const url=await ocr.start(content,type),until=Date.now()+timeoutMs;
-   for(;;){result=await ocr.poll(url);if(!['running','notStarted'].includes(result.status))break;
-    if(Date.now()>until)throw new FinError(504,'El lector tarda más de lo normal; inténtalo de nuevo en un momento');await sleep(pollMs);}
-  }catch(e){if(e instanceof FinError)throw e;throw new FinError(e.transient===false?422:503,e.transient===false?'El lector no ha podido procesar el archivo':'El lector de documentos no está disponible; inténtalo de nuevo en un momento');}
+  const until=Date.now()+timeoutMs;let last=null;
+  const retry=async(fn)=>{
+   for(;;){
+    try{return await fn();}
+    catch(e){
+     if(e instanceof FinError)throw e;
+     last=e;
+     if(e.transient===false){console.error('[finanzas] lector OCR rechazó el archivo',e.status||e.message);throw new FinError(e.status===401||e.status===403?503:422,
+      e.status===401||e.status===403?'El lector de documentos no acepta la petición (clave o cuota mensual del plan gratuito agotada). Avisa al administrador de Azure.':'El lector no ha podido procesar el archivo');}
+     // The service's own Retry-After is honoured in full; only our fallback is capped.
+     const wait=e.retryAfter!=null?Math.max(e.retryAfter*1000,pollMs):Math.min(pollMs*2,10000);
+     if(Date.now()+wait>until)break;
+     await sleep(wait);
+    }
+   }
+   console.error('[finanzas] lector OCR no disponible',last?.status||last?.name||last?.message);
+   throw new FinError(last?.status===429?429:503,last?.status===429
+    ?'El lector de documentos ha alcanzado su límite de uso (plan gratuito: unas 20 lecturas por minuto). Espera un minuto y vuelve a intentarlo.'
+    :'El lector de documentos no está disponible; inténtalo de nuevo en un momento');
+  };
+  const url=await retry(()=>ocr.start(content,type));
+  let result,n=0;
+  for(;;){
+   await sleep(Math.min(pollMs*(1+n++*0.5),5000));
+   result=await retry(()=>ocr.poll(url));
+   if(!['running','notStarted'].includes(result.status))break;
+   if(Date.now()>until)throw new FinError(504,'El lector tarda más de lo normal; inténtalo de nuevo en un momento');
+  }
   if(result.status!=='succeeded')throw new FinError(422,'El lector no ha podido leer el documento');
   return result;
  }
@@ -1617,7 +1652,6 @@ export class FinanzasService {
       JOIN ledens.worker_payment_batches b ON b.id=s.batch_id LEFT JOIN ledens.bank_movements m ON m.id=b.bank_movement_id WHERE s.id=$1 FOR UPDATE OF s`,[it.splitId])).rows[0];
      if(!s)throw new FinError(404,'Pago no encontrado');
      if(s.worker_payment_id)throw new FinError(409,'Este pago ya está guardado');
-     if(s.bank_movement_id)await this.missingConcepts(c,{bankMovementId:s.bank_movement_id});
      const e=(await c.query('SELECT id,name FROM ledens.employees WHERE id=$1',[it.employeeId])).rows[0];
      if(!e)throw new FinError(400,'Trabajador no encontrado');
      const w=(await c.query(`INSERT INTO ledens.worker_payments(amount,occurred_on,bank_movement_id,employee_id,empleado)

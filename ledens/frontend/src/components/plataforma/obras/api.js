@@ -68,16 +68,44 @@ export const api = {
     if (!r.ok) throw new ApiError(r.status, data.error || (r.status === 413 ? 'Los archivos superan el tamaño máximo (20 MB en total).' : 'No se ha podido generar el borrador.'), data);
     return data;
   },
+  // Admin chat: finds the project itself, reads its already-uploaded visita
+  // files, and only then proposes a draft (backend: presupuestos/agenteChat.js).
+  // `messages` is the full conversation so far, in Claude's own message
+  // format — the frontend keeps it and sends it back whole each turn.
+  chatAgente: async (messages) => {
+    let r;
+    try {
+      r = await fetch(`${base}/agente/chat`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', ...viewAsHeaders() }, body: JSON.stringify({ messages }) });
+    } catch {
+      throw new ApiError(0, 'Error de conexión. Comprueba tu red e inténtalo de nuevo.');
+    }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new ApiError(r.status, data.error || 'No se ha podido continuar la conversación.', data);
+    return data;
+  },
   // Proposed new partidas for the base (admins; backend: presupuestos/propuestas.js).
   propuestas: (estado) => request('GET', `${base}/propuestas?estado=${encodeURIComponent(estado || 'pending')}`),
   aprobarPropuesta: (id, body) => request('POST', `${base}/propuestas/${id}/aprobar`, body),
   rechazarPropuesta: (id, body) => request('POST', `${base}/propuestas/${id}/rechazar`, body),
+  // The base de partidas (admins; backend: presupuestos/partidas.js).
+  partidas: (params) => request('GET', `${base}/partidas?${new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v !== '' && v != null))}`),
+  guardarPartida: (id, body) => request('PATCH', `${base}/partidas/${id}`, body),
   assignJefe: (id, body) => request('PUT', `${base}/${id}/jefe`, body),
   rename: (id, body) => request('PUT', `${base}/${id}/nombre`, body),
   // Projects of Gestión financiera: the obra's link (team) and a project with its presupuestos.
   setProject: (id, body) => request('PUT', `${base}/${id}/proyecto`, body),
+  // { obraId }: this obra becomes an ampliación of that one (same client).
+  joinObra: (id, body) => request('PUT', `${base}/${id}/obra`, body),
   projects: () => request('GET', `${base}/proyectos`),
   project: (projectId) => request('GET', `${base}/proyectos/${projectId}`),
+  // Planificación (Gantt) of a project with an approved presupuesto (backend: presupuestos/gantt.js).
+  gantt: (projectId) => request('GET', `${base}/proyectos/${projectId}/gantt`),
+  saveGantt: (projectId, partidaId, body) => request('PUT', `${base}/proyectos/${projectId}/gantt/${partidaId}`, body),
+  // «Guardar en bloque»: several tasks' predecessors in one request, one
+  // transaction server-side (ganttAgente.js never saves by itself).
+  saveGanttMany: (projectId, tasks) => request('PUT', `${base}/proyectos/${projectId}/gantt`, { tasks }),
+  // Suggests predecessors for the tasks that still have none (presupuestos/ganttAgente.js). Saves nothing.
+  ganttAgente: (projectId) => request('POST', `${base}/proyectos/${projectId}/gantt/agente`),
   schedule: (id, body) => request('PUT', `${base}/${id}/fechas`, body),
   declare: (id, body) => request('PUT', `${base}/${id}/produccion`, body),
 };

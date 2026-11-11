@@ -137,6 +137,7 @@ test('bank and cash movements read as one treasury table with their origin, in e
  assert.deepEqual([mv.find(r=>r.id===bank.id).origin,mv.find(r=>r.id===k.id).origin,mv.find(r=>r.id===k.id).tipo],['bank_movements','cash_movements','efectivo']);
  // Once assigned, cash appears in Movimientos conciliados like a reconciled bank movement.
  const {recordId}=await asAdmin().assignCash({id:k.id,target:'clientes',projectId:p1});
- const rec=(await asAdmin().reconciled({pageSize:100})).rows.find(r=>r.record_id===recordId);
- assert.deepEqual([rec.origin,rec.movimiento,rec.sentido,rec.fecha_movimiento],['cash_movements','Cobro en mano','cobro','2026-10-01']);
+ assert.ok(recordId);
+ const rec=(await asAdmin().reconciled({pageSize:100})).rows.find(r=>r.id===k.id);
+ assert.deepEqual([rec.origin,rec.concepto,rec.sentido,rec.fecha,rec.proyecto_estado],['cash_movements','Cobro en mano','cobro','2026-10-01','asignado']);
 });

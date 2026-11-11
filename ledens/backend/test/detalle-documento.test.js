@@ -44,7 +44,7 @@ test('Concepto de movimientos classifies it as Pago de materiales: a provisional
  assert.equal((await pending()).filter(x=>x.provisional).length,1,'only the provisional payment can be segregated');
 });
 
-test('a payment reconciled with several documents without concepts is classified; the obra waits for every invoice, and the provisional is replaced only then (029)',async()=>{
+test('a payment reconciled with several documents without concepts is classified and assigned to an obra; the provisional is replaced only with every invoice (029) and its concepts keep the obra',async()=>{
  const q=(sql,p)=>db.query(sql,p);
  const b=(await q(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
   VALUES('MOV-dos',-80,-80,'2026-10-11','Pago dos facturas','EUR','COMPLETED') RETURNING id`)).rows[0].id;
@@ -53,10 +53,10 @@ test('a payment reconciled with several documents without concepts is classified
   await q("INSERT INTO ledens.bank_document_allocations(bank_movement_id,document_id,allocated_amount,state,reconciled_on) VALUES($1,$2,-40,'Confirmado','2026-10-11')",[b,docs[n]]);}
  const r=(await asAdmin().movements({pageSize:100})).rows.find(x=>x.id===b);
  const {materialId,recordId}=await asAdmin().classifyMovement({id:b,clase:'materiales',version:r.version});
- // The missing concepts are reported when it is assigned to an obra.
+ // Missing concepts never block assigning it to an obra (only «Segregar conceptos» reports them).
  const obra=(await q("INSERT INTO ledens.projects(name,project_id) VALUES('Obra Dos','P-DOS') RETURNING id")).rows[0].id;
  const rec=(await asAdmin().listRecords({type:'material',pending:true,q:'Pago dos facturas'})).rows[0];
- await assert.rejects(asAdmin().assign({type:'material',id:materialId,projectId:obra,version:rec.version,requestId:crypto.randomUUID()}),{status:409,message:/F-A no tiene conceptos registrados.*antes de asignarlo a una obra/});
+ await asAdmin().assign({type:'material',id:materialId,projectId:obra,version:rec.version,requestId:crypto.randomUUID()});
  const addLine=async(d,gross)=>{const l=(await q("INSERT INTO ledens.invoice_lines(document_id,line_number,description) VALUES($1,1,'Material') RETURNING id",[d])).rows[0].id;
   await q(`INSERT INTO ledens.financial_records(invoice_line_id,document_id,occurred_on,description,gross_amount,currency) VALUES($1,$2,'2026-10-08','Material',$3,'EUR')`,[l,d,gross]);};
  await addLine(docs['F-A'],40);
@@ -64,6 +64,8 @@ test('a payment reconciled with several documents without concepts is classified
  await addLine(docs['F-B'],40);
  assert.equal((await q('SELECT status FROM ledens.financial_records WHERE id=$1',[recordId])).rows[0].status,'excluded','both invoices: replaced');
  assert.deepEqual((await q("SELECT category FROM ledens.financial_records WHERE document_id=ANY($1::uuid[]) AND source_valid AND status<>'excluded'",[Object.values(docs)])).rows.map(x=>x.category),['materials','materials']);
+ assert.deepEqual((await q(`SELECT a.project_id FROM ledens.project_financial_allocations a JOIN ledens.financial_records f ON f.id=a.record_id
+  WHERE f.document_id=ANY($1::uuid[]) AND f.source_valid AND f.status<>'excluded'`,[Object.values(docs)])).rows.map(x=>x.project_id),[obra,obra],'the concepts inherit the obra');
 });
 
 test('a refund reconciled with a credit note without concepts can still be a supplier refund',async()=>{
@@ -105,7 +107,7 @@ test('a receipt reconciled with a document without concepts can be a client rece
  assert.equal((await asAdmin().movements({pageSize:100})).rows.find(x=>x.id===b2).clase,'clientes','classified: F-SIN without concepts does not leave it pending');
  const con=(await asAdmin().listRecords({type:'cliente',pageSize:100})).rows.find(x=>x.numerodocumento==='F-CON');
  const obra=(await db.query("INSERT INTO ledens.projects(name,project_id) VALUES('Obra Mixta','P-MIX') RETURNING id")).rows[0].id;
- await assert.rejects(asAdmin().assign({type:con.type,id:con.id,projectId:obra,version:con.version,requestId:crypto.randomUUID()}),{status:409,message:/F-SIN no tiene conceptos registrados/});
+ await asAdmin().assign({type:con.type,id:con.id,projectId:obra,version:con.version,requestId:crypto.randomUUID()});
 });
 
 test('a payment reconciled with a document without concepts can go to Pendiente de trabajador: no error, no longer pending',async()=>{
@@ -180,6 +182,23 @@ test('a detail that does not add up to the document stores nothing',async()=>{
  await assert.rejects(attach({status:'succeeded',analyzeResult:{documents:[{fields:{}}]}}),{status:422,message:/No se han encontrado productos/});
  await assert.rejects(attach({status:'failed'}),{status:422});
  await assert.rejects(attach({status:'running'},{timeoutMs:0}),{status:504});
+});
+
+test('a rate-limited reader (429 of the free tier) is retried, not fatal; quota or key errors say so',async()=>{
+ const err=(status,extra={})=>Object.assign(new Error('ocr_request_failed'),{status,transient:status===429||status>=500,...extra});
+ let polls=0;
+ const flaky={async start(){return 'op';},async poll(){if(polls++<2)throw err(429,{retryAfter:0});return reading([10,20],30);}};
+ await assert.rejects(attach(null,{ocr:flaky}),{status:422,message:/suman 30\.00/},'got past the 429s and read the document');
+ assert.equal(polls,3);
+ const limited={async start(){throw err(429,{retryAfter:0});},async poll(){}};
+ await assert.rejects(attach(null,{ocr:limited,timeoutMs:20}),{status:429,message:/límite de uso/});
+ // A Retry-After beyond the deadline is never shortened: the limit error comes at once, without an early retry.
+ let starts=0;const longWait={async start(){starts++;throw err(429,{retryAfter:30});},async poll(){}};
+ await assert.rejects(attach(null,{ocr:longWait,timeoutMs:5000}),{status:429});
+ assert.equal(starts,1);
+ const quota={async start(){throw err(403);},async poll(){}};
+ await assert.rejects(attach(null,{ocr:quota}),{status:503,message:/cuota/});
+ assert.deepEqual(await records(),[]);
 });
 
 test('format, size, role, link and reader are checked before reading',async()=>{

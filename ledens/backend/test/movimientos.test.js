@@ -92,7 +92,30 @@ test('direction, documents without records and roles guard the classification',a
 test('Pendiente de conciliación carries what «Asignar documento» needs for each bank movement',async()=>{
  const r=(await asAdmin().reconciliation({pageSize:100})).rows.find(x=>x.id===m.pago.id);
  const b=(await db.query('SELECT * FROM ledens.bank_movements WHERE id=$1',[m.pago.id])).rows[0];
- assert.deepEqual(r.bank,{id:b.id,description:'Pago sin factura',reference:null,total_amount:'-90',remaining:r.por_conciliar,state:'COMPLETED',currency:'EUR',bank_fingerprint:bankFingerprint(b)});
+ assert.deepEqual(r.bank,{id:b.id,description:'Pago sin factura',reference:null,total_amount:'-90',remaining:r.por_conciliar,state:'COMPLETED',currency:'EUR',bank_fingerprint:bankFingerprint(b),bloqueo:null});
+});
+
+test('«Asignar documento» says why a bank movement cannot take a document; one the bank voided leaves the list',async()=>{
+ const add=async(source,state,currency)=>(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES($1,-60.18,-60.18,'2026-10-14','Factura Obramat',$2,$3) RETURNING id`,[source,currency,state])).rows[0].id;
+ const pendiente=await add('MOV-pend','PENDING','EUR'),revertido=await add('MOV-rev','REVERTED','EUR'),usd=await add('MOV-usd','COMPLETED','USD'),sinEstado=await add('MOV-null',null,'EUR');
+ const rows=(await asAdmin().reconciliation({pageSize:100})).rows,find=id=>rows.find(x=>x.id===id);
+ assert.match(find(pendiente).bank.bloqueo,/aún no ha completado/);
+ assert.match(find(usd).bank.bloqueo,/USD/);
+ assert.match(find(sinEstado).bank.bloqueo,/sin informar/);
+ const eurAccount=(await db.query("INSERT INTO ledens.bank_accounts(name,currency) VALUES('Revolut EUR','EUR') RETURNING id")).rows[0].id;
+ const sinDivisa=(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state,bank_account_id)
+  VALUES('MOV-sin-divisa',-60.18,-60.18,'2026-10-14','Factura Obramat',NULL,'COMPLETED',$1) RETURNING id`,[eurAccount])).rows[0].id;
+ const huerfano=(await db.query(`INSERT INTO ledens.bank_movements(source_id,amount,total_amount,completed_on,description,currency,state)
+  VALUES('MOV-huerfano',-60.18,-60.18,'2026-10-14','Factura Obramat',NULL,'COMPLETED') RETURNING id`)).rows[0].id;
+ const again=(await asAdmin().reconciliation({pageSize:100})).rows;
+ const ok=again.find(x=>x.id===sinDivisa).bank;
+ assert.deepEqual([ok.currency,ok.bloqueo],['EUR',null],'no currency: the account\'s EUR, so «Asignar documento» is enabled');
+ const orphan=again.find(x=>x.id===huerfano).bank;
+ assert.deepEqual([orphan.currency,orphan.bloqueo],['EUR',null],'no currency and no account (FactMovimientosBancarios): EUR');
+ await db.query('DELETE FROM ledens.bank_movements WHERE id=ANY($1::uuid[])',[[sinDivisa,huerfano]]);
+ assert.equal(find(revertido),undefined,'a reverted movement never moved money: nothing to reconcile');
+ await db.query('DELETE FROM ledens.bank_movements WHERE id=ANY($1::uuid[])',[[pendiente,revertido,usd,sinEstado]]);
 });
 
 test('a provisional material payment is replaced by its invoice when the Bridge reconciles it: class and obra carried, never counted twice',async()=>{

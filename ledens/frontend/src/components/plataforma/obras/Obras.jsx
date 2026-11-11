@@ -4,7 +4,10 @@ import { Empty, ErrorBox, Kpi } from '../finanzas/ui.jsx';
 import Detalle, { PhaseBadge, Progress } from './Detalle.jsx';
 import Editor from './Editor.jsx';
 import Propuestas from './Propuestas.jsx';
-import { ObraCard, PresupuestosTable, ProjectsGrid, Proyecto } from './Proyectos.jsx';
+import Partidas from './Partidas.jsx';
+import { AvanceProyectos, ObraCard, PresupuestosTable, ProjectsGrid, Proyecto } from './Proyectos.jsx';
+import AgenteForm from './AgenteForm.jsx';
+import AgenteChat from './AgenteChat.jsx';
 import { useObrasI18n } from './i18n.js';
 import '../../../styles/finanzas.css';
 import '../../../styles/obras.css';
@@ -22,6 +25,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
   const [creating, setCreating] = useState(false); // true, or the project it starts in
   const [importing, setImporting] = useState(null); // the project the budget PDF is uploaded to
   const [agentando, setAgentando] = useState(null); // the project the visit documentation is generated for
+  const [chatting, setChatting] = useState(false); // admin-only agent chat, not tied to one project
   const [filter, setFilter] = useState('todos');
   // Team «Presupuestos y obras»: by project (default) or every presupuesto; the project open.
   const [view, setView] = useState('proyectos');
@@ -30,7 +34,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
   // Every project the team member may see (each one has its page, with or without presupuestos).
   const [projects, setProjects] = useState(null);
   useEffect(() => {
-    if (panel === 'client' || screen !== 'presupuestos') return;
+    if (panel === 'client' || !['presupuestos', 'avance'].includes(screen)) return;
     api.projects().then((d) => setProjects(d.proyectos), () => setProjects(null));
   }, [panel, screen]);
 
@@ -41,11 +45,13 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
     countRef.current?.(d.presupuestos.filter((p) => (panel === 'client' ? p.phase === 'pendiente' && p.decides !== false : p.phase === 'cambios')).length);
   }, (e) => setError(e.message)), [panel]);
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setOpen(null); setCreating(false); setImporting(null); setAgentando(null); setProject(null); }, [screen]);
+  useEffect(() => { setOpen(null); setCreating(false); setImporting(null); setAgentando(null); setChatting(false); setProject(null); }, [screen]);
 
   if (creating) return <div className="fin obr"><Editor mode="new" project={creating?.id ? creating : undefined} onCancel={() => setCreating(false)} onSaved={(d) => { setCreating(false); load(); toast?.('Borrador guardado'); setOpen({ id: d.id }); }} /></div>;
   if (importing) return <div className="fin obr"><PdfImport project={importing} toast={toast} onCancel={() => setImporting(null)} onDone={(id) => { setImporting(null); load(); setOpen({ id }); }} /></div>;
   if (agentando) return <div className="fin obr"><AgenteImport project={agentando} toast={toast} onCancel={() => setAgentando(null)} onDone={(id) => { setAgentando(null); load(); setOpen({ id }); }} /></div>;
+  if (chatting) return <div className="fin obr"><AgenteChat toast={toast} onCancel={() => setChatting(false)} onDone={(id) => { setChatting(false); load(); setOpen({ id }); }} /></div>;
+  if (screen === 'partidas') return <Partidas toast={toast} readOnly={readOnly} />;
   if (screen === 'propuestas') return <Propuestas toast={toast} readOnly={readOnly} onCount={() => countRef.current?.()} />;
   if (open) {
     return (
@@ -108,13 +114,14 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
     );
   }
 
-  // Team: obras en curso, straight into updating the progress of each line.
+  // Team: every open project (with or without presupuestos) and its obras en
+  // curso, straight into updating the progress of each line.
   if (screen === 'avance') {
     return (
       <div className="fin obr">
-        <Head title="Actualizar avance" text="Elige la obra y actualiza el avance de cada partida en %. El cliente lo ve al momento." />
-        {obras.length ? <div className="obr-cards">{obras.map((p) => <ObraCard key={p.id} p={p} team cta={readOnly ? null : 'Actualizar avance'} onClick={() => setOpen({ id: p.id, tab: 'obra', edit: true })} />)}</div>
-          : <Empty icon="ri-building-2-line" title="No hay obras en curso" text={panel === 'admin' ? 'Una obra aparece aquí cuando su presupuesto está aprobado y tiene fecha de inicio.' : 'Aquí verás las obras en curso de las que eres jefe de obra.'} />}
+        <Head title="Actualizar avance" text="Todos los proyectos abiertos, tengan o no presupuesto. Elige la obra y actualiza el avance de cada partida en %. El cliente lo ve al momento." />
+        <AvanceProyectos obras={obras} projects={projects} readOnly={readOnly} panel={panel}
+          onUpdate={(p) => setOpen({ id: p.id, tab: 'obra', edit: true })} onOpenProject={setProject} />
       </div>
     );
   }
@@ -134,6 +141,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
         {!readOnly ? (
           <div className="obr-actions">
             <button type="button" className="fin-btn" onClick={() => setCreating(true)}><i className="ri-add-line"></i>Nuevo presupuesto</button>
+            {panel === 'admin' ? <button type="button" className="fin-btn" onClick={() => setChatting(true)}><i className="ri-robot-line"></i>Agente (chat)</button> : null}
           </div>
         ) : null}
       </div>
@@ -239,31 +247,12 @@ function PdfImport({ project, onCancel, onDone, toast }) {
   );
 }
 
-const fileToBase64 = (file) => new Promise((resolve, reject) => {
-  const r = new FileReader();
-  r.onload = () => resolve(String(r.result).split(',')[1] || '');
-  r.onerror = () => reject(new Error(`No se ha podido leer «${file.name}»`));
-  r.readAsDataURL(file);
-});
-
 // Notes, transcribed voice notes, photos and plans from the client visit →
 // a draft (backend: presupuestos/agente.js), matched against the base de
 // partidas the same way a PDF import is. Nothing is saved until the jefe
 // reviews it in the same editor and sends it.
 function AgenteImport({ project, onCancel, onDone, toast }) {
-  const [notes, setNotes] = useState('');
-  const [picked, setPicked] = useState([]);
   const [draft, setDraft] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const generate = async () => {
-    setBusy(true); setError('');
-    try {
-      const files = await Promise.all(picked.map(async (f) => ({ name: f.name, mime: f.type || 'text/plain', dataBase64: await fileToBase64(f) })));
-      setDraft(await api.readAgente({ notes, files }));
-    } catch (e) { setError(e.message); }
-    setBusy(false);
-  };
   if (draft) {
     return <Editor mode="new" initial={draft} project={project} onCancel={onCancel} onSaved={async (d, { send }) => {
       let msg = 'Borrador guardado';
@@ -279,22 +268,7 @@ function AgenteImport({ project, onCancel, onDone, toast }) {
         {project ? <p className="obr-project-line"><i className="ri-building-4-line" aria-hidden="true"></i><span>{'Proyecto '}<strong>{[project.code, project.name].filter(Boolean).join(' · ')}</strong></span></p> : null}
         <p>Escribe lo que recogiste del cliente y adjunta fotos, planos o las notas de voz ya transcritas. El agente propone capítulos y partidas de la base de Ledens; lo que no pueda deducir de los archivos queda marcado para que lo resuelvas antes de enviarlo — nunca inventa medidas, precios ni decisiones del cliente.</p>
       </div>
-      {error ? <ErrorBox message={error} /> : null}
-      <div className="fin-card fin-form">
-        <label className="fin-field"><span>Notas de la visita</span>
-          <textarea rows={6} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Qué se pide, estancias afectadas, materiales y calidades comentadas, medidas tomadas, qué queda pendiente de decidir…" />
-        </label>
-        <label className="fin-field"><span>Fotos, planos, PDF o notas de voz transcritas (máximo 20 MB en total)</span>
-          <input type="file" multiple accept="image/jpeg,image/png,image/heic,application/pdf,text/plain,.txt,.heic"
-            onChange={(e) => { setPicked([...e.target.files]); setError(''); }} />
-        </label>
-        {picked.length ? <p className="fin-muted">{picked.length} archivo(s) seleccionado(s).</p> : null}
-        {busy ? <p className="fin-muted">Leyendo la documentación de la visita… puede tardar un momento.</p> : null}
-        <div className="obr-actions obr-start">
-          <button type="button" className="fin-btn" onClick={onCancel} disabled={busy}>Cancelar</button>
-          <button type="button" className="fin-btn is-primary" onClick={generate} disabled={busy || (!notes.trim() && !picked.length)}><i className="ri-magic-line"></i>{busy ? 'Generando…' : 'Generar borrador'}</button>
-        </div>
-      </div>
+      <AgenteForm onDraft={setDraft} onCancel={onCancel} />
     </div>
   );
 }

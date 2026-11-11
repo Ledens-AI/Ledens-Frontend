@@ -91,6 +91,7 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
       </div>
       {doc.can?.linkProject || doc.project ? <ProjectLink doc={doc} canEdit={!!can.linkProject} busy={busy} onOpenProject={onOpenProject}
         onSave={(projectId) => act(() => api.setProject(doc.id, { projectId }), projectId ? 'Obra vinculada al proyecto' : 'Obra desvinculada del proyecto')} error={dialog === null ? dialogError : ''} /> : null}
+      {can.joinObra ? <JoinObra doc={doc} busy={busy} onSave={(obraId) => act(() => api.joinObra(doc.id, { obraId }), 'Presupuesto unido a la obra como ampliación')} error={dialog === null ? dialogError : ''} /> : null}
       {can.assignJefe ? <JefePicker doc={doc} busy={busy} onSave={(jefeId) => act(() => api.assignJefe(doc.id, { jefeId }), 'Jefe de obra actualizado')} /> : null}
 
       {doc.parent ? <p className="fin-warn"><i className="ri-information-line"></i><span>{t.extensionNoteA}<button type="button" className="fin-link" onClick={() => onOpen?.(doc.parent.id)}>{`${doc.parent.ref} · ${doc.parent.title}`}</button>{t.extensionNoteB}</span></p> : null}
@@ -397,6 +398,48 @@ function ProjectLink({ doc, canEdit, busy, onSave, onOpenProject, error }) {
         <i className="ri-links-line"></i>{pr ? 'Cambiar proyecto' : 'Vincular a un proyecto'}</button> : null}
       {canEdit && pr ? <button type="button" className="fin-btn is-small is-ghost" disabled={busy} onClick={() => onSave(null)}>Desvincular</button> : null}
       {error ? <span className="fin-error-inline">{error}</span> : null}
+    </div>
+  );
+}
+
+// Team: an obra created on its own (a second presupuesto of the same work)
+// joins another obra of the client as an ampliación, so the work is one obra:
+// one progress, one set of photos and documents (team-only, in Spanish).
+function JoinObra({ doc, busy, onSave, error }) {
+  const [open, setOpen] = useState(false);
+  const [obras, setObras] = useState(null);
+  const [value, setValue] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const projectId = doc.project && !doc.project.missing ? doc.project.id : null;
+  const show = () => {
+    setOpen(true); setValue(''); setLoadError('');
+    api.options().then((o) => {
+      // Same client; never one in another project. Those of this project first.
+      const list = (o.obras || []).filter((x) => x.id !== doc.id && x.clientId === doc.client?.id && (!projectId || !x.projectId || x.projectId === projectId));
+      list.sort((a, b) => (b.projectId === projectId) - (a.projectId === projectId));
+      setObras(list);
+      if (list.length === 1) setValue(list[0].id);
+    }, (e) => setLoadError(e.message));
+  };
+  if (!open) return <div><button type="button" className="fin-btn is-small" onClick={show} disabled={busy}><i className="ri-git-merge-line"></i>Unir a otra obra como ampliación</button>{error ? <span className="fin-error-inline">{error}</span> : null}</div>;
+  return (
+    <div className="fin-card">
+      <div className="fin-card-head"><h2>Unir a otra obra</h2></div>
+      <p className="fin-muted obr-mb">{`${doc.ref} pasa a ser una ampliación de la obra que elijas: su avance, fotos, documentos y clientes invitados se suman a esa obra, que conserva su jefe de obra, sus fechas y su proyecto (si no tiene, toma los de este). Las versiones y aprobaciones no cambian.`}</p>
+      {loadError ? <p className="fin-error-inline">{loadError}</p> : null}
+      {obras && !obras.length ? <p className="fin-muted">{`No hay otra obra aprobada de ${doc.client?.name || 'este cliente'}${projectId ? ' en este proyecto' : ''} a la que unirlo.`}</p> : null}
+      <div className="fin-filters">
+        {obras?.length ? (
+          <label className="fin-field"><span>Obra</span>
+            <select value={value} onChange={(e) => setValue(e.target.value)}>
+              <option value="">Elige la obra</option>
+              {obras.map((o) => <option key={o.id} value={o.id}>{`${o.ref} · ${o.title}${o.projectId && o.projectId === projectId ? ' · este proyecto' : ''}`}</option>)}
+            </select>
+          </label>
+        ) : !obras && !loadError ? <span className="fin-muted">Cargando…</span> : null}
+        <button type="button" className="fin-btn" onClick={() => setOpen(false)} disabled={busy}>Cancelar</button>
+        <button type="button" className="fin-btn is-primary" disabled={busy || !value} onClick={() => { setOpen(false); onSave(value); }}><i className="ri-git-merge-line"></i>Unir como ampliación</button>
+      </div>
     </div>
   );
 }
