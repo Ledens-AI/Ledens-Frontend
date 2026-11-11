@@ -91,6 +91,8 @@ export const api = {
   partidas: (params) => request('GET', `${base}/partidas?${new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v !== '' && v != null))}`),
   guardarPartida: (id, body) => request('PATCH', `${base}/partidas/${id}`, body),
   assignJefe: (id, body) => request('PUT', `${base}/${id}/jefe`, body),
+  // «Analizar existentes»: a PDF draft against the obra's approved lines (saves nothing).
+  compare: (id, body) => request('POST', `${base}/${id}/comparar`, body),
   rename: (id, body) => request('PUT', `${base}/${id}/nombre`, body),
   // Projects of Gestión financiera: the obra's link (team) and a project with its presupuestos.
   setProject: (id, body) => request('PUT', `${base}/${id}/proyecto`, body),

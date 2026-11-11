@@ -225,13 +225,15 @@ function PdfSummary({ initial, all, rate }) {
   const total = Math.round((all + all * rate / 100) * 100) / 100;
   const doc = Number(initial.totalDocument);
   const shown = initial.pricesIncludeVat ? total : all;
-  const differs = Math.abs(shown - doc) > 0.05;
+  // After «Analizar existentes» only the missing lines are left: the PDF's total no longer applies.
+  const differs = !initial.onlyMissing && Math.abs(shown - doc) > 0.05;
   return (
     <div className="fin-stack">
       <p className={differs ? 'fin-warn' : 'fin-muted'}>
         <i className={initial.source === 'ocr' ? 'ri-scan-2-line' : 'ri-file-text-line'}></i>
         {` Leído ${initial.source === 'ocr' ? 'con OCR' : 'del texto del PDF'}: suma de importes del PDF ${eur(doc)} ${initial.pricesIncludeVat ? 'con IVA (los precios se han pasado a base imponible)' : 'sin IVA'}; ahora ${eur(shown)}.`}
         {differs ? ' No coinciden: revisa las partidas marcadas o las que falten.' : ''}
+        {initial.onlyMissing ? ` Solo quedan las partidas que la obra no tiene aprobadas (${initial.onlyMissing}).` : ''}
       </p>
       {initial.warnings?.length ? <div className="fin-warn"><i className="ri-error-warning-line"></i><span>{initial.warnings.join(' ')}</span></div> : null}
     </div>
