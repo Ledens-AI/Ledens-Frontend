@@ -1,5 +1,6 @@
 import { audit } from '../db/audit.js';
 import { createInBase } from './propuestas.js';
+import { unitKey } from './catalog.js';
 
 // Presupuestos para clientes y seguimiento de obra (migration 020). One
 // service per request, built with the effective user (after «Ver como»).
@@ -219,13 +220,52 @@ export class PresupuestosService {
     }));
   }
 
+  // «Analizar existentes» for an ampliación read from a PDF: each line of the
+  // draft against what the obra already has approved (root + approved
+  // ampliaciones, the lines that count). Same partida = same code or same base
+  // partida (PA-###) or the same name, always with the same unit. A line is
+  // «existente» when the approved quantity still unclaimed covers it,
+  // «exceso» when it asks for more (only the difference is new) and «nueva»
+  // when nothing matches. Saves nothing; the team decides in the editor.
+  async compareWithObra(id, body = {}) {
+    const p = await this.load(this.pool, id);
+    if (!this.isTeam(p)) fail(403, 'Solo el equipo de la obra compara presupuestos');
+    if (p.parent_id) fail(400, 'Se compara con la obra principal');
+    const approved = await this.obraLines([p.id]);
+    if (!approved.length) fail(409, 'La obra todavía no tiene partidas aprobadas');
+    const chapters = Array.isArray(body.chapters) ? body.chapters : [];
+    if (chapters.length > 50 || chapters.reduce((a, c) => a + (Array.isArray(c?.items) ? c.items.length : 0), 0) > 1000) fail(400, 'Demasiadas partidas');
+    const nameKey = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9ñ]+/g, ' ').trim();
+    const codeKey = (s) => String(s || '').trim().toUpperCase();
+    const num = (v) => { const n = Number(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : 0; };
+    const pool = approved.map((l) => ({ l, left: Number(l.quantity), unit: unitKey(l.unit), code: codeKey(l.code), base: codeKey(l.base_code), name: nameKey(l.name) }));
+    const out = [];
+    const summary = { nuevas: 0, existentes: 0, excesos: 0 };
+    chapters.forEach((c, ci) => (Array.isArray(c?.items) ? c.items : []).forEach((it, ii) => {
+      const unit = unitKey(it?.unit), code = codeKey(it?.code), base = codeKey(it?.baseCode), name = nameKey(it?.name), qty = num(it?.quantity);
+      const same = (a) => a.unit === unit && ((code && a.code === code) || (base && (a.base === base || a.code === base)) || (name && a.name === name));
+      const cands = pool.filter(same);
+      if (!cands.length) { summary.nuevas++; out.push({ chapter: ci, item: ii, status: 'nueva' }); return; }
+      const have = cands.reduce((a, x) => a + x.left, 0);
+      let need = qty;
+      for (const x of cands) { const take = Math.min(x.left, need); x.left -= take; need -= take; }
+      const price = cands[0].l.unit_price;
+      const priceDiffers = it?.unitPrice != null && it.unitPrice !== '' && Math.abs(num(it.unitPrice) - Number(price)) > 0.005;
+      const matched = [...new Map(cands.map((x) => [x.l.presupuesto_id + x.l.id, { ref: x.l.ref, code: x.l.code, name: x.l.name, quantity: x.l.quantity, unitPrice: x.l.unit_price }])).values()];
+      const extra = Math.round((qty - have) * 1000) / 1000;
+      if (extra > 0) { summary.excesos++; out.push({ chapter: ci, item: ii, status: 'exceso', approvedQuantity: String(Math.round(have * 1000) / 1000), extraQuantity: String(extra), approvedUnitPrice: price, priceDiffers, matched }); }
+      else { summary.existentes++; out.push({ chapter: ci, item: ii, status: 'existente', approvedQuantity: String(Math.round(have * 1000) / 1000), approvedUnitPrice: price, priceDiffers, matched }); }
+    }));
+    return { obra: { id: p.id, ref: p.ref, title: p.title }, items: out, summary };
+  }
+
   // Approved lines of an obra (root + approved ampliaciones) with production.
   async obraLines(ids, db = this.pool) {
     if (!ids.length) return [];
     return (await db.query(`
       SELECT coalesce(p.parent_id,p.id) obra_id, p.id presupuesto_id, p.ref, p.title, p.parent_id, v.id version_id, v.vat_rate,
              ch.id capitulo_id, ch.position chapter_position, ch.name chapter_name,
-             l.id, l.position, l.code, l.name, l.description, l.unit, l.quantity::text, l.unit_price::text, l.kind, l.selected,
+             l.id, l.position, l.code, l.base_code, l.name, l.description, l.unit, l.quantity::text, l.unit_price::text, l.kind, l.selected,
              ${LINE} amount, coalesce(${LAST_EXECUTED},0)::text executed,
              (SELECT jsonb_build_object('at',pr.declared_at,'by',u.name,'note',pr.note) FROM presupuesto_produccion pr
                 LEFT JOIN users u ON u.id=pr.declared_by WHERE pr.partida_id=l.id ORDER BY pr.id DESC LIMIT 1) last

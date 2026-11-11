@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, archivos, parseDecimal } from './api.js';
 import { Badge, Dialog, Empty, ErrorBox, Kpi } from '../finanzas/ui.jsx';
 import Editor from './Editor.jsx';
+import PdfImport from './PdfImport.jsx';
 import BaseMatch from './BaseMatch.jsx';
 import Archivos from './Archivos.jsx';
 import Clientes from './Clientes.jsx';
@@ -32,7 +33,7 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
   const [error, setError] = useState('');
   const [tab, setTab] = useState(initialTab || 'presupuesto');
   const [versionId, setVersionId] = useState(null);
-  const [editing, setEditing] = useState(null); // 'edit' | 'ampliacion'
+  const [editing, setEditing] = useState(null); // 'edit' | 'ampliacion' | 'ampliacion-pdf'
   const [dialog, setDialog] = useState(null); // 'approve' | 'changes' | 'reject' | 'send'
   const [selected, setSelected] = useState([]);
   const [text, setText] = useState('');
@@ -55,8 +56,12 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
 
   if (error) return <div className="fin-stack"><BackLink onBack={onBack} /><ErrorBox message={error} onRetry={() => load(versionId)} retryLabel={t.retry} /></div>;
   if (!doc) return <div className="fin-loading fin-muted">{t.loadingDoc}</div>;
+  if (editing === 'ampliacion-pdf') {
+    return <PdfImport parent={doc} toast={toast} onCancel={() => setEditing('ampliacion')}
+      onDone={(id) => { setEditing(null); onChanged?.(); onOpen?.(id); }} />;
+  }
   if (editing) {
-    return <Editor mode={editing} doc={editing === 'edit' ? doc : null} parent={doc}
+    return <Editor mode={editing} onFromPdf={editing === 'ampliacion' ? () => setEditing('ampliacion-pdf') : undefined} doc={editing === 'edit' ? doc : null} parent={doc}
       onCancel={() => setEditing(null)}
       onSaved={(d) => { setEditing(null); onChanged?.(); toast?.('Borrador guardado'); if (d.id !== doc.id) onOpen?.(d.id); else { setDoc(d); setVersionId(null); } }} />;
   }

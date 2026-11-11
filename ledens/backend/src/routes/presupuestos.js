@@ -101,6 +101,8 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   router.get('/:id', handle((req) => svc(req).get(req.params.id, { versionId: req.query.version || undefined })));
   router.post('/', handle((req) => svc(req).create(req.body || {})));
   router.put('/:id', handle((req) => svc(req).saveDraft(req.params.id, req.body || {})));
+  // «Analizar existentes»: a PDF draft against the obra's approved lines (saves nothing).
+  router.post('/:id/comparar', handle((req) => svc(req).compareWithObra(req.params.id, req.body || {})));
   router.post('/:id/enviar', handle((req) => svc(req).send(req.params.id)));
   router.post('/:id/aprobar', handle((req) => svc(req).approve(req.params.id, req.body || {})));
   router.post('/:id/aprobar-en-nombre', handle((req) => svc(req).approveOnBehalf(req.params.id, req.body || {})));
