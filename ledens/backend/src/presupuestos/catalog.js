@@ -3,7 +3,8 @@
 // only active partidas, the most specific one, never forced when scope or unit
 // do not fit; lines in another language are translated first (translate.js);
 // differences with the base are annotated, never changed silently; a line no
-// partida covers becomes a proposed new partida for an admin to approve.
+// partida covers becomes a new partida, created in the base when the
+// presupuesto is saved (PresupuestosService.propose).
 // Read-only on ledens.*: nothing here writes to the base.
 
 const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -132,7 +133,7 @@ export async function matchLines(lines, catalog, { translator, pricesIncludeVat,
       const reason = nearest
         ? `Ninguna partida activa de la base con unidad ${l.unit ? unitLabel(l.unit) : 'compatible'} cubre esta línea; la más próxima es ${nearest.it.code} «${nearest.it.name}» (${unitLabel(nearest.it.unit)}, similitud ${nearest.s.toFixed(2)}).`
         : `Ninguna partida de la base se parece a esta línea${unverifiableText(foreign, t)}.`;
-      annotations.push({ type: 'nueva', text: `${reason} Se propone una partida nueva, pendiente de que la apruebe un administrador.` });
+      annotations.push({ type: 'nueva', text: `${reason} Al guardar el presupuesto se crea como partida nueva de la base, con el siguiente código PA.` });
       return {
         baseCode: null, baseName: null, annotations, translation: t && t.from !== 'es' ? text : null,
         proposal: {

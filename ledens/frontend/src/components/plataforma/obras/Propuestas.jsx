@@ -20,14 +20,14 @@ export default function Propuestas({ toast, onCount, readOnly }) {
     <div className="fin obr">
       <div className="fin-page-head">
         <h1>Partidas propuestas</h1>
-        <p>Líneas de presupuestos importados que ninguna partida de la base cubre. Al aprobarla se añade al final de la base con el siguiente código PA-### libre; las partidas existentes no se modifican. Sin precio queda inactiva y pendiente de valoración.</p>
+        <p>Partidas nuevas de la base, creadas al guardar presupuestos con líneas que ninguna partida cubría: cada una se añade al final de la base con el siguiente código PA-### libre (sin precio queda inactiva y pendiente de valoración); las existentes no se modifican. En «Pendientes» solo quedan las propuestas de antes de este cambio, que decide un administrador.</p>
       </div>
       <div className="fin-segmented">
         {[['pending', 'Pendientes'], ['approved', 'Aprobadas'], ['rejected', 'Rechazadas']].map(([k, l]) => <button key={k} type="button" className={status === k ? 'is-on' : ''} onClick={() => setStatus(k)}>{l}</button>)}
       </div>
       {error ? <ErrorBox message={error} onRetry={load} /> : null}
       {!data ? <div className="fin-loading fin-muted">Cargando…</div>
-        : !data.propuestas.length ? <Empty icon="ri-add-box-line" title={status === 'pending' ? 'No hay partidas pendientes' : 'Nada por aquí'} text="Aparecen al guardar un presupuesto importado de PDF con líneas que la base no cubre." />
+        : !data.propuestas.length ? <Empty icon="ri-add-box-line" title={status === 'pending' ? 'No hay partidas pendientes' : 'Nada por aquí'} text={status === 'pending' ? 'Las partidas nuevas se crean al guardar el presupuesto; mira «Aprobadas» para ver las creadas.' : 'Aparecen al guardar un presupuesto con líneas que la base no cubre.'} />
         : data.propuestas.map((p) => <Propuesta key={p.id} p={p} categories={data.categories} readOnly={readOnly || status !== 'pending'} toast={toast} onDone={load} />)}
     </div>
   );

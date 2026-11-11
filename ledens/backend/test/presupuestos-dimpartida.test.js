@@ -62,7 +62,7 @@ test('matching: by the PDF code, by text, translated from English; prices from t
   assert.match(m[4].proposal.name, /Membrana impermeable en balcón/);
   assert.equal(m[4].proposal.nearestCode, 'PA-189');
   assert.equal(m[4].proposal.categoryCode, 'CAT-017');
-  assert.match(m[4].annotations.find((a) => a.type === 'nueva').text, /más próxima es PA-189.*pendiente de que la apruebe un administrador/);
+  assert.match(m[4].annotations.find((a) => a.type === 'nueva').text, /más próxima es PA-189.*se crea como partida nueva de la base/);
 });
 
 test('without a translator: an English line is matched by its code and says the text was not checked', async () => {
@@ -133,7 +133,7 @@ async function englishPdf() {
   return Buffer.from(await doc.save());
 }
 
-test('PDF draft → saved presupuesto: base codes and annotations for the team only, one proposal per uncovered line', async () => {
+test('PDF draft → saved presupuesto: a line the base does not cover becomes a new partida of the base at once', async () => {
   const users = Object.fromEntries([admin, jefe, cliente].map((u) => [u.id, u]));
   const app = express();
   app.use('/api/presupuestos', createPresupuestosRouter({ pool, ocr: null, translator: fakeTranslator, origin: 'https://ledens.test',
@@ -149,65 +149,69 @@ test('PDF draft → saved presupuesto: base codes and annotations for the team o
   assert.equal(trench.baseCode, 'PA-187');
   assert.ok(trench.annotations.some((a) => a.type === 'precio'));
   assert.equal(trench.name, 'Excavation of perimeter trench beside the facade', 'the client keeps the PDF text');
-  assert.equal(membrane.baseCode, null);
+  assert.equal(membrane.baseCode, null, 'nothing is written while reading the PDF');
   assert.equal(membrane.proposal.nearestCode, 'PA-189');
+  const before = (await db.query('SELECT id_partida, name, sale_price_including_vat::text FROM ledens.work_items ORDER BY id_partida')).rows;
+  assert.equal(before.length, 6);
 
   const svc = new PresupuestosService(pool, jefe);
   let p = await svc.create({ ...draft, title: 'Impermeabilización', clientId: cliente.id, sourceFile: 'waterproofing.pdf' });
   const items = p.version.chapters[0].items;
   assert.equal(items[0].baseCode, 'PA-187');
   assert.ok(items[0].annotations.some((a) => /Se usa el del PDF/.test(a.text)));
-  assert.equal(items[1].proposal.status, 'pending');
+  // Saving created the partida with the next PA-###, in the category of the nearest one, active (it has a price).
+  assert.equal(items[1].baseCode, 'PA-201');
+  assert.equal(items[1].proposal, null, 'nothing left pending');
+  const nueva = items[1].annotations.filter((a) => a.type === 'nueva');
+  assert.equal(nueva.length, 1);
+  assert.match(nueva[0].text, new RegExp(`Partida nueva creada en la base como PA-201 · ${membrane.proposal.categoryCode} .*\\(activa\\)`));
+  const wi = (await db.query("SELECT w.*, c.id_categoria FROM ledens.work_items w JOIN ledens.work_categories c ON c.id=w.category_id WHERE id_partida='PA-201'")).rows[0];
+  assert.deepEqual([wi.name, wi.unit_source, Number(wi.sale_price_including_vat), Math.round(Number(wi.sale_price_excluding_vat) * 100) / 100, wi.activa, wi.rendimientovalidado, wi.id_categoria],
+    ['Membrana impermeable en balcón', 'm²', 30, 24.79, 'SI', 'NO', membrane.proposal.categoryCode]);
+  assert.equal(wi.unit_id, '11111111-1111-4111-8111-111111111111', 'unit taken from the base');
+  assert.match(wi.observacionesagente, /Partida creada el .* a partir de «waterproofing\.pdf» para la obra PRE-\d{4}-\d{3} «Impermeabilización»\. Partida más próxima descartada: PA-189\..*Precio de venta del presupuesto PRE-.*presentado al cliente.*PENDIENTE DE VALIDACIÓN COMO PRECIO ESTÁNDAR/);
+  assert.deepEqual((await db.query("SELECT id_partida, name, sale_price_including_vat::text FROM ledens.work_items WHERE id_partida <> 'PA-201' ORDER BY id_partida")).rows, before, 'existing partidas unchanged');
   const prop = (await db.query('SELECT * FROM partida_propuestas')).rows;
-  assert.equal(prop.length, 1);
-  assert.match(prop[0].origin, /a partir de «waterproofing\.pdf» para la obra PRE-\d{4}-\d{3} «Impermeabilización»\. Partida más próxima descartada: PA-189\./);
-  assert.match(prop[0].price_source, /Precio de venta del presupuesto PRE-.*presentado al cliente/);
-  assert.equal(Number(prop[0].price_incl_vat), 30);
-  // Saving the draft again replaces, does not duplicate, its pending proposal.
+  assert.deepEqual(prop.map((x) => [x.status, x.created_code, x.decided_by]), [['approved', 'PA-201', jefe.id]], 'kept as history in «Partidas propuestas»');
+  assert.equal((await db.query("SELECT count(*)::int n FROM audit_log WHERE action='Partida creada en la base' AND detail LIKE '%al guardar el presupuesto%'")).rows[0].n, 1);
+  // Saving the draft again points to PA-201: no second partida.
   p = await svc.saveDraft(p.id, { ...draft, title: 'Impermeabilización', chapters: p.version.chapters.map((c) => ({ name: c.name, items: c.items })) });
-  assert.equal((await db.query("SELECT count(*)::int n FROM partida_propuestas WHERE status='pending'")).rows[0].n, 1);
+  assert.equal(p.version.chapters[0].items[1].baseCode, 'PA-201');
+  assert.equal((await db.query('SELECT count(*)::int n FROM ledens.work_items')).rows[0].n, 7);
+  // The PA-201 partida now covers that line in the next PDF.
   p = await svc.send(p.id);
   const seen = await new PresupuestosService(pool, cliente).get(p.id);
   assert.equal(seen.version.chapters[0].items[0].baseCode, undefined, 'the client never sees the base or the annotations');
   assert.equal(seen.version.chapters[0].items[0].annotations, undefined);
 });
 
-test('admin tray: approving appends PA-### at the end of the base (never touching others); a new category gets CAT-###; rejecting is noted', async () => {
-  const before = (await db.query('SELECT id_partida, name, sale_price_including_vat::text FROM ledens.work_items ORDER BY id_partida')).rows;
+test('new partidas on save: no price → inactive; no category → «Sin clasificar»; the same name and unit twice → one partida', async () => {
+  const svc = new PresupuestosService(pool, jefe);
+  const p = await svc.create({ title: 'Otra', clientId: cliente.id, chapters: [{ name: 'C', items: [
+    { name: 'Partida rara', unit: 'ud', quantity: '1', unitPrice: '0', proposal: { name: 'Partida rara', unit: 'ud', priceInclVat: null, categoryCode: 'CAT-017', nearestCode: 'PA-187' } },
+    { name: 'Otra rara', unit: 'ud', quantity: '1', unitPrice: '10', proposal: { name: 'Otra rara', unit: 'ud', priceInclVat: '12.1' } },
+    { name: 'Otra rara', unit: 'ud', quantity: '2', unitPrice: '10', proposal: { name: 'Otra rara', unit: 'ud', priceInclVat: '12.1' } }] }] });
+  const codes = p.version.chapters[0].items.map((i) => i.baseCode);
+  assert.deepEqual(codes, ['PA-202', 'PA-203', 'PA-203']);
+  const rows = (await db.query("SELECT w.id_partida, w.activa, w.sale_price_including_vat::text price, c.id_categoria cat FROM ledens.work_items w JOIN ledens.work_categories c ON c.id=w.category_id WHERE id_partida IN ('PA-202','PA-203') ORDER BY 1")).rows;
+  assert.deepEqual(rows.map((r) => [r.id_partida, r.activa, r.price, r.cat]), [['PA-202', 'NO', null, 'CAT-017'], ['PA-203', 'SI', '12.1', 'CAT-018']]);
+  assert.match(p.version.chapters[0].items[0].annotations.at(-1).text, /inactiva, precio pendiente de valoración/);
+  assert.match(p.version.chapters[0].items[2].annotations.at(-1).text, /Partida de la base PA-203, con el mismo nombre y unidad/);
+  assert.equal((await db.query("SELECT count(*)::int n FROM ledens.work_categories WHERE name='Sin clasificar'")).rows[0].n, 1);
+});
+
+test('admin tray: a proposal still pending from before is approved (PA-###, new CAT-###) or rejected by an admin only', async () => {
   await assert.rejects(new PropuestasService(pool, jefe).list(), { status: 403 });
   const tray = new PropuestasService(pool, admin);
-  const { propuestas, categories } = await tray.list();
-  assert.equal(propuestas.length, 1);
-  assert.ok(categories.some((c) => c.code === 'CAT-017'));
-  const [prop] = propuestas;
-  assert.equal(prop.line.name, 'Waterproof membrane on balcony');
-
-  const r = await tray.approve(prop.id, { newCategoryName: 'Impermeabilización', incluyeMateriales: 'SI', palabrasClave: 'membrana, balcon, impermeabilizacion' });
-  assert.deepEqual(r, { code: 'PA-201', category: 'CAT-018', active: true });
-  const wi = (await db.query("SELECT w.*, c.id_categoria FROM ledens.work_items w JOIN ledens.work_categories c ON c.id=w.category_id WHERE id_partida='PA-201'")).rows[0];
-  assert.deepEqual([wi.name, wi.unit_source, Number(wi.sale_price_including_vat), Math.round(Number(wi.sale_price_excluding_vat) * 100) / 100, wi.activa, wi.incluye_materiales, wi.rendimientovalidado, wi.id_categoria],
-    ['Membrana impermeable en balcón', 'm²', 30, 24.79, 'SI', 'SI', 'NO', 'CAT-018']);
-  assert.equal(wi.unit_id, '11111111-1111-4111-8111-111111111111', 'unit taken from the base');
-  assert.match(wi.observacionesagente, /Partida propuesta el .* Partida más próxima descartada: PA-189\..*PENDIENTE DE VALIDACIÓN COMO PRECIO ESTÁNDAR/);
-  assert.deepEqual((await db.query("SELECT id_partida, name, sale_price_including_vat::text FROM ledens.work_items WHERE id_partida <> 'PA-201' ORDER BY id_partida")).rows, before, 'existing partidas unchanged');
-  const line = (await db.query('SELECT base_code, annotations FROM presupuesto_partidas WHERE id=(SELECT partida_id FROM partida_propuestas WHERE id=$1)', [prop.id])).rows[0];
-  assert.equal(line.base_code, 'PA-201');
-  assert.match(line.annotations.at(-1).text, /Partida creada en la base como PA-201 \(activa\)/);
-  await assert.rejects(tray.approve(prop.id), { status: 409 });
-
-  // Another one, approved without price: inactive, pending valuation, existing category.
-  const svc = new PresupuestosService(pool, jefe);
-  const p2 = await svc.create({ title: 'Otra', clientId: cliente.id, chapters: [{ name: 'C', items: [
-    { name: 'Partida rara', unit: 'ud', quantity: '1', unitPrice: '0', proposal: { name: 'Partida rara', unit: 'ud', priceInclVat: null, categoryCode: 'CAT-017', nearestCode: 'PA-187' } },
-    { name: 'Otra rara', unit: 'ud', quantity: '1', unitPrice: '0', proposal: { name: 'Otra rara', unit: 'ud', categoryCode: 'CAT-017' } }] }] });
-  const [x, y] = (await tray.list()).propuestas.sort((a, b) => a.name.localeCompare(b.name));
-  assert.equal((await tray.approve(y.id, { priceInclVat: '' })).active, false);
-  const inactive = (await db.query("SELECT activa, sale_price_including_vat, observacionesagente FROM ledens.work_items WHERE id_partida='PA-202'")).rows[0];
-  assert.deepEqual([inactive.activa, inactive.sale_price_including_vat], ['NO', null]);
-  assert.match(inactive.observacionesagente, /PRECIO PENDIENTE DE VALORACIÓN/);
-  await assert.rejects(tray.reject(x.id, {}), { status: 400 });
-  await tray.reject(x.id, { note: 'Ya existe como PA-187 adaptada' });
-  const notes = (await new PresupuestosService(pool, jefe).get(p2.id)).version.chapters[0].items.map((i) => i.annotations.map((a) => a.text).join(' '));
-  assert.match(notes.join(' | '), /Partida propuesta rechazada: Ya existe como PA-187 adaptada/);
-  assert.deepEqual((await db.query("SELECT action FROM audit_log WHERE action LIKE 'Partida%' ORDER BY id")).rows.map((r) => r.action), ['Partida creada en la base', 'Partida creada en la base', 'Partida propuesta rechazada']);
+  assert.equal((await tray.list()).propuestas.length, 0, 'nothing waits: partidas are created on save');
+  assert.ok((await tray.list({ status: 'approved' })).propuestas.length >= 3);
+  const [x, y] = (await db.query(`INSERT INTO partida_propuestas (name, unit, price_incl_vat, category_code, origin, created_by) VALUES
+    ('Antigua A', 'ud', 50, NULL, 'Propuesta antigua', $1), ('Antigua B', 'ud', NULL, 'CAT-017', 'Propuesta antigua', $1) RETURNING id`, [jefe.id])).rows.map((r) => r.id);
+  await assert.rejects(tray.approve(x), { status: 400, message: /categoría/ }, 'an admin still chooses the category');
+  const r = await tray.approve(x, { newCategoryName: 'Impermeabilización', incluyeMateriales: 'SI' });
+  assert.deepEqual(r, { code: 'PA-204', category: 'CAT-019', active: true }, 'CAT-018 is «Sin clasificar», created on save');
+  await assert.rejects(tray.approve(x), { status: 409 });
+  await assert.rejects(tray.reject(y, {}), { status: 400 });
+  await tray.reject(y, { note: 'Ya existe como PA-187 adaptada' });
+  assert.equal((await db.query('SELECT status FROM partida_propuestas WHERE id=$1', [y])).rows[0].status, 'rejected');
 });
