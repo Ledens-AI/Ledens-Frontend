@@ -18,11 +18,12 @@ const fromVersion = (v) => (v?.chapters || []).map((c) => ({
  * kind), one VAT rate, conditions/exclusions. mode: 'new' (admin picks client
  * and jefe), 'ampliacion' (of `parent`) or 'edit' (the presupuesto `doc`). The
  * server validates everything again. */
-export default function Editor({ mode, doc, parent, initial, sourceFile, project: initialProject, onSaved, onCancel }) {
+export default function Editor({ mode, doc, parent, initial, sourceFile, project: initialProject, onFromPdf, onSaved, onCancel }) {
   const [title, setTitle] = useState(doc?.title || initial?.title || (mode === 'ampliacion' ? `Ampliación de ${parent.title}` : ''));
   const [address, setAddress] = useState(doc?.address || initial?.address || '');
   // An ampliación starts with the VAT rate of the obra it extends.
-  const rateOf = doc || (mode === 'ampliacion' ? parent : null);
+  // A PDF's own VAT rate wins over the obra's.
+  const rateOf = doc || (mode === 'ampliacion' && !initial ? parent : null);
   const [vatRate, setVatRate] = useState(rateOf ? String(Number(rateOf.version.vatRate)).replace('.', ',') : initial ? String(initial.vatRate).replace('.', ',') : '21');
   const [notes, setNotes] = useState(doc?.version.notes || initial?.notes || '');
   const [chapters, setChapters] = useState(() => (doc ? fromVersion(doc.version) : initial ? fromVersion(initial) : [{ name: '', items: [blankItem()] }]));
@@ -91,12 +92,22 @@ export default function Editor({ mode, doc, parent, initial, sourceFile, project
   return (
     <div className="fin-stack obr-editor">
       <div className="fin-page-head">
-        <h1>{initial ? 'Revisar presupuesto leído del PDF' : mode === 'new' ? 'Nuevo presupuesto' : mode === 'ampliacion' ? 'Nueva ampliación' : `Editar ${doc.ref}`}</h1>
+        <h1>{initial && mode === 'ampliacion' ? 'Revisar ampliación leída del PDF' : initial ? 'Revisar presupuesto leído del PDF' : mode === 'new' ? 'Nuevo presupuesto' : mode === 'ampliacion' ? 'Nueva ampliación' : `Editar ${doc.ref}`}</h1>
         <p>{mode === 'edit' && doc.versions[0]?.status !== 'draft'
           ? `El cliente ya tiene la versión ${doc.versions[0].number}. Al guardar se prepara la versión ${doc.versions[0].number + 1} como borrador; no la verá hasta que la envíes.`
+          : initial && mode === 'ampliacion' ? `Comprueba capítulos, partidas, mediciones y precios y envíasela al cliente: cuando la apruebe, se suma al total y al avance de ${parent.ref}. Los precios se guardan sin IVA.`
           : initial ? 'Comprueba capítulos, partidas, mediciones y precios, elige el cliente y envíaselo: quedará pendiente de su aprobación. Los precios se guardan sin IVA.'
           : 'Se guarda como borrador. El cliente no lo verá hasta que lo envíes. Los precios son sin IVA.'}</p>
       </div>
+      {mode === 'ampliacion' && !initial && onFromPdf ? (
+        <div className="fin-card obr-decide">
+          <div>
+            <h2>¿Tienes el presupuesto de la ampliación en PDF?</h2>
+            <p className="fin-muted">Súbelo y se rellenan capítulos, partidas, mediciones y precios. Lo revisas, se lo envías al cliente y, cuando lo apruebe, se suma al total de la obra.</p>
+          </div>
+          <div className="obr-actions"><button type="button" className="fin-btn is-primary" onClick={onFromPdf}><i className="ri-file-upload-line"></i>Subir PDF de la ampliación</button></div>
+        </div>
+      ) : null}
       {initial ? <PdfSummary initial={initial} all={Math.round(chapters.reduce((a, c) => a + c.items.reduce((b, it) => b + lineAmount(it), 0), 0) * 100) / 100} rate={rate} /> : null}
       {error ? <ErrorBox message={error} /> : null}
       <div className="fin-stack">
