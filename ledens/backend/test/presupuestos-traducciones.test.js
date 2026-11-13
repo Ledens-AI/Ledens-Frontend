@@ -25,9 +25,11 @@ before(async () => {
     email_verified boolean NOT NULL DEFAULT true, access_held boolean NOT NULL DEFAULT false, registered_at timestamptz DEFAULT now());
     CREATE TABLE audit_log(id bigint GENERATED ALWAYS AS IDENTITY, actor_id uuid REFERENCES users(id), actor_label text, action text,
       target_id uuid REFERENCES users(id), target_label text, detail text);`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '032_traducciones_presupuesto.sql', '033_presupuestos_proyecto.sql', '042_traducciones_presupuesto_es.sql']) {
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '032_traducciones_presupuesto.sql', '033_presupuestos_proyecto.sql']) {
     await db.exec(await fs.readFile(new URL('../src/db/migrations/' + m, import.meta.url), 'utf8'));
   }
+  // The Spanish cache (042) on its own line, so this setup does not collide with other branches editing the list above.
+  await db.exec(await fs.readFile(new URL('../src/db/migrations/042_traducciones_presupuesto_es.sql', import.meta.url), 'utf8'));
   [admin, cliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES ('admin@tr.test','Admin','admin'),('cliente@tr.test','Client','client') RETURNING id,email,name,role`)).rows;
   const svc = new PresupuestosService(pool, admin);
   const d = await svc.create({ title: 'Fontanería', vatRate: '21', clientId: cliente.id, notes: 'No incluye la red de desagües.',
