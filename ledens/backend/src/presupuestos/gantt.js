@@ -20,7 +20,11 @@ import { PresupuestoError, PresupuestosService, isUuid } from './service.js';
 // every answer recalculates them, so a change in the table moves the chart.
 // «Inicio de obra» (migration 039): one milestone per obra, on its start date,
 // that any task may take as a predecessor (its id is the obra's own id; it
-// lasts 0 days, so FS 0 starts the task that same day).
+// lasts 0 days, so FS 0 starts the task that same day). It is the default
+// predecessor (FS 0, `porDefecto`) of every task with none stored, unless the
+// team removed it on purpose (gantt_tareas.sin_predecesoras, migration 042).
+// Cuadrillas (042, per obra, default 1): the rendimiento is per cuadrilla, so
+// a duration computed from it is divided by the obra's cuadrillas.
 // Who: the team that may see the project reads it; the assigned jefe of the
 // obra (or an admin) changes its tasks.
 const fail = (status, message) => { throw new PresupuestoError(status, message); };
@@ -106,10 +110,10 @@ export function span({ start, end }) {
 
 // Duration from the base: rendimiento in units per working day (or hours per
 // unit when the column says so).
-export function durationFrom(quantity, rendimiento, perHour) {
-  const q = Number(quantity), r = Number(rendimiento);
+export function durationFrom(quantity, rendimiento, perHour, cuadrillas = 1) {
+  const q = Number(quantity), r = Number(rendimiento), n = Math.max(1, Number(cuadrillas) || 1);
   if (!(q > 0) || !(r > 0)) return null;
-  const days = perHour ? q * r / HOURS_PER_DAY : q / r;
+  const days = (perHour ? q * r / HOURS_PER_DAY : q / r) / n;
   return Math.min(MAX_DAYS, Math.max(0.1, Math.ceil(days * 10 - 1e-6) / 10));
 }
 
@@ -151,16 +155,25 @@ export class GanttService {
     const lines = await this.svc.obraLines(obras.map((o) => o.id), db);
     const ids = lines.map((l) => l.id);
     const extra = new Map((await db.query('SELECT id, base_code FROM presupuesto_partidas WHERE id = ANY($1::uuid[])', [ids])).rows.map((r) => [r.id, r.base_code]));
-    const overrides = new Map((await db.query('SELECT partida_id, duration_days FROM gantt_tareas WHERE partida_id = ANY($1::uuid[]) AND duration_days IS NOT NULL', [ids])).rows.map((r) => [r.partida_id, Number(r.duration_days)]));
+    const stored = (await db.query('SELECT partida_id, duration_days, sin_predecesoras FROM gantt_tareas WHERE partida_id = ANY($1::uuid[])', [ids])).rows;
+    const overrides = new Map(stored.filter((r) => r.duration_days !== null).map((r) => [r.partida_id, Number(r.duration_days)]));
+    const noPreds = new Set(stored.filter((r) => r.sin_predecesoras).map((r) => r.partida_id));
+    const crews = new Map((await db.query('SELECT obra_id, cuadrillas FROM gantt_obras WHERE obra_id = ANY($1::uuid[])', [obras.map((o) => o.id)])).rows.map((r) => [r.obra_id, r.cuadrillas]));
     const deps = (await db.query(`SELECT partida_id, predecessor_id, type, lag_days FROM gantt_dependencias WHERE partida_id = ANY($1::uuid[])
                                   UNION ALL
                                   SELECT partida_id, obra_id, type, lag_days FROM gantt_inicio_dependencias WHERE partida_id = ANY($1::uuid[]) AND obra_id = ANY($2::uuid[])
                                   ORDER BY 2`, [ids, obras.map((o) => o.id)])).rows;
-    return { view, obras, lines, extra, overrides, deps };
+    return { view, obras, lines, extra, overrides, noPreds, crews, deps };
   }
 
   async get(projectId, db = this.pool) {
-    const { view, obras, lines, extra, overrides, deps } = await this.load(projectId, db);
+    const { view, obras, lines, extra, overrides, noPreds, crews, deps: stored } = await this.load(projectId, db);
+    // Default: «Inicio de obra» FS 0 for a task with no stored predecessor that
+    // the team has not left without one on purpose.
+    const withDeps = new Set(stored.map((d) => d.partida_id));
+    const defaults = lines.filter((l) => !withDeps.has(l.id) && !noPreds.has(l.id))
+      .map((l) => ({ partida_id: l.id, predecessor_id: l.obra_id, type: 'FS', lag_days: 0, porDefecto: true }));
+    const deps = [...stored, ...defaults];
     const codeOf = (l) => extra.get(l.id) || (/^PA-\d+$/i.test(String(l.code || '').trim()) ? String(l.code).trim().toUpperCase() : null);
     const { col, map: rend } = await this.rendimientos(db, [...new Set(lines.map(codeOf).filter(Boolean))]);
     const today = new Date().toISOString().slice(0, 10);
@@ -170,7 +183,7 @@ export class GanttService {
     const names = new Map(lines.map((l) => [l.id, `${l.code ? `${l.code} ` : ''}${l.name}`]));
     const tasks = lines.map((l) => {
       const code = codeOf(l), r = code ? rend.get(code) ?? null : null;
-      const computed = durationFrom(l.quantity, r, col?.perHour);
+      const computed = durationFrom(l.quantity, r, col?.perHour, crews.get(l.obra_id) || 1);
       const override = overrides.get(l.id) ?? null;
       return { l, code, r, computed, override, id: l.id, earliest: cal.index(obraStart.get(l.obra_id)), duration: override ?? computed ?? 1 };
     });
@@ -189,14 +202,15 @@ export class GanttService {
         warning: t.override !== null ? null : !t.code ? 'Partida sin código de la base: 1 día; indica la duración' : t.r === null ? 'Sin rendimiento en la base: 1 día; indica la duración' : null,
         start: cal.date(sp.first), end: cal.date(sp.last), startAt: sp.from, endAt: sp.to,
         executionPct: q > 0 ? Math.round(Math.min(ex, q) / q * 1000) / 10 : 0,
-        predecessors: deps.filter((d) => d.partida_id === l.id).map((d) => ({ id: d.predecessor_id, type: d.type, lag: d.lag_days })),
+        predecessors: deps.filter((d) => d.partida_id === l.id).map((d) => ({ id: d.predecessor_id, type: d.type, lag: d.lag_days, ...(d.porDefecto ? { porDefecto: true } : {}) })),
+        cuadrillas: crews.get(l.obra_id) || 1,
         canEdit: canEdit(l.obra_id),
       };
     });
     const starts = out.map((t) => t.start).sort(), ends = out.map((t) => t.end).sort();
     return {
       project: { id: view.project.id, code: view.project.code, name: view.project.name },
-      obras: obras.map((o) => ({ id: o.id, ref: o.ref, title: o.title, startDate: o.startDate, plannedStart: obraStart.get(o.id) })),
+      obras: obras.map((o) => ({ id: o.id, ref: o.ref, title: o.title, startDate: o.startDate, plannedStart: obraStart.get(o.id), cuadrillas: crews.get(o.id) || 1, canEdit: canEdit(o.id) })),
       // Milestones a task may take as predecessor (id = the obra's id).
       hitos: obras.map((o) => ({ id: o.id, obraId: o.id, ref: o.ref, name: names.get(o.id), date: obraStart.get(o.id) })),
       start: starts[0] || base, end: ends[ends.length - 1] || base,
@@ -210,6 +224,9 @@ export class GanttService {
   normalize(body = {}, n = 1) {
     const partidaId = body.id;
     if (!isUuid(partidaId)) fail(404, `Tarea ${n} no encontrada`);
+    // Not sent at all (e.g. the agent's bulk save of predecessors): the stored
+    // duration stays as it is.
+    const keepDuration = !('duration' in body);
     let duration = body.duration;
     if (duration === '' || duration === undefined) duration = null;
     if (duration !== null) {
@@ -231,7 +248,23 @@ export class GanttService {
       if (!Number.isInteger(lag) || lag < -365 || lag > 365) fail(400, 'El desfase son días laborables enteros, de -365 a 365');
       return { id: p.id, type, lag };
     });
-    return { partidaId, duration, preds };
+    return { partidaId, duration, keepDuration, preds };
+  }
+
+  // Cuadrillas of one obra of the project (1–20): durations computed from the
+  // rendimiento are divided by them. Assigned jefe or admin; audited.
+  async setCuadrillas(projectId, obraId, body = {}) {
+    const n = Number(body.cuadrillas);
+    if (!Number.isInteger(n) || n < 1 || n > 20) fail(400, 'Las cuadrillas son un número entero de 1 a 20');
+    const { obras } = await this.load(projectId);
+    const obra = obras.find((o) => o.id === obraId);
+    if (!obra) fail(404, 'Esa obra no está en este proyecto');
+    if (this.user.role !== 'admin' && obra.jefe?.id !== this.user.id) fail(403, 'Solo el jefe de esta obra o un administrador cambia su planificación');
+    await this.pool.query(`INSERT INTO gantt_obras (obra_id, cuadrillas, updated_by) VALUES ($1,$2,$3)
+                           ON CONFLICT (obra_id) DO UPDATE SET cuadrillas=EXCLUDED.cuadrillas, updated_by=EXCLUDED.updated_by, updated_at=now()`, [obraId, n, this.user.id]);
+    await audit({ actor: { id: this.user.id, name: this.user.name || this.user.email }, action: 'Planificación modificada', target: { id: null, label: obra.ref },
+      detail: `${obra.ref}: ${n} ${n === 1 ? 'cuadrilla' : 'cuadrillas'}` }, this.pool);
+    return this.get(projectId);
   }
 
   // One task's choices.
@@ -258,14 +291,16 @@ export class GanttService {
       const obraOf = new Map(lines.map((l) => [l.id, obras.find((o) => o.id === l.obra_id)]));
       const name = (id) => { const l = lines.find((x) => x.id === id); return l ? (l.code || l.name) : hitoIds.has(id) ? 'Inicio de obra' : id; };
       const details = [];
-      for (const { partidaId, duration, preds } of prepared) {
+      for (const { partidaId, duration, keepDuration, preds } of prepared) {
         if (!inProject.has(partidaId)) fail(404, 'Esa partida no es una tarea de este proyecto');
         const obra = obraOf.get(partidaId);
         if (this.user.role !== 'admin' && obra?.jefe?.id !== this.user.id) fail(403, 'Solo el jefe de esta obra o un administrador cambia su planificación');
         for (const p of preds) if (!inProject.has(p.id) && !hitoIds.has(p.id)) fail(400, 'La predecesora no es una tarea de este proyecto');
-        if (duration === null) await c.query('DELETE FROM gantt_tareas WHERE partida_id=$1', [partidaId]);
-        else await c.query(`INSERT INTO gantt_tareas (partida_id, duration_days, updated_by) VALUES ($1,$2,$3)
-                            ON CONFLICT (partida_id) DO UPDATE SET duration_days=EXCLUDED.duration_days, updated_by=EXCLUDED.updated_by, updated_at=now()`, [partidaId, duration, this.user.id]);
+        // An empty list means «sin predecesoras» on purpose (no default «Inicio de obra»).
+        await c.query(`INSERT INTO gantt_tareas (partida_id, duration_days, sin_predecesoras, updated_by) VALUES ($1,$2,$3,$4)
+                       ON CONFLICT (partida_id) DO UPDATE SET duration_days = CASE WHEN $5 THEN gantt_tareas.duration_days ELSE EXCLUDED.duration_days END,
+                         sin_predecesoras=EXCLUDED.sin_predecesoras, updated_by=EXCLUDED.updated_by, updated_at=now()`,
+        [partidaId, keepDuration ? null : duration, !preds.length, this.user.id, keepDuration]);
         await c.query('DELETE FROM gantt_dependencias WHERE partida_id=$1', [partidaId]);
         await c.query('DELETE FROM gantt_inicio_dependencias WHERE partida_id=$1', [partidaId]);
         for (const p of preds) {
@@ -273,7 +308,7 @@ export class GanttService {
           else await c.query('INSERT INTO gantt_dependencias (partida_id, predecessor_id, type, lag_days) VALUES ($1,$2,$3,$4)', [partidaId, p.id, p.type, p.lag]);
         }
         const line = lines.find((l) => l.id === partidaId);
-        details.push(`${line.ref} · ${line.code || line.name}: ${duration !== null ? `${String(duration).replace('.', ',')} días` : 'duración según rendimiento'}${preds.length ? ` · predecesoras ${preds.map((p) => `${name(p.id)} ${p.type}${p.lag ? (p.lag > 0 ? `+${p.lag}` : p.lag) : ''}`).join(', ')}` : ' · sin predecesoras'}`);
+        details.push(`${line.ref} · ${line.code || line.name}: ${keepDuration ? 'misma duración' : duration !== null ? `${String(duration).replace('.', ',')} días` : 'duración según rendimiento'}${preds.length ? ` · predecesoras ${preds.map((p) => `${name(p.id)} ${p.type}${p.lag ? (p.lag > 0 ? `+${p.lag}` : p.lag) : ''}`).join(', ')}` : ' · sin predecesoras'}`);
       }
       const result = await this.get(projectId, c); // throws on a cycle → rollback, nothing applied
       const label = prepared.length === 1 ? lines.find((l) => l.id === prepared[0].partidaId)?.ref : `${prepared.length} tareas`;

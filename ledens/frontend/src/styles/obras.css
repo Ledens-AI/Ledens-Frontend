@@ -189,3 +189,6 @@
 .obr-gantt-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .obr-gantt-legend i { display: inline-block; width: 14px; height: 10px; border-radius: 3px; }
 .obr-gantt-legend-hito { display: inline-block; width: 9px; height: 9px; background: #3A3A38; transform: rotate(45deg); margin: 0 2px; }
+.obr-gantt-crews { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+.obr-gantt-crew { display: inline-flex; align-items: center; gap: 8px; }
+.obr-gantt-pred-default { font-style: italic; }

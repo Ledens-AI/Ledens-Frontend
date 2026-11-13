@@ -28,7 +28,7 @@ before(async () => {
       rendimiento_cuadrilla numeric, rendimientovalidado text);
     INSERT INTO ledens.work_items (id_partida, name, unit_source, rendimiento_cuadrilla) VALUES
       ('PA-001','Demolición','m2',20),('PA-002','Tabique','m2',8),('PA-003','Pintura','m2',NULL);`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '035_gantt_planificacion.sql', '039_gantt_inicio_obra.sql', '040_gantt_duracion_decimal.sql']) await db.exec(await migration(m));
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '035_gantt_planificacion.sql', '039_gantt_inicio_obra.sql', '040_gantt_duracion_decimal.sql', '042_gantt_cuadrillas.sql']) await db.exec(await migration(m));
   [admin, jefe, otroJefe, cliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES
     ('admin@g.test','Admin','admin'),('jefe@g.test','Jefe','jefe'),('jefe2@g.test','Otro','jefe'),('cliente@g.test','Cliente','client')
     RETURNING id,email,name,role`)).rows;
@@ -92,7 +92,7 @@ test('the Gantt uses the rendimiento of the base and follows the predecessors ta
 
   // A cycle is refused and nothing changes.
   await assert.rejects(G(jefe).update(proyecto, dem.id, { predecessors: [{ id: pin.id, type: 'FS' }] }), { status: 400 });
-  assert.deepEqual((await G(jefe).get(proyecto)).tasks[0].predecessors, []);
+  assert.deepEqual((await G(jefe).get(proyecto)).tasks[0].predecessors, [{ id: obra, type: 'FS', lag: 0, porDefecto: true }]); // untouched: «Inicio de obra» by default
   await assert.rejects(G(jefe).update(proyecto, dem.id, { predecessors: [{ id: dem.id }] }), { status: 400 });
   await assert.rejects(G(jefe).update(proyecto, dem.id, { duration: -1 }), { status: 400 });
   await assert.rejects(G(jefe).update(proyecto, dem.id, { duration: 0.25 }), { status: 400 });
@@ -126,4 +126,35 @@ test('«Inicio de obra» is a milestone any task may take as predecessor', async
   assert.deepEqual(g.tasks[0].predecessors, []);
   assert.equal((await db.query('SELECT count(*)::int n FROM gantt_inicio_dependencias')).rows[0].n, 0);
   await assert.rejects(G(jefe).update(proyecto, dem.id, { predecessors: [{ id: vacio }] }), { status: 400 });
+});
+
+test('cuadrillas divide the computed duration; «Inicio de obra» is the default predecessor until removed', async () => {
+  let g = await G(jefe).get(proyecto);
+  assert.deepEqual(g.obras.map((o) => [o.cuadrillas, o.canEdit]), [[1, true]]);
+  const [dem, tab, pin] = g.tasks;
+  // Fresh state for dem: no stored choice → «Inicio de obra» by default.
+  await db.query('DELETE FROM gantt_tareas WHERE partida_id = $1', [dem.id]);
+  await db.query('DELETE FROM gantt_dependencias WHERE partida_id = $1', [dem.id]);
+  g = await G(jefe).get(proyecto);
+  assert.deepEqual(g.tasks[0].predecessors, [{ id: obra, type: 'FS', lag: 0, porDefecto: true }]);
+  assert.equal(g.tasks[0].start, '2026-11-06');
+
+  // 2 cuadrillas: 50/20 = 2,5 días → 1,3; 20/8 = 2,5 → 1,3. A typed duration stays.
+  await G(jefe).update(proyecto, pin.id, { duration: 4, predecessors: [{ id: tab.id, type: 'SS', lag: 1 }] });
+  await assert.rejects(G(otroJefe).setCuadrillas(proyecto, obra, { cuadrillas: 2 }), { status: 404 });
+  await assert.rejects(G(jefe).setCuadrillas(proyecto, obra, { cuadrillas: 0 }), { status: 400 });
+  await assert.rejects(G(jefe).setCuadrillas(proyecto, cliente.id, { cuadrillas: 2 }), { status: 404 });
+  g = await G(jefe).setCuadrillas(proyecto, obra, { cuadrillas: 2 });
+  assert.deepEqual(g.tasks.map((t) => [t.computedDuration, t.duration, t.cuadrillas]), [[1.3, 1.3, 2], [1.3, 1.3, 2], [null, 4, 2]]);
+  assert.equal(g.obras[0].cuadrillas, 2);
+
+  // Saving only predecessors (the agent's bulk save) keeps the typed duration.
+  g = await G(jefe).updateMany(proyecto, [{ id: pin.id, predecessors: [{ id: dem.id }] }]);
+  assert.equal(g.tasks[2].duration, 4);
+  // Removing every predecessor on purpose leaves it without one (no default).
+  g = await G(jefe).update(proyecto, dem.id, { predecessors: [] });
+  assert.deepEqual(g.tasks[0].predecessors, []);
+  g = await G(jefe).update(proyecto, dem.id, { predecessors: [{ id: obra, type: 'FS' }] });
+  assert.deepEqual(g.tasks[0].predecessors, [{ id: obra, type: 'FS', lag: 0 }]);
+  await G(admin).setCuadrillas(proyecto, obra, { cuadrillas: 1 });
 });
