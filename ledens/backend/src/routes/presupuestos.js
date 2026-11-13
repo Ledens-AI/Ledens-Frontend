@@ -89,6 +89,7 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   // Planificación (Gantt) of a project with an approved presupuesto.
   const gantt = (req) => new GanttService(pool || getPool(), req.user);
   router.get('/proyectos/:projectId/gantt', handle((req) => gantt(req).get(req.params.projectId)));
+  router.put('/proyectos/:projectId/gantt/obras/:obraId', handle((req) => gantt(req).setCuadrillas(req.params.projectId, req.params.obraId, req.body || {})));
   router.put('/proyectos/:projectId/gantt/:partidaId', handle((req) => gantt(req).update(req.params.projectId, req.params.partidaId, req.body || {})));
   // Several tasks at once — «guardar en bloque» after reviewing the planning
   // agent's suggestions (or any other multi-row edit): one transaction, the

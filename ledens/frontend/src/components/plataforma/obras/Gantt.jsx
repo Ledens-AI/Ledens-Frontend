@@ -43,6 +43,12 @@ export default function Gantt({ projectId, readOnly, onBack }) {
     setSaving(null);
   };
 
+  const saveCuadrillas = async (obra, n) => {
+    setSaving(obra.id); setSaveError('');
+    try { setData(await api.saveGanttCuadrillas(projectId, obra.id, n)); } catch (e) { setSaveError(`${obra.ref}: ${e.message}`); }
+    setSaving(null);
+  };
+
   const back = <div><button type="button" className="fin-btn is-ghost is-small" onClick={onBack}><i className="ri-arrow-left-line"></i>Volver al proyecto</button></div>;
   if (error) return <div className="fin-stack">{back}<ErrorBox message={error} onRetry={load} /></div>;
   if (!data) return <div className="fin-loading fin-muted">Calculando la planificación…</div>;
@@ -60,7 +66,9 @@ export default function Gantt({ projectId, readOnly, onBack }) {
       <p className="fin-muted fin-small obr-hint-tight">
         {data.rendimiento ? `Duración = cantidad ÷ rendimiento de la partida en la base («${data.rendimiento.column}», ${data.rendimiento.unit}), redondeada a la décima de día (dos tareas de 0,5 seguidas ocupan un día). ` : 'La base de partidas no tiene columna de rendimiento: cada tarea dura 1 día hasta que indiques su duración. '}
         Cada obra empieza en su fecha de inicio. Cambia una predecesora, su relación, el desfase o la duración y el Gantt se recalcula al momento.
+        {' '}Las tareas sin planificar tienen «Inicio de obra» como predecesora por defecto; si la quitas, la tarea se queda sin predecesora.
       </p>
+      <Cuadrillas obras={data.obras || []} readOnly={readOnly} saving={saving} onSave={saveCuadrillas} />
       {missing ? <p className="fin-warn"><i className="ri-error-warning-line"></i><span>{`${missing} ${missing === 1 ? 'tarea no tiene' : 'tareas no tienen'} rendimiento en la base: cuentan 1 día hasta que indiques su duración.`}</span></p> : null}
       {saveError ? <ErrorBox message={saveError} /> : null}
       {tasks.length ? <Chart data={data} /> : <Empty icon="ri-calendar-line" title="Sin tareas" text="Los presupuestos aprobados de este proyecto no tienen partidas." />}
@@ -72,6 +80,29 @@ export default function Gantt({ projectId, readOnly, onBack }) {
 
 // «Inicio de obra» (hitos: one per obra, id = the obra's id) can be chosen as a
 // predecessor like any task; it is listed first.
+// Cuadrillas per obra: the rendimiento of the base is per cuadrilla, so with
+// N cuadrillas a duration computed from it is divided by N (a typed duration
+// stays as typed).
+const CREW_OPTIONS = Array.from({ length: 10 }, (_, i) => i + 1);
+function Cuadrillas({ obras, readOnly, saving, onSave }) {
+  if (!obras.length) return null;
+  return (
+    <div className="obr-gantt-crews">
+      {obras.map((o) => (
+        <label key={o.id} className="obr-gantt-crew">
+          <span>{`Cuadrillas en la obra${obras.length > 1 ? ` ${o.ref}` : ''}`}</span>
+          {!readOnly && o.canEdit ? (
+            <select value={o.cuadrillas} disabled={saving === o.id} onChange={(e) => onSave(o, Number(e.target.value))} aria-label="Número de cuadrillas">
+              {[...new Set([...CREW_OPTIONS, o.cuadrillas])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          ) : <strong>{o.cuadrillas}</strong>}
+          <span className="fin-muted fin-small">{o.cuadrillas > 1 ? `las duraciones por rendimiento se dividen entre ${o.cuadrillas}` : 'una cuadrilla trabajando'}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function Tabla({ tasks, hitos, readOnly, saving, onSave }) {
   const index = useMemo(() => new Map(tasks.map((t, i) => [t.id, i + 1])), [tasks]);
   const label = (t) => (t.hito ? `◆ ${t.name}` : `${index.get(t.id)}. ${t.code ? `${t.code} · ` : ''}${t.name}`);
@@ -202,7 +233,7 @@ function Fila({ t, n, tasks, label, editable, busy, onSave }) {
             <div key={i} className="obr-gantt-pred">
               {editable ? (
                 <>
-                  <select value={p.id} onChange={(e) => change(i, { id: e.target.value }, !!e.target.value)} aria-label="Actividad predecesora">
+                  <select value={p.id} onChange={(e) => change(i, { id: e.target.value, porDefecto: undefined }, !!e.target.value)} aria-label="Actividad predecesora" title={p.porDefecto ? 'Predecesora por defecto' : undefined}>
                     <option value="">Elige la predecesora…</option>
                     {options(p.id).map((x) => <option key={x.id} value={x.id}>{label(x)}</option>)}
                   </select>
@@ -212,9 +243,10 @@ function Fila({ t, n, tasks, label, editable, busy, onSave }) {
                   <input type="number" step="1" className="obr-gantt-num" value={p.lag} onChange={(e) => change(i, { lag: e.target.value })} onBlur={commitLag}
                     onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} aria-label="Desfase en días laborables" title="Desfase en días laborables (negativo = solape)" />
                   <button type="button" className="fin-btn is-ghost is-small" onClick={() => { const next = preds.filter((_, k) => k !== i); setPreds(next); if (p.id) onSave(t, { predecessors: next }); }} aria-label="Quitar predecesora"><i className="ri-close-line"></i></button>
+                  {p.porDefecto ? <span className="fin-muted fin-small obr-gantt-pred-default">por defecto</span> : null}
                 </>
               ) : (
-                <span className="fin-small">{`${label(tasks.find((x) => x.id === p.id) || { id: p.id, name: '?' })} · ${REL.find((r) => r[0] === p.type)?.[1]}${p.lag ? ` · ${p.lag > 0 ? '+' : ''}${p.lag} d` : ''}`}</span>
+                <span className="fin-small">{`${label(tasks.find((x) => x.id === p.id) || { id: p.id, name: '?' })} · ${REL.find((r) => r[0] === p.type)?.[1]}${p.lag ? ` · ${p.lag > 0 ? '+' : ''}${p.lag} d` : ''}${p.porDefecto ? ' (por defecto)' : ''}`}</span>
               )}
             </div>
           ))}
@@ -260,6 +292,7 @@ function Chart({ data }) {
   const arrows = [];
   for (const t of tasks) {
     for (const p of t.predecessors) {
+      if (p.porDefecto) continue; // «Inicio de obra» by default: one arrow per task would only clutter the chart
       const pt = tasks[row.get(p.id)];
       if (!pt) continue;
       const fromEnd = !pt.hito && (p.type === 'FS' || p.type === 'FF'), toEnd = p.type === 'FF' || p.type === 'SF';
