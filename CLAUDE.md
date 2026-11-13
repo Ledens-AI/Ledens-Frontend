@@ -288,11 +288,16 @@ Clerk is gone — `/auth` and `Header` now talk directly to the backend's `/api/
 ## CI/CD
 
 ### Frontend — `.github/workflows/azure-static-web-apps.yml`
-- **Triggers:** push to `main` touching `ledens/frontend/**` or the workflow file; PR open/sync/close
-- **Action:** `Azure/static-web-apps-deploy@v1`
+- **Triggers:** push to `main` touching `ledens/frontend/**` or the workflow file (production deploy); PR open/sync touching the same paths (build check only)
+- **Action:** `Azure/static-web-apps-deploy@v1` (production only)
   - `app_location`: `ledens/frontend`
   - `output_location`: `dist`
+- **Pull requests do not create preview environments** (job «Build (sin vista previa)»: `npm ci` + `npm run build`). They were never used for review and filled the Standard plan's limit of 10 staging environments, which made every PR's deploy fail («maximum number of staging environments», Nov 2026).
 - **Secret required:** `AZURE_STATIC_WEB_APPS_API_TOKEN`
+
+### Frontend environments — `swa-cerrar-pr.yml`, `swa-limpiar-entornos.yml`
+- `swa-cerrar-pr.yml`: on every PR closed against `main`, with **no `paths` filter** (a filter let PRs whose diff no longer touched the frontend skip the cleanup), runs the SWA `close` action. A PR without an environment is a no-op.
+- `swa-limpiar-entornos.yml`: Mondays 05:23 UTC and by hand (input «simular», on by default by hand), deletes every `swa-ledens` environment except `default` (production) and those of open PRs; stops before deleting anything if the open PRs cannot be read. Uses `AZURE_CREDENTIALS` (same service principal as the backend deploy).
 
 ### Backend — `.github/workflows/deploy-backend.yml`
 - **Triggers:** push to `main` touching `ledens/backend/**` or the workflow file; `workflow_dispatch`
