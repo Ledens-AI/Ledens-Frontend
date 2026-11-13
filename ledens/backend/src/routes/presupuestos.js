@@ -105,6 +105,9 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   // agent's suggestions (or any other multi-row edit): one transaction, the
   // whole plan revalidated once, all of it saved or none of it.
   router.put('/proyectos/:projectId/gantt', handle((req) => gantt(req).updateMany(req.params.projectId, req.body?.tasks || [])));
+  // The draft of the Gantt: the plan as those changes would leave it, with its
+  // limitaciones (e.g. sobreasignación de cuadrillas). Saves nothing.
+  router.post('/proyectos/:projectId/gantt/simular', handle((req) => gantt(req).updateMany(req.params.projectId, req.body?.tasks || [], { simular: true })));
   // Suggests predecessors for the tasks that have none yet; never saves them
   // itself (src/presupuestos/ganttAgente.js). Same Anthropic client as /agente.
   router.post('/proyectos/:projectId/gantt/agente', rateLimit({ windowMs: 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false }),

@@ -111,6 +111,8 @@ export const api = {
   // «Guardar en bloque»: several tasks' predecessors in one request, one
   // transaction server-side (ganttAgente.js never saves by itself).
   saveGanttMany: (projectId, tasks) => request('PUT', `${base}/proyectos/${projectId}/gantt`, { tasks }),
+  // The plan as these changes would leave it, with its limitaciones; saves nothing (the draft of Gantt.jsx).
+  simulateGantt: (projectId, tasks) => request('POST', `${base}/proyectos/${projectId}/gantt/simular`, { tasks }),
   // Suggests predecessors for the tasks that still have none (presupuestos/ganttAgente.js). Saves nothing.
   ganttAgente: (projectId) => request('POST', `${base}/proyectos/${projectId}/gantt/agente`),
   // Calendario laboral of the Gantt (presupuestos/festivos.js): { fecha, nombre, projectId? }

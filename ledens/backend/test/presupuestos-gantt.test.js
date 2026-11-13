@@ -5,11 +5,16 @@ import { PresupuestosService } from '../src/presupuestos/service.js';
 import { GanttService, calendar, schedule, analyze, durationFrom, span, orderByDependencies } from '../src/presupuestos/gantt.js';
 import { FestivosService, festivosDeAnio } from '../src/presupuestos/festivos.js';
 import { RecursosService, rolDePuesto } from '../src/presupuestos/recursos.js';
+import { sobreasignaciones } from '../src/presupuestos/ganttLimitaciones.js';
 // Planificación (Gantt) of a project (migration 035), on PGlite with synthetic rows.
 let db, pool, admin, jefe, otroJefe, cliente, proyecto, vacio, obra, w;
 const migration = (m) => fs.readFile(new URL('../src/db/migrations/' + m, import.meta.url), 'utf8');
 const P = (u) => new PresupuestosService(pool, u);
-const G = (u) => new GanttService(pool, u);
+// The scheduling tests put tasks in parallel on purpose (SS, FF…) with one
+// cuadrilla, so they run without the limitaciones; GL is the real service
+// (what the routes use), tested at the end.
+const G = (u) => new GanttService(pool, u, { enforceLimitaciones: false });
+const GL = (u) => new GanttService(pool, u);
 const F = (u) => new FestivosService(pool, u, (x) => new GanttService(pool, x));
 
 before(async () => {
@@ -291,6 +296,76 @@ test('Recursos: each worker with their obras, the Gantt period and overlaps', as
   // Long after both obras end, nothing overlaps any more.
   const later = await R(admin).list({ today: '2027-06-01' });
   assert.equal(later.trabajadores.find((t) => t.name === 'Luis').estado, 'libre');
+});
+
+test('sobreasignación: no more tasks at once than cuadrillas', () => {
+  const date = (i) => `2026-11-${String(10 + i).padStart(2, '0')}`;
+  const o = [{ id: 'o', ref: 'PRE-1', cuadrillas: 1 }];
+  const t = (id, start, end) => ({ id, obraId: 'o', name: id, start, end });
+  // Back to back (one ends at 2,5 where the next starts) is fine; 0 days never counts.
+  assert.deepEqual(sobreasignaciones([t('a', 0, 2.5), t('b', 2.5, 4), t('c', 1, 1)], o, date), []);
+  // Overlap from 2 to 2,5: day index 2.
+  let r = sobreasignaciones([t('a', 0, 2.5), t('b', 2, 4)], o, date);
+  assert.equal(r.length, 1);
+  assert.deepEqual([r[0].tipo, r[0].max, r[0].desde, r[0].hasta, r[0].tareas.sort()], ['sobreasignacion', 2, '2026-11-12', '2026-11-12', ['a', 'b']]);
+  assert.match(r[0].mensaje, /PRE-1: con 1 cuadrilla hay 2 tareas a la vez el 12\/11/);
+  // Overlaps back to back (a+b, then a+c) are one conflict over the whole stretch.
+  r = sobreasignaciones([t('a', 0, 3), t('b', 1, 2), t('c', 2, 4)], o, date);
+  assert.deepEqual([r.length, r[0].desde, r[0].hasta, r[0].tareas.length, r[0].max], [1, '2026-11-11', '2026-11-12', 3, 2]);
+  // With 2 cuadrillas two at once are fine, three are not.
+  const o2 = [{ ...o[0], cuadrillas: 2 }];
+  assert.deepEqual(sobreasignaciones([t('a', 0, 2), t('b', 0, 2)], o2, date), []);
+  r = sobreasignaciones([t('a', 0, 2), t('b', 0, 2), t('c', 1, 3)], o2, date);
+  assert.deepEqual([r.length, r[0].max, r[0].cuadrillas], [1, 3, 2]);
+  assert.match(r[0].mensaje, /con 2 cuadrillas hay 3 tareas a la vez/);
+  // Other obras are counted on their own.
+  assert.deepEqual(sobreasignaciones([t('a', 0, 2), { ...t('b', 0, 2), obraId: 'x' }], [...o, { id: 'x', ref: 'PRE-2', cuadrillas: 1 }], date), []);
+});
+
+test('a plan that overallocates the cuadrillas of an obra cannot be saved; simular shows it without saving', async () => {
+  const cocina = (await db.query("SELECT id FROM presupuestos WHERE title='Cocina'")).rows[0].id;
+  // Start from a known plan in the obra: dem, then tab and pin both right after dem (in parallel).
+  let g = await G(jefe).get(proyecto);
+  // By code: the chart orders tasks by their dependencies, not by the budget.
+  const [dem, tab, pin] = ['PA-001', 'PA-002', 'PA-003'].map((c) => g.tasks.find((t) => t.obraId === obra && t.code === c));
+  await G(jefe).updateMany(proyecto, [{ id: dem.id, duration: null, predecessors: [{ id: obra }] }, { id: tab.id, duration: null, predecessors: [{ id: dem.id }] }, { id: pin.id, duration: null, predecessors: [{ id: dem.id }] }]);
+  g = await GL(jefe).get(proyecto);
+  const mine = g.limitaciones.filter((x) => x.obraId === obra);
+  assert.equal(mine.length, 1);
+  assert.deepEqual(mine[0].tareas.sort(), [tab.id, pin.id].sort());
+  assert.deepEqual([dem, tab, pin].map((x) => g.tasks.find((t) => t.id === x.id).sobreasignada), [false, true, true]);
+
+  // Any save in that obra that leaves it overallocated is refused, and nothing changes.
+  const audits = async () => (await db.query("SELECT count(*)::int n FROM audit_log WHERE action='Planificación modificada'")).rows[0].n;
+  const before = await audits();
+  await assert.rejects(GL(jefe).update(proyecto, dem.id, { duration: 2, predecessors: [{ id: obra }] }), { status: 409, message: /No se puede guardar: PRE-2026-001: con 1 cuadrilla hay 2 tareas a la vez/ });
+  assert.equal((await GL(jefe).get(proyecto)).tasks.find((t) => t.id === dem.id).durationOverride, null);
+  assert.equal(await audits(), before);
+  // Another obra of the project is not held back by it.
+  const coc = g.tasks.find((t) => t.obraId === cocina);
+  await GL(jefe).update(proyecto, coc.id, { duration: 3, predecessors: [{ id: cocina }] });
+
+  // simular: the plan as the change would leave it, and nothing saved.
+  const fix = [{ id: pin.id, predecessors: [{ id: tab.id, type: 'FS' }] }];
+  const sim = await GL(jefe).updateMany(proyecto, fix, { simular: true });
+  assert.equal(sim.simulacion, true);
+  assert.deepEqual(sim.limitaciones.filter((x) => x.obraId === obra), []);
+  assert.deepEqual(sim.tasks.find((t) => t.id === pin.id).predecessors, [{ id: tab.id, type: 'FS', lag: 0 }]);
+  assert.equal((await GL(jefe).get(proyecto)).limitaciones.filter((x) => x.obraId === obra).length, 1, 'simular saved nothing');
+  assert.equal(await audits(), before + 1); // only the cocina save
+  // A cycle is still refused in a simulation.
+  await assert.rejects(GL(jefe).updateMany(proyecto, [{ id: dem.id, predecessors: [{ id: pin.id }] }], { simular: true }), { status: 400 });
+
+  // The fix itself saves.
+  g = await GL(jefe).updateMany(proyecto, fix);
+  assert.deepEqual(g.limitaciones.filter((x) => x.obraId === obra), []);
+  assert.ok(g.tasks.every((t) => !t.sobreasignada));
+
+  // With 2 cuadrillas, two tasks at once are allowed; three are not.
+  await GL(jefe).setCuadrillas(proyecto, obra, { cuadrillas: 2, equipos: [{ oficial: w.Juan, peon: w.Pedro }, { oficial: w.Luis, peon: w.Mario }] });
+  g = await GL(jefe).update(proyecto, pin.id, { predecessors: [{ id: dem.id, type: 'FS' }] });
+  assert.deepEqual(g.limitaciones.filter((x) => x.obraId === obra), []);
+  await assert.rejects(GL(jefe).updateMany(proyecto, [{ id: tab.id, predecessors: [{ id: obra }] }, { id: pin.id, predecessors: [{ id: obra }] }]), { status: 409, message: /con 2 cuadrillas hay 3 tareas a la vez/ });
 });
 
 test('each task goes right below the task it depends on, in cascade', () => {
