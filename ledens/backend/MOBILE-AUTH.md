@@ -60,7 +60,15 @@ La app envía `Authorization: Bearer <token>` y **ninguna cookie**: en React Nat
 - `GET /api/auth/me` devuelve el mismo objeto `user` que en la web.
 - Todos los routers protegidos con `requireAuth` aplican los mismos roles y permisos que con cookie.
 - Cookie de sesión y Bearer a la vez → `401`.
-- Las escrituras de los routers con guard de origen (presupuestos, obras, invitaciones, finanzas, finance, bridge) siguen exigiendo el `Origin` de la web. Por tanto, de momento la app solo puede leer en ellos; el middleware común con excepción para Bearer validado llegará en un PR posterior.
+- **Escrituras**: los routers con guard de origen (presupuestos, obras, invitaciones del equipo, finanzas, finance, bridge, herramientas) usan un único middleware, `requireSameOrigin` (`src/auth/origin.js`). Una escritura pasa:
+  - con el `Origin` exacto de la web. Es la regla de siempre y la única para la cookie;
+  - o **sin cabecera `Origin`**, pero solo si `requireAuth` ya validó un Bearer (`req.authTransport === 'bearer'`). Es el caso de la app nativa.
+
+  Siguen recibiendo 403:
+  - un Bearer que envía un `Origin` ajeno (es un navegador);
+  - las rutas públicas de aceptación de invitaciones, que pueden crear una cookie de sesión.
+
+  Pasar el guard no concede nada más: roles, permisos por fila y «Ver como» (solo lectura) se aplican igual.
 
 ## Decisiones de seguridad
 

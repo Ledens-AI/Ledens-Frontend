@@ -2,6 +2,7 @@ import {Router} from 'express';
 import {getPool,isDbConfigured} from '../db/pool.js';
 import {requireAuth,checkRole} from '../auth/sessions.js';
 import {viewAs} from '../auth/viewAs.js';
+import { requireSameOrigin } from '../auth/origin.js';
 import {BridgeService,BridgeError} from '../bridge/service.js';
 import {BridgeWorkspace} from '../bridge/workspace.js';
 import {traced} from '../logs/runs.js';
@@ -14,10 +15,9 @@ export function createBridgeRouter({service,authorize=[requireAuth,viewAs(),chec
   router.use(authorize);
   const get=()=>service||new BridgeService(getPool());
   const handle=fn=>async(req,res,next)=>{try{await fn(req,res);}catch(e){next(e);}};
-  router.use((req,res,next)=>{
-    if(req.method!=='GET'&&req.get('origin')!==process.env.CORS_ORIGIN)return res.status(403).json({error:'invalid_origin'});
-    next();
-  });
+  // Writes: our web Origin, or a validated Bearer without Origin (auth/origin.js).
+  // CORS_ORIGIN read per request, as before; unset now fails closed.
+  router.use(requireSameOrigin({origin:()=>process.env.CORS_ORIGIN,message:'invalid_origin'}));
   router.param('id',(req,res,next,id)=>{if(!uuid(id))return res.status(400).json({error:'invalid_id'});next();});
   router.get('/workspace/counts',handle(async(req,res)=>res.json(await new BridgeWorkspace(get().pool).counts())));
   router.get('/workspace/movements',handle(async(req,res)=>res.json(await new BridgeWorkspace(get().pool).movements({...req.query,pending:true}))));
