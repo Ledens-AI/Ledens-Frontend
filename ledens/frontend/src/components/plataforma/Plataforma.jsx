@@ -23,6 +23,7 @@ import { fitTables } from './fitTables.js';
 import { PLAT_TXT } from './i18n.js';
 const GestionFinanciera = React.lazy(() => import('./finanzas/GestionFinanciera.jsx'));
 const Obras = React.lazy(() => import('./obras/Obras.jsx'));
+const Herramientas = React.lazy(() => import('./herramientas/Herramientas.jsx'));
 import '../../styles/plataforma.css';
 
 // Money badge of the sidebar (e.g. «1.250 €»): whole euros keep it short; nothing when 0.
@@ -31,19 +32,27 @@ const eurBadge = (n) => (n > 0 ? EUR_BADGE.format(Math.max(1, Math.round(n))) : 
 const HOME = { client: 'c_home', worker: 'w_home', admin: 'a_home' };
 const PREFIX = { client: 'c_', worker: 'w_', admin: 'a_' };
 // Screens drawn by ./obras/Obras.jsx, and which of its views each one is.
-const OBRAS_SCREEN = { c_home: 'home', c_presupuestos: 'presupuestos', c_obras: 'obras', w_home: 'home', w_obras: 'presupuestos', w_avance: 'avance', a_presu: 'presupuestos', a_avance: 'avance', a_propuestas: 'propuestas', a_partidas: 'partidas' };
+// Screens drawn by ./herramientas/Herramientas.jsx (Ledens Tools; jefe de obra and admin only).
+const TOOLS_SCREEN = { w_tools: 'mis', w_tool_req: 'solicitudes', a_tools: 'panel', a_tools_inv: 'inventario', a_tool_req: 'solicitudes', a_tools_ops: 'operaciones' };
+const TOOLS_HOME = { worker: 'w_tools', admin: 'a_tools' };
+// A scanned label lands on /plataforma?herramienta=<token> (App.jsx /h/:token): opaque, grants nothing.
+const scannedToken = () => { try { const t = new URLSearchParams(window.location.search).get('herramienta'); return t && /^[A-Za-z0-9_-]{8,40}$/.test(t) ? t : null; } catch { return null; } };
+const OBRAS_SCREEN = { c_home: 'home', c_presupuestos: 'presupuestos', c_obras: 'obras', w_home: 'home', w_obras: 'presupuestos', w_avance: 'avance', w_recursos: 'recursos', a_presu: 'presupuestos', a_avance: 'avance', a_propuestas: 'propuestas', a_partidas: 'partidas', a_recursos: 'recursos' };
 
 class PlataformaView extends React.Component {
-  state={role:ROLE_VIEW[this.props.user.role]||'client',screen:HOME[ROLE_VIEW[this.props.user.role]||'client'],userId:null,adminUsers:null,adminAudit:[],roleEdit:null,saving:false,notifOpen:false,modal:null,toast:'',phone:'',personType:'fisica',profErr:'',reason:'',userFilter:'all',q:'',presu:null,finTab:'resumen',finPending:0,finClientPending:0,finWorkerPending:0,finBridgePending:0,finConciliationPending:0,finConceptPending:0};
+  toolToken=scannedToken();
+  state={role:ROLE_VIEW[this.props.user.role]||'client',screen:this.toolToken&&TOOLS_HOME[ROLE_VIEW[this.props.user.role]]||HOME[ROLE_VIEW[this.props.user.role]||'client'],toolAlerts:[],userId:null,adminUsers:null,adminAudit:[],roleEdit:null,saving:false,notifOpen:false,modal:null,toast:'',phone:'',personType:'fisica',profErr:'',reason:'',userFilter:'all',q:'',presu:null,finTab:'resumen',finPending:0,finClientPending:0,finWorkerPending:0,finBridgePending:0,finConciliationPending:0,finConceptPending:0};
   // Screens belong to one role each (c_ client, w_ jefe de obra, a_ admin);
   // anything else is ignored. The backend enforces the same split for data.
   // Gestión financiera is w_fin / a_fin (jefe de obra and admin), never c_.
-  go=(screen,x)=>{if(!screen.startsWith(PREFIX[this.state.role]))return;this.setState(Object.assign({screen,notifOpen:false},x||{}));window.scrollTo(0,0);};
+  go=(screen,x)=>{if(!screen.startsWith(PREFIX[this.state.role]))return;this.setState(st=>Object.assign({screen,notifOpen:false,navTick:(st.navTick||0)+1},x||{}));window.scrollTo(0,0);};
   mainRef=React.createRef();
-  componentDidMount(){if(this.mainRef.current)this._unfit=fitTables(this.mainRef.current);if(this.state.role==='admin'){this.loadUsers();this.loadAudit();this.getJSON('/api/bridge/workspace/counts').then(d=>this.setState({finBridgePending:d.pending,finConciliationPending:d.reconciliation??d.pending}),()=>{});this.getJSON('/api/finanzas/movimientos/pendientes').then(d=>this.setState({finConceptPending:d.pendientes}),()=>{});}if(this.state.role!=='client'){this.getJSON('/api/finanzas/pendiente-trabajador/resumen').then(d=>this.setState({finWorkerPending:Number(d.importe)||0}),()=>{});}if(this.state.role!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.materiales?.pendientes??d.pendientes,finClientPending:d.clientes?.pendientes??0}),()=>{});this.loadPresu();}
+  componentDidMount(){if(this.toolToken){try{window.history.replaceState(null,'',window.location.pathname);}catch{/* ignore */}if(this.state.role==='client')this.flash('Las herramientas solo están disponibles para el equipo de Ledens.');}this.loadTools();if(this.mainRef.current)this._unfit=fitTables(this.mainRef.current);if(this.state.role==='admin'){this.loadUsers();this.loadAudit();this.getJSON('/api/bridge/workspace/counts').then(d=>this.setState({finBridgePending:d.pending,finConciliationPending:d.reconciliation??d.pending}),()=>{});this.getJSON('/api/finanzas/movimientos/pendientes').then(d=>this.setState({finConceptPending:d.pendientes}),()=>{});}if(this.state.role!=='client'){this.getJSON('/api/finanzas/pendiente-trabajador/resumen').then(d=>this.setState({finWorkerPending:Number(d.importe)||0}),()=>{});}if(this.state.role!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.materiales?.pendientes??d.pendientes,finClientPending:d.clientes?.pendientes??0}),()=>{});this.loadPresu();}
   // Badge and notification counts: presupuestos waiting for this user.
   loadPresu=()=>{this.getJSON('/api/presupuestos').then(d=>{const n=k=>d.presupuestos.filter(p=>p.phase===k&&(k!=='pendiente'||p.decides!==false)).length;this.setState({presu:{pendiente:n('pendiente'),cambios:n('cambios')}});},()=>this.setState({presu:null}));
     if(this.props.user.role==='admin'&&this.state.role==='admin')this.getJSON('/api/presupuestos/propuestas').then(d=>this.setState({propuestas:d.propuestas.length}),()=>{});}
+  // Ledens Tools alerts for the bell and the sidebar badges (computed by the server each time).
+  loadTools=()=>{if(this.state.role==='client')return this.setState({toolAlerts:[]});this.getJSON('/api/herramientas/avisos').then(d=>this.setState({toolAlerts:d.avisos}),()=>this.setState({toolAlerts:[]}));};
   getJSON=async(url)=>{const r=await fetch(url,{headers:viewAsHeaders()});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'No se pudieron cargar los datos.');return d;};
   loadUsers=()=>this.getJSON('/api/admin/users').then(d=>this.setState({adminUsers:d.users}),e=>{this.setState({adminUsers:[]});this.flash(e.message);});
   loadAudit=()=>this.getJSON('/api/admin/audit').then(d=>this.setState({adminAudit:d.entries}),e=>this.flash(e.message));
@@ -59,7 +68,7 @@ class PlataformaView extends React.Component {
         const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'No se pudo abrir la vista de ese usuario.');}
       setViewAs(panel==='admin'?null:user?.id);
       this.setState({role:panel,screen:HOME[panel],viewAs:panel==='admin'?null:user||null,finTab:'resumen',finPending:undefined,finClientPending:undefined,finWorkerPending:undefined,notifOpen:false,switching:false},
-        ()=>{if(panel!=='client')this.getJSON('/api/finanzas/pendiente-trabajador/resumen').then(d=>this.setState({finWorkerPending:Number(d.importe)||0}),()=>{});if(panel!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.materiales?.pendientes??d.pendientes,finClientPending:d.clientes?.pendientes??0}),()=>{});this.loadPresu();});
+        ()=>{if(panel!=='client')this.getJSON('/api/finanzas/pendiente-trabajador/resumen').then(d=>this.setState({finWorkerPending:Number(d.importe)||0}),()=>{});if(panel!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.materiales?.pendientes??d.pendientes,finClientPending:d.clientes?.pendientes??0}),()=>{});this.loadPresu();this.loadTools();});
       window.scrollTo(0,0);
     }catch(e){this.setState({switching:false});this.flash(e.message);}
   };
@@ -70,11 +79,13 @@ class PlataformaView extends React.Component {
     // admin: real users from /api/admin/users
     const now=new Date(),allU=s.adminUsers||[],rowsAll=allU.map(u=>userRow(u,allU,now));
     const user=rowsAll.find(u=>u.id===s.userId)||{id:null,name:s.adminUsers?'Usuario no encontrado':'Cargando…',email:'',role:'client',roleL:'',since:'',prov:'',ver:'',verBg:'#EDEDEA',verFg:'#3A3A38',profS:'',works:'—',last:'',phone:'—',city:'—',issues:[],initials:''};
-    const pc=s.presu||{},obrasScreen=OBRAS_SCREEN[s.screen]||null;
+    const pc=s.presu||{},obrasScreen=OBRAS_SCREEN[s.screen]||null,toolsScreen=TOOLS_SCREEN[s.screen]||null;
+    const ta=k=>(s.toolAlerts||[]).filter(a=>a.kind===k).reduce((n,a)=>n+a.count,0);
     const nav=role==='client'?[mk(L.nav.home,'ri-home-5-line','c_home'),mk(L.nav.presupuestos,'ri-file-list-3-line','c_presupuestos',pc.pendiente||0),mk(L.nav.obras,'ri-building-2-line','c_obras'),mk(L.nav.perfil,'ri-user-3-line','c_perfil')]
-      :role==='worker'?[mk('Hoy','ri-sun-line','w_home'),{header:'Operaciones'},mk('Obras asignadas','ri-building-2-line','w_obras',pc.cambios||0),mk('Actualizar avance','ri-bar-chart-horizontal-line','w_avance')]
+      :role==='worker'?[mk('Hoy','ri-sun-line','w_home'),{header:'Operaciones'},mk('Obras asignadas','ri-building-2-line','w_obras',pc.cambios||0),mk('Actualizar avance','ri-bar-chart-horizontal-line','w_avance'),mk('Recursos','ri-team-line','w_recursos'),mk('Herramientas','ri-hammer-line','w_tools',ta('recepcion')),mk('Mis solicitudes','ri-inbox-archive-line','w_tool_req')]
       :[mk('Panel','ri-dashboard-3-line','a_home'),mk('Usuarios','ri-group-line','a_users',rowsAll.filter(u=>u.issues.length).length,['a_users','a_user']),mk('Auditoría','ri-history-line','a_audit'),
-        {header:'Operaciones'},mk('Presupuestos y obras','ri-file-list-3-line','a_presu',pc.cambios||0),mk('Actualizar avance','ri-bar-chart-horizontal-line','a_avance'),mk('Partidas propuestas','ri-add-box-line','a_propuestas',s.propuestas||0),mk('Partidas','ri-stack-line','a_partidas')];
+        {header:'Operaciones'},mk('Presupuestos y obras','ri-file-list-3-line','a_presu',pc.cambios||0),mk('Actualizar avance','ri-bar-chart-horizontal-line','a_avance'),mk('Partidas propuestas','ri-add-box-line','a_propuestas',s.propuestas||0),mk('Partidas','ri-stack-line','a_partidas'),mk('Recursos','ri-team-line','a_recursos'),
+        {header:'Herramientas'},mk('Panel de herramientas','ri-hammer-line','a_tools'),mk('Inventario','ri-archive-stack-line','a_tools_inv'),mk('Solicitudes','ri-inbox-archive-line','a_tool_req',ta('aprobar')),mk('Operaciones','ri-truck-line','a_tools_ops',ta('recepcion'))];
     const finScreen=PREFIX[role]+'fin',isFin=s.screen===finScreen;
     // Admin-only finance tabs follow the panel on screen: an admin in the jefe
     // panel (or viewing as a jefe) sees the jefe's tabs.
@@ -82,12 +93,14 @@ class PlataformaView extends React.Component {
       return {label,icon,badge:k==='pendientes'?s.finPending:k==='cliente'?s.finClientPending:k==='pendiente-trabajador'?eurBadge(s.finWorkerPending):k==='conciliacion'?s.finConciliationPending:k==='concepto'?s.finConceptPending:0,go:()=>this.go(finScreen,{finTab:k}),bg:on?'#F2F4FA':'transparent',fg:on?'#3E4D85':'#3A3A38',fw:on?700:500};}));
     const U=this.props.user,shown=s.viewAs||U,meName=shown.name||shown.email;
     const me={name:meName,initials:initials(meName),role:shown.role&&shown.role!=='client'?ROLE_LABEL[shown.role]:L.clientRole,avBg:role==='client'?'#EC6090':role==='worker'?'#68C0B5':'#0C062B'};
-    const titles={c_home:[L.nav.home],c_obras:[L.nav.obras],c_presupuestos:[L.nav.presupuestos],c_perfil:[L.nav.perfil],w_home:['Hoy'],w_obras:['Obras asignadas'],a_home:['Panel de administración'],a_users:['Usuarios'],a_user:['Usuarios',user.name],a_audit:['Auditoría'],a_presu:['Presupuestos y obras'],w_avance:['Actualizar avance'],a_avance:['Actualizar avance'],a_propuestas:['Partidas propuestas'],a_partidas:['Partidas']};
+    const titles={c_home:[L.nav.home],c_obras:[L.nav.obras],c_presupuestos:[L.nav.presupuestos],c_perfil:[L.nav.perfil],w_home:['Hoy'],w_obras:['Obras asignadas'],a_home:['Panel de administración'],a_users:['Usuarios'],a_user:['Usuarios',user.name],a_audit:['Auditoría'],a_presu:['Presupuestos y obras'],w_avance:['Actualizar avance'],a_avance:['Actualizar avance'],a_propuestas:['Partidas propuestas'],a_partidas:['Partidas'],w_recursos:['Recursos'],a_recursos:['Recursos'],w_tools:['Herramientas'],w_tool_req:['Mis solicitudes'],a_tools:['Herramientas','Panel'],a_tools_inv:['Herramientas','Inventario'],a_tool_req:['Herramientas','Solicitudes'],a_tools_ops:['Herramientas','Operaciones']};
     titles[finScreen]=['Gestión financiera',(FIN_TABS.find(t=>t[0]===s.finTab)||FIN_TABS[0])[1]];
     const parent={a_user:'a_users'};
     const tt=titles[s.screen];const crumbs=tt.map((l,i)=>({label:l,sep:i>0,fg:i===tt.length-1?'#1D1D1B':'#6B6B68',fw:i===tt.length-1?700:500,go:()=>i<tt.length-1&&(isFin?this.go(finScreen,{finTab:'resumen'}):this.go(parent[s.screen]))}));
     const NT=role==='client'&&pc.pendiente?[['ri-file-list-3-line',pc.pendiente===1?L.pendingOne:L.pendingMany(pc.pendiente),L.pendingSub,()=>this.go('c_presupuestos')]]
       :role!=='client'&&pc.cambios?[['ri-chat-3-line',pc.cambios===1?'Un cliente ha pedido cambios':pc.cambios+' presupuestos con cambios pedidos','Prepara la versión nueva',()=>this.go(role==='admin'?'a_presu':'w_obras')]]:[];
+    // Ledens Tools: one line per kind of alert, never one per tool.
+    if(role!=='client')for(const a of s.toolAlerts||[])NT.push(['ri-hammer-line',a.title,a.sub,()=>this.go(role==='admin'?(a.kind==='aprobar'?'a_tool_req':a.kind==='recepcion'?'a_tools_ops':'a_tools'):(['aprobada','rechazada'].includes(a.kind)?'w_tool_req':'w_tools'))]);
     const notifs=NT.map(n=>({icon:n[0],title:n[1],sub:n[2],bg:'#F8F9FC',fw:700,dot:'#EC6090',go:n[3]}));
     const unread=notifs.length;
     const is={};['c_perfil','a_home','a_users','a_user','a_audit'].forEach(k=>is['is_'+k]=s.screen===k);
@@ -112,7 +125,7 @@ class PlataformaView extends React.Component {
     const KPI=adminKpis(allU,rowsAll,s.adminAudit||[],now);
     const myIssues=user.issues.map(i=>({...i,done:false,open:false,tBg:ITYPE[i.type][0],tFg:ITYPE[i.type][1]}));
     return Object.assign({},is,{
-      showDemo:role!=='admin'&&!isFin&&!obrasScreen,obrasScreen,isFin,finTab:s.finTab,finGo:k=>this.go(finScreen,{finTab:k}),finPending:(n,c=s.finClientPending)=>(n!==s.finPending||c!==s.finClientPending)&&this.setState({finPending:n,finClientPending:c}),finConceptPending:n=>n!==s.finConceptPending&&this.setState({finConceptPending:n}),finWorkerPending:n=>n!==s.finWorkerPending&&this.setState({finWorkerPending:n}),finBridgePending:(n,c=n)=>(n!==s.finBridgePending||c!==s.finConciliationPending)&&this.setState({finBridgePending:n,finConciliationPending:c}),flash:this.flash,isClient:role==='client',isWorker:role==='worker',isAdmin:role==='admin',isInternal:view==='internal',
+      showDemo:role!=='admin'&&!isFin&&!obrasScreen&&!toolsScreen,obrasScreen,toolsScreen,toolToken:this.toolToken,toolsChanged:this.loadTools,navTick:s.navTick||0,isFin,finTab:s.finTab,finGo:k=>this.go(finScreen,{finTab:k}),finPending:(n,c=s.finClientPending)=>(n!==s.finPending||c!==s.finClientPending)&&this.setState({finPending:n,finClientPending:c}),finConceptPending:n=>n!==s.finConceptPending&&this.setState({finConceptPending:n}),finWorkerPending:n=>n!==s.finWorkerPending&&this.setState({finWorkerPending:n}),finBridgePending:(n,c=n)=>(n!==s.finBridgePending||c!==s.finConciliationPending)&&this.setState({finBridgePending:n,finConciliationPending:c}),flash:this.flash,isClient:role==='client',isWorker:role==='worker',isAdmin:role==='admin',isInternal:view==='internal',
       areaLabel:role==='client'?L.area:role==='worker'?'Workspace':'Administración',nav,me,crumbs,notifs,unread,notifOpen:s.notifOpen,
       firstName:firstName(shown),meFirst:(shown.name||'').trim().split(/\s+/)[0]||'',meLast:(shown.name||'').trim().split(/\s+/).slice(1).join(' '),meEmail:shown.email,meSince:shown.created_at?this.props.fmtDateL(shown.created_at,{month:'short',year:'numeric'}):'',
       logout:()=>this.props.onLogout(),
@@ -151,7 +164,7 @@ class PlataformaView extends React.Component {
     // (and whatever they embed) are Spanish whatever the saved choice.
     return (
       <LangOverride lang={v.isClient ? null : 'es'}>
-      <div className="plat">
+      <div className={"plat" + (v.toolsScreen ? " plat-tools" : "")}>
     <div style={{ display: "grid", gridTemplateColumns: "248px minmax(0,1fr)", minHeight: "100vh" }}>
       <aside style={{ background: "#fff", borderRight: "1px solid #EDEDEA", display: "flex", flexDirection: "column", gap: "24px", padding: "22px 16px", position: "sticky", top: "0", height: "100vh", overflowY: "auto" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "0 8px" }}>
@@ -299,6 +312,11 @@ class PlataformaView extends React.Component {
           {v.obrasScreen ? (
             <React.Suspense fallback={<div style={{ padding: "32px", color: "#6B6B68" }}>{v.L.loading}</div>}>
               <Obras key={(v.viewAs?.id || 'self') + v.obrasPanel} panel={v.obrasPanel} screen={v.obrasScreen} readOnly={!!v.viewAs} toast={v.flash} firstName={v.firstName} onCount={v.presuChanged} />
+            </React.Suspense>
+          ) : null}
+          {v.toolsScreen ? (
+            <React.Suspense fallback={<div style={{ padding: "32px", color: "#6B6B68" }}>{"Cargando herramientas…"}</div>}>
+              <Herramientas key={(v.viewAs?.id || 'self') + v.obrasPanel} panel={v.obrasPanel} screen={v.toolsScreen} nav={v.navTick} readOnly={!!v.viewAs} toast={v.flash} token={v.toolToken} onCount={v.toolsChanged} />
             </React.Suspense>
           ) : null}
           {v.is_c_perfil ? (

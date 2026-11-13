@@ -312,34 +312,46 @@ test('«Ver como» through Bearer: only an admin, only reading', { skip }, async
   }));
 });
 
-test('origin (CSRF) guards are not relaxed: no Origin or a foreign one is 403 for cookie and for Bearer', { skip }, async () => {
+test('origin (CSRF) guards: cookie writes need our Origin; a validated Bearer may omit it but never send a foreign one', { skip }, async () => {
   const admin = await makeUser('admin');
-  // One write per router that carries the guard. Bodies are irrelevant: the
-  // guard answers before the handler runs.
+  // One write per router that carries the guard (auth/origin.js).
   const writes = [
     ['POST', '/api/presupuestos'],
     ['POST', '/api/obras/00000000-0000-0000-0000-000000000000/archivos'],
     ['POST', '/api/invitaciones/obras/00000000-0000-0000-0000-000000000000'],
-    ['POST', '/api/invitaciones/aceptacion/consultar'],
     ['PUT', '/api/finanzas/pagos-trabajadores/periodo'],
     ['POST', '/api/finance/allocations/bulk'],
     ['POST', '/api/bridge/00000000-0000-0000-0000-000000000000/dismiss'],
+    ['POST', '/api/herramientas/tipos'],
   ];
-  const guardBody = async (res) => (await res.json()).error;
+  const isGuard = async (res) => res.status === 403 && /^(Origen no permitido|invalid_origin)$/.test((await res.clone().json().catch(() => ({}))).error || '');
   for (const flag of [undefined, 'true']) {
     await withFlag(flag, () => withServer(async (base) => {
       for (const [method, path] of writes) {
+        // Cookie: unchanged — missing or foreign Origin is always the guard's 403.
         for (const origin of [undefined, 'https://evil.example', 'null', `${ORIGIN}.evil.example`]) {
           const viaCookie = await req(base, path, { method, cookie: admin.cookie, origin, body: {} });
-          assert.equal(viaCookie.status, 403, `cookie ${method} ${path} origin=${origin} flag=${flag}`);
-          assert.match(await guardBody(viaCookie), /Origen no permitido|invalid_origin/);
-          if (flag === 'true') {
+          assert.ok(await isGuard(viaCookie), `cookie ${method} ${path} origin=${origin} flag=${flag}: ${viaCookie.status}`);
+        }
+        const sameOrigin = await req(base, path, { method, cookie: admin.cookie, origin: ORIGIN, body: {} });
+        assert.ok(!(await isGuard(sameOrigin)), `cookie ${method} ${path} with our Origin passes the guard`);
+        if (flag === 'true') {
+          // A validated Bearer without Origin (native app) passes the guard…
+          const native = await req(base, path, { method, auth: admin.bearer, body: {} });
+          assert.ok(!(await isGuard(native)), `bearer ${method} ${path} without Origin passes the guard: ${native.status}`);
+          // …but a Bearer request that names a foreign origin (a browser) does not.
+          for (const origin of ['https://evil.example', 'null', `${ORIGIN}.evil.example`]) {
             const viaBearer = await req(base, path, { method, auth: admin.bearer, origin, body: {} });
-            assert.equal(viaBearer.status, 403, `bearer ${method} ${path} origin=${origin}`);
-            assert.match(await guardBody(viaBearer), /Origen no permitido|invalid_origin/);
+            assert.ok(await isGuard(viaBearer), `bearer ${method} ${path} origin=${origin}: ${viaBearer.status}`);
           }
+        } else {
+          // Flag off: the header is ignored, so there is no session at all.
+          assert.equal((await req(base, path, { method, auth: admin.bearer, body: {} })).status, 401, `flag off bearer ${method} ${path}`);
         }
       }
+      // The public invitation routes (they can set a session cookie) never exempt a Bearer.
+      const accept = await req(base, '/api/invitaciones/aceptacion/consultar', { method: 'POST', auth: admin.bearer, body: {} });
+      assert.ok(await isGuard(accept), `aceptacion with Bearer and no Origin flag=${flag}: ${accept.status}`);
     }));
   }
 });
