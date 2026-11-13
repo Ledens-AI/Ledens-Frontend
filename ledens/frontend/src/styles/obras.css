@@ -208,3 +208,20 @@
 .obr-rec-filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
 .obr-rec-filters input[type='search'] { flex: 1 1 220px; max-width: 320px; }
 .obr-gantt-pred-default { font-style: italic; }
+/* Planificación: ruta crítica y calendario laboral (Gantt.jsx) */
+.obr-gantt-resumen { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 24px; font-size: 14px; }
+.obr-gantt-resumen li { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.obr-gantt-crit-text { color: #B35F00; font-weight: 600; }
+.obr-gantt-crit-tag { display: inline-block; padding: 1px 8px; border: 1.5px solid #E07B00; border-radius: 999px; color: #B35F00; font-size: 12px; font-weight: 700; }
+.obr-gantt-legend-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.obr-gantt-legend-toggle i { box-sizing: border-box; }
+.obr-gantt-cal { display: flex; flex-direction: column; gap: 10px; }
+.obr-gantt-cal-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.obr-gantt-cal-body { display: flex; flex-direction: column; gap: 10px; }
+.obr-gantt-cal-body p { margin: 0; }
+.obr-gantt-cal-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.obr-gantt-cal-list li { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto 32px; align-items: center; gap: 10px; font-size: 14px; }
+.obr-gantt-cal-tag { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: #F1F0EC; color: #5B5B57; }
+.obr-gantt-cal-tag.is-project { background: #FBE9D7; color: #8A4B12; }
+.obr-gantt-cal-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.obr-gantt-cal-form input[type="text"] { flex: 1 1 220px; min-width: 0; }

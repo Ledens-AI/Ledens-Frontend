@@ -9,7 +9,10 @@ import { ErrorBox, Empty } from '../finanzas/ui.jsx';
  * duration comes from the rendimiento of the partida in the base (or the one
  * set here), its start from the predecessors table below. Every change in the
  * table is saved and the server answers with the whole plan recalculated, so
- * the chart moves at once. Working days Mon–Fri. Spanish only (team). */
+ * the chart moves at once. Working days Mon–Fri minus the festivos of the
+ * company and of the project («Calendario laboral»). The server also returns
+ * each task's holgura (backward pass): the critical path is outlined in
+ * orange. Spanish only (team). */
 
 const REL = [
   ['FS', 'Fin → inicio (FC)'],
@@ -23,6 +26,11 @@ const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', '
 // Bar colours: red = no predecessor yet, blue = has one; the executed share
 // of the line (% de avance) fills the bar in green from the left.
 const BAR = { sinPredecesora: '#D14A4A', conPredecesora: '#4A7FB8', avance: '#3E9A5A' };
+// Ruta crítica (holgura total 0): outlined in orange, and so are the arrows
+// between two critical tasks. Festivos are shaded like weekends, warmer.
+const CRIT = '#E07B00';
+const FESTIVO = '#FBE9D7';
+const dias = (n) => `${num(n)} ${n === 1 ? 'día' : 'días'}`;
 const num = (v) => String(v).replace('.', ',');
 
 export default function Gantt({ projectId, readOnly, onBack }) {
@@ -57,20 +65,34 @@ export default function Gantt({ projectId, readOnly, onBack }) {
 
   const { tasks } = data;
   const missing = tasks.filter((t) => t.warning).length;
+  const obras = data.obras || [];
   return (
     <div className="fin-stack obr">
       {back}
       <div className="fin-project-head">
         <span className="fin-muted">{['Proyecto', data.project.code].filter(Boolean).join(' ')}</span>
         <h2>{`Planificación · ${data.project.name}`}</h2>
-        <span className="fin-muted">{`${fecha(data.start)} → ${fecha(data.end)} · ${tasks.length} ${tasks.length === 1 ? 'tarea' : 'tareas'} · días laborables (lunes a viernes)`}</span>
+        <span className="fin-muted">{`${fecha(data.start)} → ${fecha(data.end)} · ${tasks.length} ${tasks.length === 1 ? 'tarea' : 'tareas'} · días laborables (lunes a viernes, sin festivos)`}</span>
       </div>
+      {tasks.length ? (
+        <ul className="obr-gantt-resumen">
+          {obras.map((o) => (
+            <li key={o.id}>
+              <strong>{obras.length > 1 ? o.ref : 'Obra'}</strong>
+              <span>{`Fin previsto ${fecha(o.plannedEnd)}`}</span>
+              <span className="obr-gantt-crit-text">{`${o.criticas} ${o.criticas === 1 ? 'tarea crítica' : 'tareas críticas'}`}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <p className="fin-muted fin-small obr-hint-tight">
         {data.rendimiento ? `Duración = cantidad ÷ rendimiento de la partida en la base («${data.rendimiento.column}», ${data.rendimiento.unit}), redondeada a la décima de día (dos tareas de 0,5 seguidas ocupan un día). ` : 'La base de partidas no tiene columna de rendimiento: cada tarea dura 1 día hasta que indiques su duración. '}
         Cada obra empieza en su fecha de inicio. Cambia una predecesora, su relación, el desfase o la duración y el Gantt se recalcula al momento.
         {' '}Las tareas sin planificar tienen «Inicio de obra» como predecesora por defecto; si la quitas, la tarea se queda sin predecesora.
+        {' '}La ruta crítica son las tareas sin holgura: si una se retrasa, se retrasa el fin de la obra. La holgura es lo que una tarea puede retrasarse sin mover el fin de su obra.
       </p>
-      <Cuadrillas obras={data.obras || []} trabajadores={data.trabajadores} readOnly={readOnly} saving={saving} onSave={saveCuadrillas} />
+      <Cuadrillas obras={obras} trabajadores={data.trabajadores} readOnly={readOnly} saving={saving} onSave={saveCuadrillas} />
+      <Calendario data={data} projectId={projectId} readOnly={readOnly} onChanged={load} />
       {missing ? <p className="fin-warn"><i className="ri-error-warning-line"></i><span>{`${missing} ${missing === 1 ? 'tarea no tiene' : 'tareas no tienen'} rendimiento en la base: cuentan 1 día hasta que indiques su duración.`}</span></p> : null}
       {saveError ? <ErrorBox message={saveError} /> : null}
       {tasks.length ? <Chart data={data} /> : <Empty icon="ri-calendar-line" title="Sin tareas" text="Los presupuestos aprobados de este proyecto no tienen partidas." />}
@@ -198,6 +220,110 @@ function WorkerSelect({ rol, value, trabajadores, taken, onChange, label }) {
   );
 }
 
+// Calendario laboral (backend: presupuestos/festivos.js): the festivos that
+// count in this plan — the company's (national and Andalusian, an admin loads
+// them by year) and this project's (local ones of the obra's municipio, rain
+// days…, an admin or the jefe of one of its obras adds them). Every change
+// recalculates the plan.
+function Calendario({ data, projectId, readOnly, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState('');
+  const canProject = !readOnly && data.canEditFestivos, canCompany = !readOnly && data.canEditFestivosEmpresa;
+  const y0 = +data.start.slice(0, 4), y1 = +data.end.slice(0, 4);
+  const [form, setForm] = useState({ fecha: '', nombre: '', ambito: 'proyecto' });
+  const [anio, setAnio] = useState(y0);
+  const all = data.festivos || [];
+  // By default: every festivo of this project (whatever its year — adding one
+  // can push the plan into the next year, and it must stay removable) and the
+  // company's of the years the plan spans. «Ver todos» lists the rest too.
+  const [todos, setTodos] = useState(false);
+  const inYears = (f) => +f.fecha.slice(0, 4) >= y0 && +f.fecha.slice(0, 4) <= y1;
+  const shown = todos ? all : all.filter((f) => f.proyecto || inYears(f));
+  const hidden = all.length - all.filter((f) => f.proyecto || inYears(f)).length;
+  const inPlan = all.filter((f) => f.fecha >= data.start && f.fecha <= data.end).length;
+  const companyYears = new Set(all.filter((f) => !f.proyecto).map((f) => +f.fecha.slice(0, 4)));
+  const missingYears = Array.from({ length: y1 - y0 + 1 }, (_, i) => y0 + i).filter((y) => !companyYears.has(y));
+
+  const run = async (fn, ok) => {
+    setBusy(true); setError(''); setDone('');
+    let saved = false;
+    try { const r = await fn(); setDone(typeof ok === 'function' ? ok(r) : ok); saved = true; await onChanged(); } catch (e) { setError(e.message); }
+    setBusy(false);
+    return saved;
+  };
+  const add = (e) => {
+    e.preventDefault();
+    const body = { fecha: form.fecha, nombre: form.nombre.trim(), ...(form.ambito === 'proyecto' || !canCompany ? { projectId } : {}) };
+    run(() => api.addFestivo(body), `Festivo del ${fecha(body.fecha)} añadido.`).then((ok) => { if (ok) setForm((f) => ({ ...f, fecha: '', nombre: '' })); });
+  };
+  const remove = (f) => run(() => api.removeFestivo(f.id), `Festivo del ${fecha(f.fecha)} quitado.`);
+  const cargar = () => run(() => api.cargarFestivos(anio, projectId), (r) => (r.anadidos ? `${r.anadidos} festivos de ${anio} añadidos.` : `Los festivos de ${anio} ya estaban.`));
+  const canRemove = (f) => (f.proyecto ? canProject : canCompany);
+
+  return (
+    <div className="fin-card obr-gantt-cal">
+      <button type="button" className="obr-gantt-cal-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <i className={open ? 'ri-arrow-down-s-line' : 'ri-arrow-right-s-line'}></i>
+        <strong>Calendario laboral</strong>
+        <span className="fin-muted fin-small">{`Lunes a viernes · ${inPlan} ${inPlan === 1 ? 'festivo' : 'festivos'} dentro de esta planificación`}</span>
+        {missingYears.length ? <span className="fin-warn-text fin-small">{`Sin festivos de la empresa para ${missingYears.join(', ')}`}</span> : null}
+      </button>
+      {open ? (
+        <div className="obr-gantt-cal-body">
+          {shown.length ? (
+            <ul className="obr-gantt-cal-list">
+              {shown.map((f) => (
+                <li key={f.id} className={f.fecha >= data.start && f.fecha <= data.end ? '' : 'fin-muted'}>
+                  <span className="fin-nowrap">{fecha(f.fecha)}</span>
+                  <span>{f.nombre}</span>
+                  <span className={`obr-gantt-cal-tag${f.proyecto ? ' is-project' : ''}`}>{f.proyecto ? 'Este proyecto' : 'Empresa'}</span>
+                  {canRemove(f) ? <button type="button" className="fin-btn is-ghost is-small" disabled={busy} onClick={() => remove(f)} aria-label={`Quitar el festivo del ${fecha(f.fecha)}`}><i className="ri-close-line"></i></button> : <span></span>}
+                </li>
+              ))}
+            </ul>
+          ) : <p className="fin-muted fin-small">{`No hay festivos en ${y0 === y1 ? y0 : `${y0}–${y1}`}: solo se descansan sábados y domingos.`}</p>}
+          {hidden ? (
+            <div>
+              <button type="button" className="fin-btn is-ghost is-small" onClick={() => setTodos(!todos)}>
+                {todos ? `Ver solo ${y0 === y1 ? y0 : `${y0}–${y1}`}` : `Ver todos los festivos (${hidden} de otros años)`}
+              </button>
+            </div>
+          ) : null}
+          {canProject || canCompany ? (
+            <form className="obr-gantt-cal-form" onSubmit={add}>
+              <input type="date" required value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} aria-label="Fecha del festivo" />
+              <input type="text" required maxLength={120} placeholder="Nombre (p. ej. Feria de Málaga, lluvia…)" value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} aria-label="Nombre del festivo" />
+              {canCompany && canProject ? (
+                <select value={form.ambito} onChange={(e) => setForm({ ...form, ambito: e.target.value })} aria-label="Para quién es festivo">
+                  <option value="proyecto">Solo este proyecto</option>
+                  <option value="empresa">Toda la empresa</option>
+                </select>
+              ) : <span className="fin-muted fin-small">{canProject ? 'Solo este proyecto' : 'Toda la empresa'}</span>}
+              <button type="submit" className="fin-btn is-small" disabled={busy}><i className="ri-add-line"></i>Añadir festivo</button>
+            </form>
+          ) : null}
+          {canCompany ? (
+            <div className="obr-actions obr-start">
+              <select value={anio} onChange={(e) => setAnio(Number(e.target.value))} aria-label="Año">
+                {Array.from({ length: y1 - y0 + 2 }, (_, i) => y0 + i).map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+              <button type="button" className="fin-btn is-small" disabled={busy} onClick={cargar}><i className="ri-calendar-check-line"></i>Cargar festivos de España y Andalucía</button>
+            </div>
+          ) : null}
+          <p className="fin-muted fin-small">
+            Los de la empresa son los nacionales y los de Andalucía; uno que cae en domingo pasa al lunes. Compruébalos con el calendario oficial del año (BOJA).
+            {' '}Los festivos locales del municipio de la obra van en «Solo este proyecto».
+          </p>
+          {error ? <ErrorBox message={error} /> : null}
+          {done ? <p className="fin-muted fin-small">{done}</p> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Tabla({ tasks, hitos, readOnly, saving, onSave }) {
   const index = useMemo(() => new Map(tasks.map((t, i) => [t.id, i + 1])), [tasks]);
   const label = (t) => (t.hito ? `◆ ${t.name}` : `${index.get(t.id)}. ${t.code ? `${t.code} · ` : ''}${t.name}`);
@@ -208,7 +334,7 @@ function Tabla({ tasks, hitos, readOnly, saving, onSave }) {
       <div className="fin-card is-flush">
         <div className="fin-table-wrap">
           <table className="fin-table obr-gantt-table">
-            <thead><tr><th>#</th><th>Partida</th><th className="fin-num">Cantidad</th><th className="fin-num">Rendimiento</th><th>Duración (días, 0,1)</th><th>Predecesoras · relación · desfase (días)</th><th>Inicio</th><th>Fin</th></tr></thead>
+            <thead><tr><th>#</th><th>Partida</th><th className="fin-num">Cantidad</th><th className="fin-num">Rendimiento</th><th>Duración (días, 0,1)</th><th>Predecesoras · relación · desfase (días)</th><th>Inicio</th><th>Fin</th><th>Holgura</th></tr></thead>
             <tbody>
               {tasks.map((t) => (
                 <Fila key={t.id} t={t} n={index.get(t.id)} tasks={choices} label={label} editable={!readOnly && t.canEdit} busy={saving === t.id} onSave={onSave} />
@@ -353,6 +479,10 @@ function Fila({ t, n, tasks, label, editable, busy, onSave }) {
       </td>
       <td className="fin-nowrap">{fecha(t.start)}</td>
       <td className="fin-nowrap">{fecha(t.end)}</td>
+      <td className="fin-nowrap" title={t.critical ? 'Si se retrasa, se retrasa el fin de la obra' : `Puede empezar hasta el ${fecha(t.lateStart)} sin retrasar el fin de la obra`}>
+        {t.critical ? <span className="obr-gantt-crit-tag">Crítica</span> : <span>{dias(t.slack)}</span>}
+        {!t.critical ? <div className="fin-muted fin-small" title="Lo que puede retrasarse sin mover ninguna sucesora">{`libre: ${dias(t.freeSlack)}`}</div> : null}
+      </td>
     </tr>
   );
 }
@@ -371,6 +501,9 @@ function Chart({ data }) {
   const row = new Map(tasks.map((t, i) => [t.id, i]));
   const today = new Date().toISOString().slice(0, 10);
   const scroller = useRef(null);
+  const [showCrit, setShowCrit] = useState(true);
+  const festivos = new Map((data.festivos || []).map((f) => [f.fecha, f.nombre]));
+  const isCrit = (t) => showCrit && !t.hito && t.critical;
   useEffect(() => { // open on today when it falls inside the plan
     const el = scroller.current;
     if (el && today > data.start && today < data.end) el.scrollLeft = Math.max(0, x(today) - 120);
@@ -378,8 +511,8 @@ function Chart({ data }) {
 
   const cols = [];
   for (let i = 0; i < days; i++) {
-    const d = new Date(t0 + i * DAY), wd = d.getUTCDay();
-    cols.push({ i, day: d.getUTCDate(), month: d.getUTCMonth(), year: d.getUTCFullYear(), weekend: wd === 0 || wd === 6 });
+    const d = new Date(t0 + i * DAY), wd = d.getUTCDay(), iso = d.toISOString().slice(0, 10);
+    cols.push({ i, day: d.getUTCDate(), month: d.getUTCMonth(), year: d.getUTCFullYear(), weekend: wd === 0 || wd === 6, festivo: wd !== 0 && wd !== 6 ? festivos.get(iso) || null : null });
   }
   const months = [];
   for (const c of cols) { const m = months[months.length - 1]; if (!m || m.month !== c.month) months.push({ month: c.month, year: c.year, from: c.i, n: 1 }); else m.n++; }
@@ -395,7 +528,7 @@ function Chart({ data }) {
       const x1 = fromEnd ? xe(pt) : xs(pt), y1 = HEAD + row.get(pt.id) * RH + RH / 2;
       const x2 = toEnd ? xe(t) : xs(t), y2 = HEAD + row.get(t.id) * RH + RH / 2;
       const mid = toEnd ? Math.max(x1, x2) + 8 : Math.min(x1 + 8, x2 - 8);
-      arrows.push({ key: `${p.id}-${t.id}`, d: `M${x1},${y1} H${mid} V${y2} H${x2}`, toEnd });
+      arrows.push({ key: `${p.id}-${t.id}`, d: `M${x1},${y1} H${mid} V${y2} H${x2}`, toEnd, crit: isCrit(t) && isCrit(pt) });
     }
   }
   return (
@@ -405,6 +538,11 @@ function Chart({ data }) {
       <span><i style={{ background: BAR.conPredecesora }}></i>Con predecesora</span>
       <span><i style={{ background: BAR.avance }}></i>Avance ejecutado</span>
       <span><b className="obr-gantt-legend-hito"></b>Inicio de obra (se puede elegir como predecesora)</span>
+      <span><i style={{ background: FESTIVO, border: '1px solid #E9CFB4' }}></i>Festivo</span>
+      <label className="obr-gantt-legend-toggle">
+        <input type="checkbox" checked={showCrit} onChange={(e) => setShowCrit(e.target.checked)} />
+        <i style={{ background: 'transparent', border: `2px solid ${CRIT}` }}></i>Resaltar la ruta crítica
+      </label>
     </div>
     <div className="fin-card is-flush obr-gantt">
       <div className="obr-gantt-labels" style={{ width: LABEL }}>
@@ -420,19 +558,22 @@ function Chart({ data }) {
         <svg width={width} height={height} role="img" aria-label={`Diagrama de Gantt: ${tasks.length} tareas del ${fecha(data.start)} al ${fecha(data.end)}`}>
           <defs>
             <marker id="obr-gantt-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="#8A8A86" /></marker>
+            <marker id="obr-gantt-arrow-crit" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill={CRIT} /></marker>
           </defs>
-          {cols.map((c) => c.weekend ? <rect key={c.i} x={c.i * DW} y={HEAD} width={DW} height={height - HEAD} fill="#F4F4F1" /> : null)}
+          {cols.map((c) => c.weekend ? <rect key={c.i} x={c.i * DW} y={HEAD} width={DW} height={height - HEAD} fill="#F4F4F1" />
+            : c.festivo ? <rect key={c.i} x={c.i * DW} y={HEAD} width={DW} height={height - HEAD} fill={FESTIVO}><title>{`Festivo: ${c.festivo}`}</title></rect> : null)}
           {months.map((m) => (
             <g key={`${m.year}-${m.month}`}>
               <line x1={m.from * DW} x2={m.from * DW} y1={0} y2={height} stroke="#E6E6E1" />
               <text x={m.from * DW + 6} y={16} fontSize="12" fontWeight="700" fill="#3A3A38">{`${MONTHS[m.month]} ${m.year}`}</text>
             </g>
           ))}
-          {cols.map((c) => <text key={c.i} x={c.i * DW + DW / 2} y={36} fontSize="10" textAnchor="middle" fill={c.weekend ? '#B0B0AB' : '#6B6B68'}>{c.day}</text>)}
+          {cols.map((c) => <text key={c.i} x={c.i * DW + DW / 2} y={36} fontSize="10" textAnchor="middle" fill={c.weekend ? '#B0B0AB' : c.festivo ? '#C0702A' : '#6B6B68'}>{c.day}</text>)}
           <line x1={0} x2={width} y1={HEAD} y2={HEAD} stroke="#E6E6E1" />
           {tasks.map((t, i) => <line key={t.id} x1={0} x2={width} y1={HEAD + (i + 1) * RH} y2={HEAD + (i + 1) * RH} stroke="#F0F0EC" />)}
           {parse(today) >= t0 && parse(today) < t0 + days * DAY ? <line x1={x(today) + DW / 2} x2={x(today) + DW / 2} y1={HEAD - 6} y2={height} stroke="#D14A4A" strokeDasharray="3 3" /> : null}
-          {arrows.map((a) => <path key={a.key} d={a.d} fill="none" stroke="#8A8A86" strokeWidth="1.2" markerEnd="url(#obr-gantt-arrow)" />)}
+          {arrows.filter((a) => !a.crit).map((a) => <path key={a.key} d={a.d} fill="none" stroke="#8A8A86" strokeWidth="1.2" markerEnd="url(#obr-gantt-arrow)" />)}
+          {arrows.filter((a) => a.crit).map((a) => <path key={a.key} d={a.d} fill="none" stroke={CRIT} strokeWidth="1.6" markerEnd="url(#obr-gantt-arrow-crit)" />)}
           {tasks.map((t, i) => {
             if (t.hito) {
               const cx = x(t.start), cy = HEAD + i * RH + RH / 2, r = 7;
@@ -451,13 +592,14 @@ function Chart({ data }) {
             const clip = `obr-gantt-clip-${i}`;
             return (
               <g key={t.id}>
-                <title>{`${t.code ? `${t.code} · ` : ''}${t.name}\n${fecha(t.start)} → ${fecha(t.end)} · ${num(t.duration)} ${t.duration === 1 ? 'día' : 'días'} laborables · ${num(t.executionPct)} % ejecutado · ${t.predecessors.length ? `${t.predecessors.length} ${t.predecessors.length === 1 ? 'predecesora' : 'predecesoras'}` : 'sin predecesora'}`}</title>
+                <title>{`${t.code ? `${t.code} · ` : ''}${t.name}\n${fecha(t.start)} → ${fecha(t.end)} · ${num(t.duration)} ${t.duration === 1 ? 'día' : 'días'} laborables · ${num(t.executionPct)} % ejecutado · ${t.predecessors.length ? `${t.predecessors.length} ${t.predecessors.length === 1 ? 'predecesora' : 'predecesoras'}` : 'sin predecesora'}\n${t.critical ? 'Crítica: sin holgura' : `Holgura ${dias(t.slack)} (libre ${dias(t.freeSlack)})`}`}</title>
                 <clipPath id={clip}><rect x={bx} y={by} width={bw} height={bh} rx="4" /></clipPath>
                 <g clipPath={`url(#${clip})`}>
                   <rect x={bx} y={by} width={bw} height={bh} fill={c} />
                   {pct > 0 ? <rect x={bx} y={by} width={bw * pct / 100} height={bh} fill={BAR.avance} /> : null}
                 </g>
                 {t.warning ? <rect x={bx + 0.5} y={by + 0.5} width={bw - 1} height={bh - 1} rx="4" fill="none" stroke="#3A3A38" strokeDasharray="3 2" /> : null}
+                {isCrit(t) ? <rect x={bx - 1.5} y={by - 1.5} width={bw + 3} height={bh + 3} rx="5" fill="none" stroke={CRIT} strokeWidth="2.5" /> : null}
               </g>
             );
           })}

@@ -11,6 +11,7 @@ import { translateDoc } from '../presupuestos/traducciones.js';
 import { PropuestasService } from '../presupuestos/propuestas.js';
 import { PartidasService } from '../presupuestos/partidas.js';
 import { GanttService } from '../presupuestos/gantt.js';
+import { FestivosService } from '../presupuestos/festivos.js';
 import { RecursosService } from '../presupuestos/recursos.js';
 import { ganttAgenteDraft } from '../presupuestos/ganttAgente.js';
 import { agenteDraft, agenteFromEnv } from '../presupuestos/agente.js';
@@ -89,6 +90,13 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   // Planificación (Gantt) of a project with an approved presupuesto.
   const gantt = (req) => new GanttService(pool || getPool(), req.user);
   router.get('/proyectos/:projectId/gantt', handle((req) => gantt(req).get(req.params.projectId)));
+  // Calendario laboral of the Gantt: festivos of the company (admin) or of a project
+  // (admin or the jefe of one of its obras); src/presupuestos/festivos.js.
+  const festivos = (req) => new FestivosService(pool || getPool(), req.user, (u) => new GanttService(pool || getPool(), u));
+  router.get('/festivos', handle((req) => festivos(req).list({ projectId: req.query.proyecto || null })));
+  router.post('/festivos', handle((req) => festivos(req).add(req.body || {})));
+  router.post('/festivos/cargar', handle((req) => festivos(req).cargar(req.body || {})));
+  router.delete('/festivos/:fid', handle((req) => festivos(req).remove(req.params.fid)));
   // Gestión de recursos: every worker, the obras whose cuadrillas they are in and overlaps (team).
   router.get('/recursos', handle((req) => new RecursosService(pool || getPool(), req.user, (u) => new GanttService(pool || getPool(), u)).list()));
   router.put('/proyectos/:projectId/gantt/obras/:obraId', handle((req) => gantt(req).setCuadrillas(req.params.projectId, req.params.obraId, req.body || {})));

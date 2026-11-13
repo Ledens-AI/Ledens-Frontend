@@ -2,13 +2,15 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { PresupuestosService } from '../src/presupuestos/service.js';
-import { GanttService, calendar, schedule, durationFrom, span, orderByDependencies } from '../src/presupuestos/gantt.js';
+import { GanttService, calendar, schedule, analyze, durationFrom, span, orderByDependencies } from '../src/presupuestos/gantt.js';
+import { FestivosService, festivosDeAnio } from '../src/presupuestos/festivos.js';
 import { RecursosService, rolDePuesto } from '../src/presupuestos/recursos.js';
 // Planificación (Gantt) of a project (migration 035), on PGlite with synthetic rows.
 let db, pool, admin, jefe, otroJefe, cliente, proyecto, vacio, obra, w;
 const migration = (m) => fs.readFile(new URL('../src/db/migrations/' + m, import.meta.url), 'utf8');
 const P = (u) => new PresupuestosService(pool, u);
 const G = (u) => new GanttService(pool, u);
+const F = (u) => new FestivosService(pool, u, (x) => new GanttService(pool, x));
 
 before(async () => {
   const { PGlite } = await import('@electric-sql/pglite');
@@ -35,7 +37,7 @@ before(async () => {
     INSERT INTO ledens.employees (name, primary_position_id, daily_pay, activo)
       SELECT x.n, (SELECT id FROM ledens.positions WHERE name = x.p), 100, x.a
       FROM (VALUES ('Juan','Oficial de 1ª',true),('Pedro','Peón',true),('Luis','Oficial de 1ª',true),('Mario','Peón',true),('Baja','Peón',false)) x(n,p,a);`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '035_gantt_planificacion.sql', '039_gantt_inicio_obra.sql', '040_gantt_duracion_decimal.sql', '042_gantt_cuadrillas.sql', '043_gantt_cuadrilla_miembros.sql']) await db.exec(await migration(m));
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '035_gantt_planificacion.sql', '039_gantt_inicio_obra.sql', '040_gantt_duracion_decimal.sql', '042_gantt_cuadrillas.sql', '043_gantt_cuadrilla_miembros.sql', '045_gantt_festivos.sql']) await db.exec(await migration(m));
   w = Object.fromEntries((await db.query('SELECT id, name FROM ledens.employees')).rows.map((r) => [r.name, r.id]));
   [admin, jefe, otroJefe, cliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES
     ('admin@g.test','Admin','admin'),('jefe@g.test','Jefe','jefe'),('jefe2@g.test','Otro','jefe'),('cliente@g.test','Cliente','client')
@@ -119,6 +121,63 @@ test('the Gantt uses the rendimiento of the base and follows the predecessors ta
   assert.equal(g.tasks[2].warning, null);
   await G(jefe).updateMany(proyecto, [{ id: dem.id, duration: null }, { id: tab.id, duration: null, predecessors: [{ id: dem.id }] }, { id: pin.id, duration: null, predecessors: [{ id: tab.id, type: 'SS', lag: 1 }] }]);
 });
+
+test('calendar with festivos and the backward pass (ruta crítica, holguras)', () => {
+  const cal = calendar('2026-11-06', ['2026-11-09', '2026-11-11']);
+  assert.deepEqual([cal.date(0), cal.date(1), cal.date(2), cal.date(3), cal.date(-1)], ['2026-11-06', '2026-11-10', '2026-11-12', '2026-11-13', '2026-11-05']);
+  assert.deepEqual([cal.index('2026-11-09'), cal.index('2026-11-12'), cal.index('2026-11-04')], [1, 2, -2]);
+  assert.equal(calendar('2026-11-09', ['2026-11-09']).date(0), '2026-11-10', 'a base on a festivo rolls to the next working day');
+  // a(3) → b(2) FS; c(1) SS a; e(1) SS c +1. The obra ends with b, at 5.
+  const tasks = [{ id: 'a', duration: 3 }, { id: 'b', duration: 2 }, { id: 'c', duration: 1 }, { id: 'e', duration: 1 }].map((t) => ({ ...t, earliest: 0 }));
+  const deps = [{ partida_id: 'b', predecessor_id: 'a', type: 'FS' }, { partida_id: 'c', predecessor_id: 'a', type: 'SS' }, { partida_id: 'e', predecessor_id: 'c', type: 'SS', lag_days: 1 }];
+  const r = analyze(tasks, deps, schedule(tasks, deps));
+  assert.deepEqual(['a', 'b', 'c', 'e'].map((id) => [r.get(id).critical, r.get(id).slack, r.get(id).freeSlack]),
+    [[true, 0, 0], [true, 0, 0], [false, 3, 0], [false, 3, 3]]);
+  assert.deepEqual([r.get('c').lateStart, r.get('c').lateEnd], [3, 4]);
+  // FF: d must end with b → d is critical too; each group ends on its own.
+  const t2 = [...tasks, { id: 'd', duration: 1, earliest: 0 }, { id: 'x', duration: 1, earliest: 0, group: 'otra' }];
+  const d2 = [...deps, { partida_id: 'd', predecessor_id: 'b', type: 'FF' }];
+  const r2 = analyze(t2, d2, schedule(t2, d2));
+  assert.deepEqual([r2.get('d').critical, r2.get('x').critical, r2.get('x').slack], [true, true, 0]);
+});
+
+test('festivos de la empresa y del proyecto move the plan; the critical path comes with it', async () => {
+  assert.deepEqual(festivosDeAnio(2026).map((f) => f.fecha), ['2026-01-01', '2026-01-06', '2026-02-28', '2026-04-02', '2026-04-03', '2026-05-01',
+    '2026-08-15', '2026-10-12', '2026-11-02', '2026-12-07', '2026-12-08', '2026-12-25']);
+  let g = await G(jefe).get(proyecto);
+  // Demolición (2,5) → tabique (2,5) FS are the critical path; pintura (1, SS +1) can slip half a day.
+  assert.deepEqual(g.tasks.map((t) => [t.critical, t.slack, t.freeSlack]), [[true, 0, 0], [true, 0, 0], [false, 0.5, 0.5]]);
+  assert.deepEqual([g.obras[0].plannedEnd, g.obras[0].criticas, g.festivos, g.canEditFestivos], ['2026-11-12', 2, [], true]);
+
+  await assert.rejects(F(cliente).list(), { status: 403 });
+  await assert.rejects(F(jefe).add({ fecha: '2026-11-09', nombre: 'Local' }), { status: 403 }); // the company's: admin only
+  await assert.rejects(F(otroJefe).add({ fecha: '2026-11-09', nombre: 'Local', projectId: proyecto }), { status: 404 });
+  await assert.rejects(F(jefe).add({ fecha: '2026-02-30', nombre: 'Mal', projectId: proyecto }), { status: 400 });
+  const { festivos } = await F(jefe).add({ fecha: '2026-11-09', nombre: 'Fiesta local', projectId: proyecto });
+  assert.deepEqual(festivos.map((f) => [f.fecha, f.proyecto]), [['2026-11-09', true]]);
+  await assert.rejects(F(jefe).add({ fecha: '2026-11-09', nombre: 'Otra vez', projectId: proyecto }), { status: 409 });
+  await assert.rejects(F(jefe).cargar({ anio: 2026 }), { status: 403 });
+  assert.equal((await F(admin).cargar({ anio: 2026 })).anadidos, 12);
+  assert.equal((await F(admin).cargar({ anio: 2026 })).anadidos, 0, 'loading twice adds nothing');
+  assert.equal((await F(admin).list()).festivos.length, 12, 'the project festivo is not one of the company');
+
+  g = await G(jefe).get(proyecto);
+  // Monday 9 is off: Fri 6, Tue 10, half of Wed 11 for the demolición; the tabique ends Fri 13.
+  assert.deepEqual(g.tasks.slice(0, 2).map((t) => [t.start, t.end]), [['2026-11-06', '2026-11-11'], ['2026-11-11', '2026-11-13']]);
+  assert.equal(g.end, '2026-11-13');
+  assert.equal(g.festivos.length, 13);
+  // Another project only gets the company's.
+  assert.equal((await loadCount(vacio)), 12);
+
+  const local = g.festivos.find((f) => f.proyecto);
+  await assert.rejects(F(otroJefe).remove(local.id), { status: 404 });
+  await F(jefe).remove(local.id);
+  await assert.rejects(F(jefe).remove(g.festivos.find((f) => !f.proyecto).id), { status: 403 });
+  assert.equal((await db.query("SELECT count(*)::int n FROM audit_log WHERE action='Calendario laboral modificado'")).rows[0].n, 3);
+  await db.query('DELETE FROM gantt_festivos');
+  assert.equal((await G(jefe).get(proyecto)).end, '2026-11-12');
+});
+const loadCount = async (projectId) => (await db.query('SELECT count(*)::int n FROM gantt_festivos WHERE project_id IS NULL OR project_id = $1', [projectId])).rows[0].n;
 
 test('«Inicio de obra» is a milestone any task may take as predecessor', async () => {
   let g = await G(jefe).get(proyecto);
