@@ -2,7 +2,7 @@
 
 Módulo de `/plataforma` para saber, en todo momento y a partir de movimientos confirmados, qué herramientas tiene Ledens, dónde están, quién responde de ellas, para qué obra trabajan, cuáles están reservadas, cuáles hay que devolver y cuáles no se pueden usar.
 
-- Backend: `src/herramientas/` (servicio), `src/routes/herramientas.js` (`/api/herramientas`), migración `042_herramientas.sql` (esquema `inventory`).
+- Backend: `src/herramientas/` (servicio), `src/routes/herramientas.js` (`/api/herramientas`), migración `043_herramientas.sql` (esquema `inventory`).
 - Frontend: `src/components/plataforma/herramientas/` (carga diferida desde `Plataforma.jsx`), pestaña «Herramientas» de una obra (`obras/Detalle.jsx`), ruta `/h/:token` (etiquetas QR).
 - Sin servicios nuevos de Azure: misma base de datos, mismo almacenamiento de fotos (Blob `obra-archivos`), misma autenticación por sesión.
 
@@ -43,7 +43,7 @@ Decisiones:
 
 ---
 
-## 2. Modelo de datos (`042_herramientas.sql`)
+## 2. Modelo de datos (`043_herramientas.sql`)
 
 ```mermaid
 erDiagram
@@ -202,15 +202,15 @@ Importación CSV (`;` o `,`, cabecera obligatoria): `tipo;categoria;seguimiento;
 ## 9. Despliegue y rollback
 
 **Despliegue** (nada automático a producción desde la rama):
-1. Revisar y fusionar el PR en `main`. El workflow del backend construye la imagen y crea una revisión de ACA; al arrancar aplica `042_herramientas.sql` (aditiva: esquema nuevo, no toca tablas existentes) bajo el bloqueo consultivo de migraciones.
+1. Revisar y fusionar el PR en `main`. El workflow del backend construye la imagen y crea una revisión de ACA; al arrancar aplica `043_herramientas.sql` (aditiva: esquema nuevo, no toca tablas existentes) bajo el bloqueo consultivo de migraciones.
 2. El workflow de SWA publica el frontend (incluye el cambio de `Permissions-Policy` para la cámara).
 3. Comprobar: `/api/health`; como administración, «Herramientas → Panel» muestra 0 activos; dar de alta una herramienta de prueba solo si se quiere, y darla de baja después (no se borra).
 4. Carga inicial: «Inventario → Importar CSV» con el inventario real (comprobar primero), imprimir etiquetas, pegarlas.
 5. Fotos: reutiliza `OBRA_ARCHIVOS_BLOB_URL`; sin él, solo las fotos responden 503.
 
 **Rollback**:
-- Código: revertir el commit de fusión (frontend y backend vuelven a la revisión anterior). La migración 042 puede quedarse: el código anterior no lee el esquema `inventory`.
-- Datos: nunca se borran por la interfaz. Eliminar el esquema solo si se decide expresamente y tras una copia: `DROP SCHEMA inventory CASCADE; DELETE FROM schema_migrations WHERE name='042_herramientas.sql';` (destructivo, manual).
+- Código: revertir el commit de fusión (frontend y backend vuelven a la revisión anterior). La migración 043 puede quedarse: el código anterior no lee el esquema `inventory`.
+- Datos: nunca se borran por la interfaz. Eliminar el esquema solo si se decide expresamente y tras una copia: `DROP SCHEMA inventory CASCADE; DELETE FROM schema_migrations WHERE name='043_herramientas.sql';` (destructivo, manual).
 
 ## 10. Riesgos y pendientes
 

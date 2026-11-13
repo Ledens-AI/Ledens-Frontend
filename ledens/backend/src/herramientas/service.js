@@ -9,7 +9,7 @@ import { LOCATION_KINDS, OWNERSHIP, INCIDENT_KINDS, PURPOSES, BLOCKING, STATUS_S
 
 export { ToolError, fail, isUuid, uuid, text, day, money, int, today };
 
-// Ledens Tools (migration 042, /api/herramientas). One service per request,
+// Ledens Tools (migration 043, /api/herramientas). One service per request,
 // built with the effective user (after «Ver como»). What each role may see
 // and do is decided here (permissions.js), never by the frontend:
 //  - admin: the whole company — register, edit, label, approve, move, repair;
