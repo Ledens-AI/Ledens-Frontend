@@ -23,7 +23,8 @@
     "express-rate-limit": "^7.4.1",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "4.10.38",
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "qrcode-generator": "^1.4.4"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.10"

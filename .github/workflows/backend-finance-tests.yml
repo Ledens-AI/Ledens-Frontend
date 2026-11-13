@@ -1,10 +1,10 @@
 name: Backend finance and authentication tests
 on:
   pull_request:
-    paths: ['ledens/backend/**', '.github/workflows/backend-finance-tests.yml']
+    paths: ['ledens/backend/**', 'ledens/frontend/**', '.github/workflows/backend-finance-tests.yml']
   push:
     branches: [main]
-    paths: ['ledens/backend/**', '.github/workflows/backend-finance-tests.yml']
+    paths: ['ledens/backend/**', 'ledens/frontend/**', '.github/workflows/backend-finance-tests.yml']
 permissions:
   contents: read
 jobs:
@@ -78,9 +78,16 @@ jobs:
         env:
           STATEMENT_TEST_DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_statement_test
         run: node --test test/revolut-statement.test.js
+      - name: Ledens Tools (inventory, transfers, requests) and concurrency on PostgreSQL 16
+        env:
+          TOOLS_TEST_DATABASE_URL: postgres://ledens_test:test_database_only@localhost:5432/ledens_tools_test
+        run: node --test test/herramientas.test.js
       - name: Frontend dependency installation
         working-directory: ledens/frontend
         run: npm ci
+      - name: Frontend unit tests
+        working-directory: ledens/frontend
+        run: npm test
       - name: Frontend production build
         working-directory: ledens/frontend
         run: npm run build

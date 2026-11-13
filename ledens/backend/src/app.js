@@ -11,6 +11,7 @@ import { createFinanzasRouter } from './routes/finanzas.js';
 import { createPresupuestosRouter } from './routes/presupuestos.js';
 import { createObrasRouter } from './routes/obras.js';
 import { createInvitacionesRouter } from './routes/invitaciones.js';
+import { createHerramientasRouter } from './routes/herramientas.js';
 import bridgeRouter from './routes/bridge.js';
 import financeRouter from './routes/finance.js';
 
@@ -40,6 +41,7 @@ export function createApp() {
   app.use('/api/presupuestos', createPresupuestosRouter());
   app.use('/api/obras', createObrasRouter());
   app.use('/api/invitaciones', createInvitacionesRouter());
+  app.use('/api/herramientas', createHerramientasRouter());
 
   const apiLimiter = rateLimit({
     windowMs: 60 * 1000,
