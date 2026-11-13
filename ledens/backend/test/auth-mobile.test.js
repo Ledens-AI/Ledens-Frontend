@@ -398,7 +398,7 @@ test('diagnóstico: answers with the flag off and on, and exposes only booleans 
       assert.equal(body.authorizationHeader, true);
       assert.equal(body.originHeader, true);
       assert.equal(body.cookieHeader, true);
-      // Behind `trust proxy 1` with one X-Forwarded-For entry, req.ip is that entry.
+      // With a single X-Forwarded-For entry, req.ip is that entry.
       assert.deepEqual(body.forwardedFor, { entries: 1, ipIsFirstEntry: true, ipIsLastEntry: true });
       assert.equal(body.ipIsInternal, false, '198.51.100.x is a public (documentation) address');
       assert.match(body.replica, /^[a-f0-9]{8}$/);
@@ -411,7 +411,11 @@ test('diagnóstico: answers with the flag off and on, and exposes only booleans 
     assert.equal(plain.originHeader, false);
     assert.equal(plain.cookieHeader, false);
     assert.equal(plain.https, false, 'plain http in the test server');
-    const spoofed = await (await call('/api/auth/mobile/diagnostico', { headers: { 'X-Forwarded-For': '203.0.113.9, 198.51.100.200' } })).json();
-    assert.deepEqual(spoofed.forwardedFor, { entries: 2, ipIsFirstEntry: false, ipIsLastEntry: true });
+    // Production shape: <client, SWA hop>. req.ip is the client (trust proxy 2).
+    const azure = await (await call('/api/auth/mobile/diagnostico', { headers: { 'X-Forwarded-For': '203.0.113.9, 198.51.100.200' } })).json();
+    assert.deepEqual(azure.forwardedFor, { entries: 2, ipIsFirstEntry: true, ipIsLastEntry: false });
+    // A client that prepends its own entry does not change req.ip.
+    const spoofed = await (await call('/api/auth/mobile/diagnostico', { headers: { 'X-Forwarded-For': '192.0.2.66, 203.0.113.9, 198.51.100.200' } })).json();
+    assert.deepEqual(spoofed.forwardedFor, { entries: 3, ipIsFirstEntry: false, ipIsLastEntry: false });
   }));
 });
