@@ -19,11 +19,27 @@ import financeRouter from './routes/finance.js';
 // Builds the Express app without starting it listening — used both by
 // src/index.js (real server) and by the tests (ephemeral server on a random
 // port, so several test files can run without colliding on :4000).
+export function trustProxyHops(value = process.env.TRUST_PROXY_HOPS) {
+  const n = Number(value);
+  return value !== undefined && value !== '' && Number.isInteger(n) && n >= 0 && n <= 5 ? n : 2;
+}
+
 export function createApp() {
   const app = express();
   const ORIGIN = process.env.CORS_ORIGIN || '*';
 
-  app.set('trust proxy', 1);
+  // How many proxies in front of Express add an X-Forwarded-For entry; req.ip
+  // (the rate limiters' key) is the address the outermost trusted one saw.
+  // Production: browser/app → Static Web App (adds the client's IP) → Container
+  // Apps ingress (adds the SWA hop's IP) → Express. Verified with
+  // /api/auth/mobile/diagnostico on 13 Nov 2026: two Azure entries, and with
+  // `1` req.ip was the SWA hop, shared by every user, so 10 failed logins by
+  // anyone blocked everyone's login. `2` reads the client's IP as SWA saw it;
+  // anything a client prepends stays to its left and is ignored. The Container
+  // App is only reachable through SWA (direct calls get 401), so nobody can
+  // skip a hop. TRUST_PROXY_HOPS overrides it (e.g. 1 behind docker-compose's
+  // single nginx).
+  app.set('trust proxy', trustProxyHops());
   app.use('/api/v1/facturas/ingesta', rateLimit({
     windowMs:60000,max:120,standardHeaders:true,legacyHeaders:false,
   }), createIngestionRouter());

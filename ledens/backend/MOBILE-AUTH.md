@@ -131,4 +131,11 @@ curl -s https://ledens.es/api/auth/mobile/diagnostico -H 'X-Forwarded-For: 203.0
 | con XFF inventado: `ipIsFirstEntry` | `false` | `req.ip` sale de una cabecera que controla el cliente: el limitador se podría esquivar |
 | `replica` en varias llamadas | uno o varios ids | Con N réplicas, cada una guarda su propio contador en memoria: el límite efectivo es N × 10 |
 
+**Resultado del 13-11-2026 en producción**, sin credenciales:
+- `https: true`, `authorizationHeader: false`, `originHeader: false` y `cookieHeader: false`: correctos;
+- la cadena `X-Forwarded-For` trae 2 entradas de Azure: cliente y salto SWA → Container Apps;
+- con `trust proxy 1`, `req.ip` era la **última** entrada, el salto de SWA, compartido por todos los usuarios. El limitador de login era global, y lo era ya para la web.
+
+Corregido con `TRUST_PROXY_HOPS` (2 por defecto, en `src/app.js`). Tras desplegarlo hay que repetir el diagnóstico: en una petición sin XFF propio debe salir `ipIsFirstEntry: true`.
+
 Además, una vez activado el flag, hay que comprobar desde la app (o con `curl`) que la app nativa no envía `Origin`.
