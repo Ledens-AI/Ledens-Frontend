@@ -38,7 +38,7 @@ before(async () => {
       rendimiento_cuadrilla numeric, rendimientovalidado text);
     INSERT INTO ledens.work_items (id_partida, name, unit_source, rendimiento_cuadrilla) VALUES
       ('PA-001','Demolición','m2',20),('PA-002','Tabique','m2',8),('PA-003','Pintura','m2',10);`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '035_gantt_planificacion.sql', '039_gantt_inicio_obra.sql', '040_gantt_duracion_decimal.sql']) await db.exec(await migration(m));
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '035_gantt_planificacion.sql', '039_gantt_inicio_obra.sql', '040_gantt_duracion_decimal.sql', '042_gantt_cuadrillas.sql', '043_gantt_cuadrilla_miembros.sql']) await db.exec(await migration(m));
   [admin, jefe, otroJefe, cliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES
     ('admin@g.test','Admin','admin'),('jefe@g.test','Jefe','jefe'),('jefe2@g.test','Otro','jefe'),('cliente@g.test','Cliente','client')
     RETURNING id,email,name,role`)).rows;
@@ -77,7 +77,8 @@ test('proposes predecessors only for tasks without one, discards cycles and nons
 
   // Nothing was written to the database by the agent itself.
   let g = await G(jefe).get(proyecto);
-  assert.ok(g.tasks.every((t) => !t.predecessors.length));
+  // (only the default «Inicio de obra» each task gets until it is planned)
+  assert.ok(g.tasks.every((t) => t.predecessors.length === 1 && t.predecessors[0].porDefecto && t.predecessors[0].id === obra));
 
   // The jefe reviews and saves in bulk — one request, one transaction.
   g = await G(jefe).updateMany(proyecto, proposal.tasks.map((t) => ({ id: t.id, predecessors: t.predecessors })));

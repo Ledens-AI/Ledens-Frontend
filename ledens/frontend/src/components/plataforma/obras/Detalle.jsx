@@ -8,6 +8,7 @@ import Archivos from './Archivos.jsx';
 import Clientes from './Clientes.jsx';
 import ProjectPicker from '../finanzas/ProjectPicker.jsx';
 import { useObrasI18n } from './i18n.js';
+const ObraHerramientas = React.lazy(() => import('../herramientas/ObraHerramientas.jsx'));
 
 export const PhaseBadge = ({ phase }) => { const { PHASE } = useObrasI18n(); const p = PHASE[phase] || PHASE.borrador; return <Badge bg={p.bg} fg={p.fg} icon={p.icon}>{p.label}</Badge>; };
 // 0–100 bar with the current value on it; values over 100 fill the bar and say so.
@@ -80,7 +81,9 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
   // Photos and documents belong to the obra: an approved root presupuesto.
   // «Clientes» is the team's (jefe asignado or admin) on the root presupuesto; «Ver como» keeps it to read.
   const tabs = [['presupuesto', t.tabBudget], ...(doc.obra ? [['obra', t.tabObra], ['archivos', t.tabFiles]] : []), ['conversacion', t.tabChat(doc.comments.length)],
-    ...(doc.can?.invite ? [['clientes', 'Clientes']] : [])];
+    ...(doc.can?.invite ? [['clientes', 'Clientes']] : []),
+    // Ledens Tools: the team's (clients never get `project`), on the obra's project.
+    ...(doc.project?.id && !doc.parent ? [['herramientas', 'Herramientas']] : [])];
 
   return (
     <div className="fin-stack obr">
@@ -200,6 +203,7 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
       {tab === 'archivos' && doc.obra ? <Archivos obraId={doc.id} readOnly={readOnly} toast={toast} /> : null}
 
       {tab === 'clientes' && doc.can?.invite ? <Clientes obraId={doc.id} readOnly={readOnly} toast={toast} /> : null}
+      {tab === 'herramientas' && doc.project?.id ? <React.Suspense fallback={<div className="fin-loading fin-muted">Cargando herramientas…</div>}><ObraHerramientas projectId={doc.project.id} readOnly={readOnly} toast={toast} /></React.Suspense> : null}
 
       {tab === 'conversacion' ? (
         <div className="fin-card">

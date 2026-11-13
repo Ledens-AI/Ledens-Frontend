@@ -67,14 +67,16 @@ export async function ganttAgenteDraft(user, projectId, { db, anthropic } = {}) 
   const { tasks } = data;
   if (tasks.length < 2) fail(400, 'Hacen falta al menos dos tareas para proponer relaciones.');
   if (!tasks.every((t) => t.canEdit)) fail(403, 'Solo el jefe de obra asignado o un administrador puede generar la planificación.');
-  // A valid (acyclic) graph always has at least one task with no predecessor
-  // — schedule()'s own topological pass depends on that — so `pending` is
-  // never empty here; nothing special to guard against.
-  const pending = tasks.filter((t) => !t.predecessors.length);
+  // Tasks still to plan: none, or only «Inicio de obra» by default. With every
+  // task tied to «Inicio de obra» or another task on purpose there is nothing
+  // left to propose.
+  const planned = (t) => t.predecessors.some((p) => !p.porDefecto);
+  const pending = tasks.filter((t) => !planned(t));
+  if (!pending.length) fail(400, 'Todas las tareas tienen ya predecesoras: no queda nada que proponer.');
 
   const index = new Map(tasks.map((t, i) => [t.id, i + 1]));
   const byIndex = new Map(tasks.map((t, i) => [i + 1, t]));
-  const lines = tasks.map((t, i) => `${i + 1}. [${t.chapter || 'Sin capítulo'}] ${t.code ? `${t.code} ` : ''}${t.name} — ${t.quantity} ${t.unit}, ${t.duration} día(s)${t.predecessors.length ? ' (ya tiene predecesora, no la toques)' : ''}`).join('\n');
+  const lines = tasks.map((t, i) => `${i + 1}. [${t.chapter || 'Sin capítulo'}] ${t.code ? `${t.code} ` : ''}${t.name} — ${t.quantity} ${t.unit}, ${t.duration} día(s)${planned(t) ? ' (ya tiene predecesora, no la toques)' : ''}`).join('\n');
   const prompt = `Tareas del proyecto «${data.project.name}» (numeradas en el orden del Gantt):\n${lines}\n\nPropón predecesoras solo para las tareas sin ninguna todavía: ${pending.map((t) => index.get(t.id)).join(', ')}.`;
 
   const proposed = await askAgent(anthropic, prompt);
@@ -83,7 +85,7 @@ export async function ganttAgenteDraft(user, projectId, { db, anthropic } = {}) 
   // matter for that (a cycle is independent of start dates), so 0 for all.
   const scheduleTasks = tasks.map((t) => ({ id: t.id, earliest: 0, duration: t.duration }));
   const names = new Map(tasks.map((t) => [t.id, `${t.code || ''} ${t.name}`.trim()]));
-  const accepted = tasks.map((t) => t.predecessors.map((p) => ({ partida_id: t.id, predecessor_id: p.id, type: p.type, lag_days: p.lag }))).flat();
+  const accepted = tasks.map((t) => t.predecessors.filter((p) => !p.porDefecto).map((p) => ({ partida_id: t.id, predecessor_id: p.id, type: p.type, lag_days: p.lag }))).flat();
   const warnings = [];
   const byTask = new Map();
   const countByTask = new Map();
@@ -95,7 +97,7 @@ export async function ganttAgenteDraft(user, projectId, { db, anthropic } = {}) 
     const label = (n) => (byIndex.get(Number(n)) ? names.get(byIndex.get(Number(n)).id) : `#${n}`);
     if (!task || !pred) { warnings.push(`Se ha descartado una relación con un número de tarea que no existe (${raw?.tarea} → ${raw?.predecesora}).`); continue; }
     if (task.id === pred.id) { warnings.push(`Se ha descartado que «${label(raw.tarea)}» sea su propia predecesora.`); continue; }
-    if (task.predecessors.length) continue; // only propose for tasks that had none — never override a manual choice
+    if (planned(task)) continue; // only propose for tasks that had none — never override a manual choice
     if ((countByTask.get(task.id) || 0) >= MAX_PREDS_PER_TASK) { warnings.push(`«${names.get(task.id)}»: se ha ignorado una predecesora de más (máximo ${MAX_PREDS_PER_TASK}).`); continue; }
     const type = DEP_TYPES.includes(String(raw.tipo).toUpperCase()) ? String(raw.tipo).toUpperCase() : 'FS';
     const lag = Number.isInteger(Number(raw.desfaseDias)) ? Math.max(-365, Math.min(365, Number(raw.desfaseDias))) : 0;

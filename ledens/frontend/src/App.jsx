@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Routes, Route, useLocation } from 'react-router-dom';
+import { Routes, Route, useLocation, Navigate, useParams } from 'react-router-dom';
 import Header from './components/Header.jsx';
 import Hero from './components/Hero.jsx';
 import Problema from './components/Problema.jsx';
@@ -26,6 +26,17 @@ import RequireAuth from './components/RequireAuth.jsx';
 
 // Full-screen pages that bring their own logo/navigation instead of Header.
 const NO_HEADER = ['/registro', '/plataforma', '/invitacion', '/contrasena'];
+
+/* A Ledens Tools label (QR): https://<app>/h/<token>. The token is opaque and
+ * grants nothing — it only names the tool; /plataforma asks to log in first
+ * (RequireAuth keeps the query) and the ficha then applies the user's own
+ * permissions. Kept as its own short path so the QR stays easy to scan and
+ * keeps working whatever changes inside /plataforma. */
+function ToolLabel() {
+  const { token } = useParams();
+  const ok = /^[A-Za-z0-9_-]{8,40}$/.test(token || '');
+  return <Navigate to={ok ? `/plataforma?herramienta=${encodeURIComponent(token)}` : '/plataforma'} replace />;
+}
 
 /* The full landing page */
 function LandingPage({ onOpenLead }) {
@@ -66,7 +77,7 @@ export default function App() {
   // in, with no client-side callback step needed.
   return (
     <>
-      {!NO_HEADER.includes(pathname) && <Header />}
+      {!NO_HEADER.includes(pathname) && !pathname.startsWith('/h/') && <Header />}
       <Routes>
         <Route path="/" element={<LandingPage onOpenLead={openLead} />} />
         <Route path="/auth" element={<AuthPage />} />
@@ -83,6 +94,8 @@ export default function App() {
             </RequireAuth>
           }
         />
+        {/* Ledens Tools QR label → its ficha in /plataforma */}
+        <Route path="/h/:token" element={<ToolLabel />} />
         <Route path="/servicios/:slug" element={<ServicioPage onOpenLead={openLead} />} />
         <Route path="/privacidad" element={<PrivacidadPage />} />
         <Route path="/terminos" element={<TerminosPage />} />

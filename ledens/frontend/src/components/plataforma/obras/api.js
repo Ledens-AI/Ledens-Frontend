@@ -103,6 +103,11 @@ export const api = {
   // Planificación (Gantt) of a project with an approved presupuesto (backend: presupuestos/gantt.js).
   gantt: (projectId) => request('GET', `${base}/proyectos/${projectId}/gantt`),
   saveGantt: (projectId, partidaId, body) => request('PUT', `${base}/proyectos/${projectId}/gantt/${partidaId}`, body),
+  // Cuadrillas of one obra (1–20): durations from the rendimiento are divided by them.
+  // Each cuadrilla is one oficial + one peón (ids of workers), all chosen at once.
+  saveGanttCuadrillas: (projectId, obraId, cuadrillas, equipos) => request('PUT', `${base}/proyectos/${projectId}/gantt/obras/${obraId}`, { cuadrillas, equipos }),
+  // Gestión de recursos: every worker with their obras and overlaps (presupuestos/recursos.js).
+  recursos: () => request('GET', `${base}/recursos`),
   // «Guardar en bloque»: several tasks' predecessors in one request, one
   // transaction server-side (ganttAgente.js never saves by itself).
   saveGanttMany: (projectId, tasks) => request('PUT', `${base}/proyectos/${projectId}/gantt`, { tasks }),

@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { getPool, isDbConfigured } from '../db/pool.js';
 import { requireAuth, checkRole } from '../auth/sessions.js';
 import { viewAs } from '../auth/viewAs.js';
+import { requireSameOrigin } from '../auth/origin.js';
 import { PresupuestosService, PresupuestoError } from '../presupuestos/service.js';
 import { pdfDraft, LayoutOcr } from '../presupuestos/pdf.js';
 import { translatorFromEnv } from '../presupuestos/translate.js';
@@ -10,6 +11,7 @@ import { translateDoc } from '../presupuestos/traducciones.js';
 import { PropuestasService } from '../presupuestos/propuestas.js';
 import { PartidasService } from '../presupuestos/partidas.js';
 import { GanttService } from '../presupuestos/gantt.js';
+import { RecursosService } from '../presupuestos/recursos.js';
 import { ganttAgenteDraft } from '../presupuestos/ganttAgente.js';
 import { agenteDraft, agenteFromEnv } from '../presupuestos/agente.js';
 import { agenteChat } from '../presupuestos/agenteChat.js';
@@ -29,10 +31,8 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   });
   router.use(authenticate || requireAuth, viewAs({ findUser }), checkRole('admin', 'jefe', 'client'));
   router.use(rateLimit({ windowMs: 60 * 1000, max: 240, standardHeaders: true, legacyHeaders: false }));
-  router.use((req, res, next) => {
-    if (req.method !== 'GET' && (!origin || req.get('origin') !== origin)) return res.status(403).json({ error: 'Origen no permitido' });
-    next();
-  });
+  // Writes: our web Origin, or a validated Bearer without Origin (auth/origin.js).
+  router.use(requireSameOrigin({ origin }));
 
   const svc = (req) => new PresupuestosService(pool || getPool(), req.user);
   const translate = translator !== undefined ? translator : translatorFromEnv();
@@ -89,6 +89,9 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   // Planificación (Gantt) of a project with an approved presupuesto.
   const gantt = (req) => new GanttService(pool || getPool(), req.user);
   router.get('/proyectos/:projectId/gantt', handle((req) => gantt(req).get(req.params.projectId)));
+  // Gestión de recursos: every worker, the obras whose cuadrillas they are in and overlaps (team).
+  router.get('/recursos', handle((req) => new RecursosService(pool || getPool(), req.user, (u) => new GanttService(pool || getPool(), u)).list()));
+  router.put('/proyectos/:projectId/gantt/obras/:obraId', handle((req) => gantt(req).setCuadrillas(req.params.projectId, req.params.obraId, req.body || {})));
   router.put('/proyectos/:projectId/gantt/:partidaId', handle((req) => gantt(req).update(req.params.projectId, req.params.partidaId, req.body || {})));
   // Several tasks at once — «guardar en bloque» after reviewing the planning
   // agent's suggestions (or any other multi-row edit): one transaction, the

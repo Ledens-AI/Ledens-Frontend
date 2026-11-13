@@ -1,0 +1,79 @@
+name: Static Web Apps — limpiar entornos huérfanos
+
+# Safety net for swa-ledens: deletes every staging environment that does not
+# belong to an open pull request. Production (`default`) is never touched.
+# Runs every Monday and by hand (Actions → this workflow → Run workflow);
+# by hand it can only list what it would delete («simular»).
+# Uses the same service principal as deploy-backend.yml (AZURE_CREDENTIALS,
+# Contributor on rg-ledens). If the list of open PRs cannot be read, it stops
+# before deleting anything.
+
+on:
+  schedule:
+    - cron: '23 5 * * 1'   # Mondays 05:23 UTC
+  workflow_dispatch:
+    inputs:
+      simular:
+        description: 'Solo listar lo que se borraría, sin borrar nada'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: swa-limpiar-entornos
+  cancel-in-progress: false
+
+env:
+  SWA_NAME: swa-ledens
+  RESOURCE_GROUP: rg-ledens
+
+jobs:
+  limpiar:
+    runs-on: ubuntu-latest
+    name: Limpiar entornos de Static Web Apps
+    steps:
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Borrar entornos sin PR abierto
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # A scheduled run has no inputs: it deletes. By hand, it only does when «simular» is unticked.
+          SIMULAR: ${{ github.event_name == 'workflow_dispatch' && inputs.simular && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          # Open PRs first: if this fails, the step fails and nothing is deleted.
+          abiertos=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 500 --json number --jq '.[].number' | tr '\n' ' ')
+          echo "PR abiertos: ${abiertos:-ninguno}"
+
+          az staticwebapp environment list --name "$SWA_NAME" --resource-group "$RESOURCE_GROUP" \
+            --query "[].[buildId, name, sourceBranch, pullRequestTitle]" -o tsv > entornos.tsv
+          echo "Entornos actuales (buildId, nombre, rama, PR):"
+          cat entornos.tsv
+
+          borrados=0
+          while IFS=$'\t' read -r build nombre rama titulo; do
+            if [ "$build" = "default" ] || [ "$nombre" = "default" ]; then continue; fi   # production
+            mantener=no
+            for n in $abiertos; do
+              if [ "$build" = "$n" ] || [ "$nombre" = "$n" ]; then mantener=si; fi
+            done
+            if [ "$mantener" = "si" ]; then echo "Se mantiene $build ($rama): PR abierto"; continue; fi
+            if [ "$SIMULAR" = "true" ]; then
+              echo "Se borraría $build ($rama · $titulo)"
+            else
+              echo "Borrando $build ($rama · $titulo)"
+              az staticwebapp environment delete --name "$SWA_NAME" --resource-group "$RESOURCE_GROUP" \
+                --environment-name "$build" --yes
+            fi
+            borrados=$((borrados + 1))
+          done < entornos.tsv
+
+          if [ "$SIMULAR" = "true" ]; then echo "Simulación: se borrarían $borrados entornos."; else echo "Entornos borrados: $borrados."; fi
+          echo "### Entornos de Static Web Apps" >> "$GITHUB_STEP_SUMMARY"
+          echo "$( [ "$SIMULAR" = "true" ] && echo 'Simulación — se borrarían' || echo 'Borrados'): **$borrados** · PR abiertos: ${abiertos:-ninguno}" >> "$GITHUB_STEP_SUMMARY"

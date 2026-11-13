@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { getPool, isDbConfigured } from '../db/pool.js';
 import { requireAuth, checkRole, getSessionUser, createSession, sessionCookieOptions, SESSION_COOKIE } from '../auth/sessions.js';
 import { viewAs } from '../auth/viewAs.js';
+import { requireSameOrigin } from '../auth/origin.js';
 import { PresupuestoError } from '../presupuestos/service.js';
 import { isGoogleConfigured } from '../auth/providers/google.js';
 import { isMicrosoftConfigured } from '../auth/providers/microsoft.js';
@@ -29,11 +30,6 @@ export function createInvitacionesRouter({ authenticate, findUser, pool, origin 
     if (!pool && !isDbConfigured()) return res.status(503).json({ error: 'Invitaciones no disponibles todavía' });
     next();
   });
-  // Same CSRF guard as /api/presupuestos: writes only from our own page.
-  router.use((req, res, next) => {
-    if (req.method !== 'GET' && (!origin || req.get('origin') !== origin)) return res.status(403).json({ error: 'Origen no permitido' });
-    next();
-  });
   const handle = (fn, status = 200) => async (req, res, next) => {
     try { res.status(status).json(await fn(req, res)); } catch (e) {
       if (e instanceof InvitacionError || e instanceof PresupuestoError) return res.status(e.status).json({ error: e.message, ...(e.code ? { code: e.code } : {}) });
@@ -43,6 +39,9 @@ export function createInvitacionesRouter({ authenticate, findUser, pool, origin 
 
   // The link: a few tries per address are plenty (the token itself is 256 random bits).
   const accept = Router();
+  // Public routes that may set a session cookie: always the strict web rule
+  // (no requireAuth runs before it, so a Bearer is never exempted here).
+  accept.use(requireSameOrigin({ origin }));
   accept.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' } }));
   const providers = () => ({ google: isGoogleConfigured(), microsoft: isMicrosoftConfigured() });
   const login = async (req, res, user) => {
@@ -73,6 +72,8 @@ export function createInvitacionesRouter({ authenticate, findUser, pool, origin 
   const team = Router();
   team.use(rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false, message: { error: 'Demasiadas peticiones. Inténtalo de nuevo en un minuto.' } }));
   team.use(authenticate || requireAuth, viewAs({ findUser }), checkRole('admin', 'jefe'));
+  // After requireAuth, so a validated Bearer without Origin may write.
+  team.use(requireSameOrigin({ origin }));
   const svc = (req) => new InvitacionesService(db(), req.user);
   team.get('/:id', handle((req) => svc(req).list(req.params.id)));
   team.post('/:id', handle((req) => svc(req).invite(req.params.id, req.body || {}), 201));
