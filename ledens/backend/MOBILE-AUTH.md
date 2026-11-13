@@ -105,9 +105,22 @@ Desde un móvil físico, usa la IP LAN del equipo (`http://192.168.x.x:4000`). E
 
 ## Antes de activar el flag en producción
 
-Requiere aprobación explícita. Hay que comprobar, en este orden:
+Requiere aprobación explícita. Las comprobaciones se hacen sin credenciales con `GET /api/auth/mobile/diagnostico`. Responde con el flag activado o no, y devuelve solo booleanos y conteos sobre la propia petición, nunca direcciones ni valores:
 
-1. Las peticiones web que SWA reenvía al Container App no traen `Authorization`; si la trajeran, la regla de cookie y Bearer juntos rompería la web.
-2. Detrás de SWA y ACA, `req.secure` es `true`; si no, el login móvil devolverá 403 «Se requiere HTTPS».
-3. `req.ip` es la IP real del cliente y no la del proxy; si no, el limitador de 10 intentos sería global para todos los usuarios.
-4. La app nativa no envía `Origin`.
+```bash
+# Como la app: sin Origin, sin cookie, sin Authorization
+curl -s https://ledens.es/api/auth/mobile/diagnostico
+# Con una entrada X-Forwarded-For inventada, para ver si req.ip se puede falsificar
+curl -s https://ledens.es/api/auth/mobile/diagnostico -H 'X-Forwarded-For: 203.0.113.9'
+```
+
+| Campo | Valor esperado | Si no |
+|---|---|---|
+| `https` | `true` | El login móvil respondería 403 «Se requiere HTTPS» |
+| `authorizationHeader` (petición sin `Authorization`) | `false` | SWA inyecta `Authorization`: con el flag activo, la regla cookie + Bearer rompería la web. **No activar** |
+| `originHeader` / `cookieHeader` (petición sin ellos) | `false` | Un proxy añade cabeceras; revisar antes de activar |
+| `forwardedFor.ipIsFirstEntry` sin XFF propio, `ipIsInternal` | `true`, `false` | `req.ip` es un proxy de Azure: el limitador de login (10 / 15 min) sería **global** para todos los usuarios |
+| con XFF inventado: `ipIsFirstEntry` | `false` | `req.ip` sale de una cabecera que controla el cliente: el limitador se podría esquivar |
+| `replica` en varias llamadas | uno o varios ids | Con N réplicas, cada una guarda su propio contador en memoria: el límite efectivo es N × 10 |
+
+Además, una vez activado el flag, hay que comprobar desde la app (o con `curl`) que la app nativa no envía `Origin`.

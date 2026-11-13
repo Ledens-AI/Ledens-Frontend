@@ -366,3 +366,41 @@ test('tokens, passwords and emails never reach the logs', { skip }, async () => 
   }
   assert.ok(lines.some((l) => l.includes('[auth] mobile login') && l.includes(u.id)), 'the login is logged by user id');
 });
+
+test('diagnóstico: answers with the flag off and on, and exposes only booleans and counts', { skip }, async () => {
+  for (const flag of [undefined, 'true']) {
+    await withEnv({ [FLAG]: flag }, () => withServer(async (call, ip) => {
+      const secret = 'a'.repeat(64);
+      const res = await call('/api/auth/mobile/diagnostico', {
+        auth: `Bearer ${secret}`, cookie: `${SESSION_COOKIE}=${secret}`, origin: 'https://evil.example',
+        headers: { 'X-Forwarded-Proto': 'https' },
+      });
+      assert.equal(res.status, 200, `flag=${flag}`);
+      assert.match(res.headers.get('cache-control') || '', /no-store/);
+      assert.equal(res.headers.get('set-cookie'), null);
+      const raw = await res.text();
+      for (const leak of [secret, ip, 'evil.example', '127.0.0.1']) assert.ok(!raw.includes(leak), `diagnóstico leaked ${leak}`);
+      const body = JSON.parse(raw);
+      assert.deepEqual(Object.keys(body).sort(), ['authorizationHeader', 'cookieHeader', 'forwardedFor', 'https', 'ipIsInternal', 'mobileAuthEnabled', 'originHeader', 'replica']);
+      assert.equal(body.mobileAuthEnabled, flag === 'true');
+      assert.equal(body.https, true);
+      assert.equal(body.authorizationHeader, true);
+      assert.equal(body.originHeader, true);
+      assert.equal(body.cookieHeader, true);
+      // Behind `trust proxy 1` with one X-Forwarded-For entry, req.ip is that entry.
+      assert.deepEqual(body.forwardedFor, { entries: 1, ipIsFirstEntry: true, ipIsLastEntry: true });
+      assert.equal(body.ipIsInternal, false, '198.51.100.x is a public (documentation) address');
+      assert.match(body.replica, /^[a-f0-9]{8}$/);
+    }));
+  }
+  // Nothing sent: everything false, and a spoofed extra entry is visible as such.
+  await flagOn(() => withServer(async (call) => {
+    const plain = await (await call('/api/auth/mobile/diagnostico')).json();
+    assert.equal(plain.authorizationHeader, false);
+    assert.equal(plain.originHeader, false);
+    assert.equal(plain.cookieHeader, false);
+    assert.equal(plain.https, false, 'plain http in the test server');
+    const spoofed = await (await call('/api/auth/mobile/diagnostico', { headers: { 'X-Forwarded-For': '203.0.113.9, 198.51.100.200' } })).json();
+    assert.deepEqual(spoofed.forwardedFor, { entries: 2, ipIsFirstEntry: false, ipIsLastEntry: true });
+  }));
+});
