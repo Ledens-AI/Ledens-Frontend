@@ -3,10 +3,15 @@ import { api } from './api.js';
 import { fecha } from './format.js';
 import { Badge, Dialog, Empty, ErrorBox, Pager } from './ui.jsx';
 
-const EMPTY = { code: '', name: '', customerId: '', customerName: '', salesman: '', address: '', municipio: '', provincia: '', statusId: '', startDate: '', endDate: '' };
+const EMPTY_BILLING = { holderName: '', taxId: '', address: '', postalCode: '', municipio: '', provincia: '', country: 'España' };
+const EMPTY = { code: '', name: '', customerId: '', customerName: '', salesman: '', address: '', municipio: '', provincia: '', statusId: '', startDate: '', endDate: '',
+  billing: { ...EMPTY_BILLING } };
 const toForm = (p) => ({ code: p.code || '', name: p.name || '', customerId: p.customer_id || '', customerName: p.customer_id ? '' : p.customer_name_source || '',
   salesman: p.salesman || '', address: p.address || '', municipio: p.municipio || '', provincia: p.provincia || '', statusId: p.status_id || '',
-  startDate: p.start_date || '', endDate: p.end_date || '' });
+  startDate: p.start_date || '', endDate: p.end_date || '', billing: { ...EMPTY_BILLING, ...(p.billing || {}) } });
+const BILLING_LABEL = { holderName: 'titular de la factura', taxId: 'CIF/NIF', address: 'dirección fiscal', postalCode: 'código postal',
+  municipio: 'municipio fiscal', provincia: 'provincia fiscal', country: 'país' };
+const isSpain = (c) => /^(españa|espana|spain|es)$/i.test((c || '').trim());
 
 /* Proyectos: the list of ledens.projects with create/edit (admins). Jefes de
  * obra see their granted projects read-only. Saving sends the version of the
@@ -30,8 +35,22 @@ export default function Proyectos({ toast }) {
   const canEdit = !!data?.canEdit;
   // Picking a registered client drops any free text typed before (the field is hidden then).
   const set = (k) => (e) => setEdit((x) => ({ ...x, form: { ...x.form, [k]: e.target.value, ...(k === 'customerId' && e.target.value ? { customerName: '' } : {}) }, error: '' }));
+  const setBill = (k) => (e) => setEdit((x) => ({ ...x, form: { ...x.form, billing: { ...x.form.billing, [k]: e.target.value } }, error: '' }));
+  // Fiscal address = the obra's, and titular = the client, as a starting point the person can change.
+  const copyFromProject = () => setEdit((x) => {
+    const f = x.form, cli = f.customerId ? options.customers.find((c) => c.id === f.customerId)?.name : f.customerName;
+    return { ...x, form: { ...f, billing: { ...f.billing, holderName: f.billing.holderName || cli || '', address: f.address, municipio: f.municipio, provincia: f.provincia } }, error: '' };
+  });
+  // Required for a new project and for one that already has them; an old project may leave them all empty.
+  const billingRequired = (e) => !e.project || !!e.project.billing;
   const check = (f) => {
     if (!f.name.trim()) return 'El nombre es obligatorio.';
+    const b = f.billing, filled = Object.keys(EMPTY_BILLING).filter((k) => k !== 'country' && b[k].trim());
+    if (billingRequired(edit) || filled.length) {
+      const missing = Object.keys(EMPTY_BILLING).filter((k) => !b[k].trim());
+      if (missing.length) return `Faltan datos de facturación: ${missing.map((k) => BILLING_LABEL[k]).join(', ')}.`;
+      if (isSpain(b.country) && !/^\d{5}$/.test(b.postalCode.trim())) return 'El código postal fiscal debe tener 5 cifras.';
+    }
     if (f.startDate && f.endDate && f.endDate < f.startDate) return 'La fecha de fin no puede ser anterior a la de inicio.';
     return '';
   };
@@ -132,6 +151,20 @@ export default function Proyectos({ toast }) {
             <label className="fin-field"><span>Provincia</span><input type="text" maxLength={200} value={f.provincia} onChange={set('provincia')} /></label>
             <label className="fin-field"><span>Inicio</span><input type="date" value={f.startDate} onChange={set('startDate')} /></label>
             <label className="fin-field"><span>Fin</span><input type="date" value={f.endDate} onChange={set('endDate')} /></label>
+          </div>
+          <div className="fin-section" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            <strong>Datos de facturación{billingRequired(edit) ? ' *' : ''}</strong>
+            <button type="button" className="fin-btn is-ghost" onClick={copyFromProject}><i className="ri-file-copy-line"></i>Usar cliente y dirección de la obra</button>
+          </div>
+          {!billingRequired(edit) ? <div className="fin-warn"><i className="ri-information-line"></i>Este proyecto no tiene datos de facturación. Complétalos para poder facturarlo.</div> : null}
+          <div className="fin-grid-form">
+            <label className="fin-field"><span>Titular de la factura{billingRequired(edit) ? ' *' : ''}</span><input type="text" maxLength={200} value={f.billing.holderName} onChange={setBill('holderName')} placeholder="Nombre y apellidos o razón social" autoComplete="off" /></label>
+            <label className="fin-field"><span>CIF / NIF / NIE{billingRequired(edit) ? ' *' : ''}</span><input type="text" maxLength={30} value={f.billing.taxId} onChange={setBill('taxId')} placeholder="p. ej. B12345674" autoComplete="off" /></label>
+            <label className="fin-field"><span>Dirección fiscal{billingRequired(edit) ? ' *' : ''}</span><input type="text" maxLength={200} value={f.billing.address} onChange={setBill('address')} placeholder="Calle, número, piso" /></label>
+            <label className="fin-field"><span>Código postal{billingRequired(edit) ? ' *' : ''}</span><input type="text" maxLength={20} inputMode={isSpain(f.billing.country) ? 'numeric' : 'text'} value={f.billing.postalCode} onChange={setBill('postalCode')} /></label>
+            <label className="fin-field"><span>Municipio{billingRequired(edit) ? ' *' : ''}</span><input type="text" maxLength={200} value={f.billing.municipio} onChange={setBill('municipio')} /></label>
+            <label className="fin-field"><span>Provincia{billingRequired(edit) ? ' *' : ''}</span><input type="text" maxLength={200} value={f.billing.provincia} onChange={setBill('provincia')} /></label>
+            <label className="fin-field"><span>País{billingRequired(edit) ? ' *' : ''}</span><input type="text" maxLength={100} value={f.billing.country} onChange={setBill('country')} /></label>
           </div>
           {edit.error ? <div className="fin-error-inline">{edit.error}</div> : null}
         </Dialog>

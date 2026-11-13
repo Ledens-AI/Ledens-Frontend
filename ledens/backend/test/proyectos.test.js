@@ -8,6 +8,7 @@ import {createFinanzasRouter} from '../src/routes/finanzas.js';
 // ledens.projects, ledens.customers and ledens.project_statuses. Synthetic rows only.
 let db,pool,admin,jefe,client,st1,st2,cust,imported;
 const as=(u)=>new ProjectsService(pool,u);
+const BILL={holderName:'Titular Prueba S.L.',taxId:'B-1234567-4',address:'C/ Fiscal 2',postalCode:'29601',municipio:'Marbella',provincia:'Málaga'};
 before(async()=>{
  const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
@@ -18,6 +19,7 @@ before(async()=>{
   ALTER TABLE ledens.projects ADD COLUMN source_id text UNIQUE,ADD COLUMN raw_id uuid UNIQUE,ADD COLUMN customer_name_source text,ADD COLUMN salesman text,
    ADD COLUMN start_date date,ADD COLUMN municipio text,ADD COLUMN provincia text,ADD COLUMN customer_id uuid REFERENCES ledens.customers(id),
    ADD COLUMN status_id uuid REFERENCES ledens.project_statuses(id),ADD COLUMN end_date date,ADD CHECK ((source_id IS NULL)=(raw_id IS NULL));`);
+ await db.exec(await fs.readFile(new URL('../src/db/migrations/043_proyecto_datos_facturacion.sql',import.meta.url),'utf8'));
  [admin,jefe]=(await db.query("INSERT INTO users(email,role,name) VALUES('admin@pr.test','admin','Admin Test'),('jefe@pr.test','jefe','Jefe Test') RETURNING id,role,name")).rows;
  client={id:jefe.id,role:'client'};
  [st1,st2]=(await db.query("INSERT INTO ledens.project_statuses(id,code,name) VALUES(gen_random_uuid(),'EN_CURSO','En curso'),(gen_random_uuid(),'CERRADO','Cerrado') RETURNING id")).rows.map(r=>r.id);
@@ -27,7 +29,7 @@ before(async()=>{
 after(()=>db?.close());
 
 test('an admin creates a project with its real fields and the change is audited',async()=>{
- const p=await as(admin).create({code:' OBRA-100 ',name:'Reforma ático',customerId:cust,salesman:'Comercial X',address:'C/ Prueba 1',municipio:'Marbella',provincia:'Málaga',statusId:st1,startDate:'2026-10-01',endDate:'2026-12-15'});
+ const p=await as(admin).create({code:' OBRA-100 ',name:'Reforma ático',customerId:cust,salesman:'Comercial X',address:'C/ Prueba 1',municipio:'Marbella',provincia:'Málaga',statusId:st1,startDate:'2026-10-01',endDate:'2026-12-15',billing:BILL});
  assert.equal(p.code,'OBRA-100');assert.equal(p.name,'Reforma ático');assert.equal(p.cliente,'Cliente Prueba');assert.equal(p.customer_name_source,'Cliente Prueba','text name defaults to the customer');
  assert.equal(p.estado,'En curso');assert.equal(p.start_date,'2026-10-01');assert.equal(p.end_date,'2026-12-15');assert.equal(p.importado,false);
  const row=(await db.query('SELECT source_id,raw_id,municipio FROM ledens.projects WHERE id=$1',[p.id])).rows[0];
@@ -43,7 +45,7 @@ test('validation: name required, unique code (any case), coherent dates, real st
  await assert.rejects(as(admin).create({name:'Otra',startDate:'10/10/2026'}),{status:400});
  await assert.rejects(as(admin).create({name:'Otra',statusId:'00000000-0000-0000-0000-000000000000'}),{status:400,message:/Estado/});
  await assert.rejects(as(admin).create({name:'Otra',customerId:'no-uuid'}),{status:400,message:/Cliente/});
- const p=await as(admin).create({name:'Sin código'});assert.equal(p.code,null,'a project without code is allowed');
+ const p=await as(admin).create({name:'Sin código',billing:BILL});assert.equal(p.code,null,'a project without code is allowed');
 });
 
 test('editing needs the version that was shown and audits exactly what changed',async()=>{
@@ -88,7 +90,7 @@ test('HTTP: writes need the allowed origin and a non-client role',async()=>{
  const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
  const base=`http://127.0.0.1:${server.address().port}/api/finanzas/gestion-proyectos`;
  try{
-  const post=(headers)=>fetch(base,{method:'POST',headers:{'content-type':'application/json',...headers},body:JSON.stringify({name:'Desde HTTP',code:'HTTP-1'})});
+  const post=(headers)=>fetch(base,{method:'POST',headers:{'content-type':'application/json',...headers},body:JSON.stringify({name:'Desde HTTP',code:'HTTP-1',billing:BILL})});
   assert.equal((await post({origin:'https://evil.test'})).status,403);
   assert.equal((await post({origin:'https://ledens.test','x-role':'client'})).status,403);
   const ok=await post({origin:'https://ledens.test'});assert.equal(ok.status,201);assert.equal((await ok.json()).project.code,'HTTP-1');
@@ -97,7 +99,7 @@ test('HTTP: writes need the allowed origin and a non-client role',async()=>{
 });
 
 test('a project reloads by id even after its code changed, and only for those who may see it',async()=>{
- const p=await as(admin).create({name:'Recarga por id',code:'RID-1'});
+ const p=await as(admin).create({name:'Recarga por id',code:'RID-1',billing:BILL});
  await as(admin).update(p.id,{...form(p),code:'RID-2',version:p.version});
  const one=await as(admin).one(p.id);assert.equal(one.code,'RID-2');assert.equal(one.name,'Recarga por id');
  await assert.rejects(as(jefe).one(p.id),{status:404},'not granted to the jefe');
@@ -105,7 +107,7 @@ test('a project reloads by id even after its code changed, and only for those wh
 });
 
 test('a registered client replaces typed text; an unchanged client keeps its stored text',async()=>{
- const p=await as(admin).create({name:'Cliente elegido',customerName:'Texto escrito antes',customerId:cust});
+ const p=await as(admin).create({name:'Cliente elegido',customerName:'Texto escrito antes',customerId:cust,billing:BILL});
  assert.equal(p.customer_name_source,'Cliente Prueba','the typed text is not kept next to a registered client');
  await db.query("UPDATE ledens.projects SET customer_name_source='Nombre importado' WHERE id=$1",[p.id]);
  const q=await as(admin).one(p.id);
@@ -118,4 +120,36 @@ test('a registered client replaces typed text; an unchanged client keeps its sto
 
 // The edit form sends every field back, as the page does.
 function form(p){return {code:p.code,name:p.name,customerId:p.customer_id,customerName:p.customer_name_source,salesman:p.salesman,address:p.address,
- municipio:p.municipio,provincia:p.provincia,statusId:p.status_id,startDate:p.start_date,endDate:p.end_date};}
+ municipio:p.municipio,provincia:p.provincia,statusId:p.status_id,startDate:p.start_date,endDate:p.end_date,billing:p.billing};}
+
+test('a new project needs every invoice field, with a valid CIF/NIF/NIE and postal code',async()=>{
+ await assert.rejects(as(admin).create({name:'Sin facturación'}),{status:400,message:/Faltan datos de facturación: titular de la factura, cif\/nif, dirección fiscal/});
+ await assert.rejects(as(admin).create({name:'Sin CIF',billing:{...BILL,taxId:' '}}),{status:400,message:/cif\/nif/});
+ await assert.rejects(as(admin).create({name:'CIF malo',billing:{...BILL,taxId:'B12345675'}}),{status:400,message:/CIF\/NIF no válido/});
+ await assert.rejects(as(admin).create({name:'NIF malo',billing:{...BILL,taxId:'12345678A'}}),{status:400,message:/CIF\/NIF no válido/});
+ await assert.rejects(as(admin).create({name:'CP malo',billing:{...BILL,postalCode:'2960'}}),{status:400,message:/Código postal/});
+ await assert.rejects(as(admin).create({name:'Extranjero en España',billing:{...BILL,taxId:'DE123456789'}}),{status:400,message:/España/});
+ assert.equal((await db.query("SELECT count(*)::int n FROM ledens.projects WHERE name LIKE 'Sin facturación%' OR name LIKE '%malo'")).rows[0].n,0,'nothing half-saved');
+ const nif=await as(admin).create({name:'Particular',billing:{...BILL,holderName:'  Ana   Pérez ',taxId:'12345678-z'}});
+ assert.deepEqual(nif.billing,{holderName:'Ana Pérez',taxId:'12345678Z',address:'C/ Fiscal 2',postalCode:'29601',municipio:'Marbella',provincia:'Málaga',country:'España'});
+ const nie=await as(admin).create({name:'Residente',billing:{...BILL,taxId:'X1234567L'}});assert.equal(nie.billing.taxId,'X1234567L');
+ const foreign=await as(admin).create({name:'Extranjero',billing:{...BILL,taxId:'DE 123456789',postalCode:'10115',municipio:'Berlin',provincia:'Berlin',country:'Alemania'}});
+ assert.equal(foreign.billing.taxId,'DE123456789');assert.equal(foreign.billing.country,'Alemania');
+ const a=(await db.query("SELECT detail FROM audit_log WHERE action='Proyecto creado' ORDER BY id DESC LIMIT 1")).rows[0].detail;
+ assert.match(a,/Factura a Titular Prueba S\.L\. \(DE123456789\)/);
+});
+
+test('an existing project without invoice data still saves; once filled it can be corrected but not removed',async()=>{
+ const p=(await as(admin).list({q:'IMP-001'})).rows[0];
+ assert.equal(p.billing,null);
+ const same=await as(admin).update(p.id,{...form(p),salesman:'Otro comercial',version:p.version});
+ assert.equal(same.billing,null,'old projects are not blocked');
+ await assert.rejects(as(admin).update(p.id,{...form(same),billing:{holderName:'Solo el nombre'},version:same.version}),{status:400,message:/Faltan datos/},'half-filled is refused');
+ const filled=await as(admin).update(p.id,{...form(same),billing:BILL,version:same.version});
+ assert.equal(filled.changed,true);assert.equal(filled.billing.taxId,'B12345674');assert.notEqual(filled.version,same.version,'billing is part of the version');
+ const fixed=await as(admin).update(p.id,{...form(filled),billing:{...filled.billing,address:'C/ Nueva 3'},version:filled.version});
+ const a=(await db.query("SELECT detail FROM audit_log WHERE action='Proyecto editado' ORDER BY id DESC LIMIT 1")).rows[0].detail;
+ assert.equal(a,'Dirección fiscal: C/ Fiscal 2 → C/ Nueva 3');
+ await assert.rejects(as(admin).update(p.id,{...form(fixed),billing:null,version:fixed.version}),{status:400,message:/Faltan datos/});
+ await assert.rejects(as(admin).update(p.id,{...form(fixed),billing:{...fixed.billing,taxId:''},version:fixed.version}),{status:400});
+});
