@@ -5,6 +5,7 @@ import rateLimit from 'express-rate-limit';
 import contactRouter from './routes/contact.js';
 import authRouter from './routes/auth.js';
 import oauthRouter from './routes/oauth.js';
+import { createMobileAuthRouter } from './routes/mobileAuth.js';
 import adminRouter from './routes/admin.js';
 import { createIngestionRouter } from './routes/ingestion.js';
 import { createFinanzasRouter } from './routes/finanzas.js';
@@ -64,6 +65,11 @@ export function createApp() {
   // their more specific error text) ever got a chance to run. Requests that
   // don't match any oauthRouter route (/register, /login, /logout, /me)
   // fall through to authRouter normally.
+  // Ledens Mobile login/logout (Bearer token in the body, never a cookie).
+  // Mounted before both /api/auth routers so authRouter's path-less 503
+  // guard never answers for it; it answers 404 itself while
+  // MOBILE_AUTH_ENABLED is not exactly 'true'.
+  app.use('/api/auth/mobile', createMobileAuthRouter());
   app.use('/api/auth', oauthRouter);
   app.use('/api/auth', authRouter);
   app.use('/api/admin', adminRouter);

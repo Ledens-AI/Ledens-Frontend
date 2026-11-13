@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { getPool, isDbConfigured } from '../db/pool.js';
-import { hashPassword, verifyPassword } from '../auth/passwords.js';
+import { hashPassword } from '../auth/passwords.js';
+import { isEmail, loginLimiter, verifyCredentials } from '../auth/credentials.js';
 import {
   createSession,
   destroySession,
@@ -13,7 +14,6 @@ import { requestLink, describeLink, usePasswordLink, PasswordLinkError } from '.
 
 const router = Router();
 
-const isEmail = (v) => typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) && v.length <= 200;
 const isName = (v) => typeof v === 'string' && v.trim().length > 0 && v.trim().length <= 120;
 const isPassword = (v) => typeof v === 'string' && v.length >= 8 && v.length <= 200;
 
@@ -24,15 +24,8 @@ router.use((_req, res, next) => {
   next();
 });
 
-// Slows down password-guessing without affecting normal use — the global
-// 30/min limiter in app.js already covers everything else under /api.
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' },
-});
+// loginLimiter (10 / 15 min per IP) lives in auth/credentials.js: the same
+// instance, and so the same counter, also guards the mobile login.
 
 router.post('/register', async (req, res) => {
   const { name, email, password } = req.body || {};
@@ -77,24 +70,14 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body || {};
-  if (!isEmail(email) || typeof password !== 'string' || !password) {
-    return res.status(401).json({ error: 'Credenciales incorrectas' });
-  }
   try {
-    const { rows } = await getPool().query(
-      'SELECT id, email, name, role, password_hash, created_at FROM users WHERE lower(email) = lower($1)',
-      [email.trim()],
-    );
-    const user = rows[0];
     // Identical response whether the email doesn't exist or the password is
-    // wrong — otherwise the error message itself lets someone probe which
-    // emails are registered.
-    if (!user || !verifyPassword(password, user.password_hash)) {
-      return res.status(401).json({ error: 'Credenciales incorrectas' });
-    }
+    // wrong (auth/credentials.js) — shared with the mobile login.
+    const user = await verifyCredentials(email, password);
+    if (!user) return res.status(401).json({ error: 'Credenciales incorrectas' });
     const { token } = await createSession(user.id, { userAgent: req.get('user-agent'), ip: req.ip });
     res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
-    res.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role, created_at: user.created_at } });
+    res.json({ user });
   } catch (err) {
     console.error('[auth] login failed', err);
     res.status(500).json({ error: 'No se pudo iniciar sesión' });
