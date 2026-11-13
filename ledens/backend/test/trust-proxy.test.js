@@ -52,3 +52,18 @@ test('the 30/min limiter blocks one client without blocking the others', async (
     assert.equal((await health(base, `203.0.113.6, ${SWA}`)).status, 200, 'another client is unaffected');
   });
 });
+
+test('behind a single proxy (docker-compose nginx, TRUST_PROXY_HOPS=1) a prepended entry is ignored too', async () => {
+  const prev = process.env.TRUST_PROXY_HOPS;
+  process.env.TRUST_PROXY_HOPS = '1';
+  try {
+    await withServer(async (base) => {
+      // nginx appends the real client to whatever the client sent.
+      assert.equal(remaining(await health(base, '203.0.113.7')), 29);
+      assert.equal(remaining(await health(base, '192.0.2.1, 203.0.113.7')), 28, 'a fake entry does not open a new counter');
+      assert.equal(remaining(await health(base, '192.0.2.2, 203.0.113.7')), 27);
+    });
+  } finally {
+    if (prev === undefined) delete process.env.TRUST_PROXY_HOPS; else process.env.TRUST_PROXY_HOPS = prev;
+  }
+});
