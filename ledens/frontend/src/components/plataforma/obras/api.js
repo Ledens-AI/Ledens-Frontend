@@ -115,6 +115,12 @@ export const api = {
   simulateGantt: (projectId, tasks) => request('POST', `${base}/proyectos/${projectId}/gantt/simular`, { tasks }),
   // Suggests predecessors for the tasks that still have none (presupuestos/ganttAgente.js). Saves nothing.
   ganttAgente: (projectId) => request('POST', `${base}/proyectos/${projectId}/gantt/agente`),
+  // Calendario laboral of the Gantt (presupuestos/festivos.js): { fecha, nombre, projectId? }
+  // — without projectId it is the whole company's (admin); cargar { anio } (admin).
+  festivos: (projectId) => request('GET', `${base}/festivos${projectId ? `?proyecto=${encodeURIComponent(projectId)}` : ''}`),
+  addFestivo: (body) => request('POST', `${base}/festivos`, body),
+  removeFestivo: (id) => request('DELETE', `${base}/festivos/${id}`),
+  cargarFestivos: (anio, projectId) => request('POST', `${base}/festivos/cargar`, { anio, projectId }),
   schedule: (id, body) => request('PUT', `${base}/${id}/fechas`, body),
   declare: (id, body) => request('PUT', `${base}/${id}/produccion`, body),
 };

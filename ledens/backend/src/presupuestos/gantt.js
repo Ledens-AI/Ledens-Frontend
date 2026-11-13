@@ -2,6 +2,7 @@ import { audit } from '../db/audit.js';
 import { PresupuestoError, PresupuestosService, isUuid } from './service.js';
 import { ROL_LABEL, completos, equipos, loadMembers, loadWorkers } from './recursos.js';
 import { sobreasignaciones } from './ganttLimitaciones.js';
+import { loadFestivos } from './festivos.js';
 
 // Planificación (Gantt) of a project of Gestión financiera with at least one
 // approved presupuesto (migration 035). Tasks are the approved lines of its
@@ -42,23 +43,41 @@ const DAY = 86400000;
 const parse = (s) => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10));
 const fmt = (t) => new Date(t).toISOString().slice(0, 10);
 const wd = (t) => (new Date(t).getUTCDay() + 6) % 7; // 0 = Monday … 6 = Sunday
-const monday = (t) => t - wd(t) * DAY;
-export function toWorkday(s) {
+// `festivos`: dates ('YYYY-MM-DD') that are not working days either
+// (gantt_festivos, migration 045: the company's and the project's).
+const offSet = (festivos) => (festivos instanceof Set ? festivos : new Set(festivos || []));
+export function toWorkday(s, festivos) {
+  const off = offSet(festivos);
   let t = parse(s);
-  while (wd(t) > 4) t += DAY;
+  while (wd(t) > 4 || off.has(fmt(t))) t += DAY;
   return fmt(t);
 }
-// Calendar of working days counted from `base` (a working day, index 0).
-export function calendar(base) {
-  const b = parse(base), bm = monday(b), bw = wd(b);
+// Calendar of working days counted from `base` (index 0 = base, or the first
+// working day from it): Mon–Fri minus `festivos`. Working days are listed as
+// they are needed, forwards and backwards.
+export function calendar(base, festivos) {
+  const off = offSet(festivos);
+  const work = (t) => wd(t) < 5 && !off.has(fmt(t));
+  const b = parse(toWorkday(base, off));
+  const fwd = [b], back = [b]; // fwd[i] = day i; back[k] = day -k
+  const at = (i) => {
+    if (i >= 0) {
+      while (fwd.length <= i) { let t = fwd[fwd.length - 1] + DAY; while (!work(t)) t += DAY; fwd.push(t); }
+      return fwd[i];
+    }
+    while (back.length <= -i) { let t = back[back.length - 1] - DAY; while (!work(t)) t -= DAY; back.push(t); }
+    return back[-i];
+  };
   return {
-    date(i) {
-      const total = bw + i, weeks = Math.floor(total / 5);
-      return fmt(bm + weeks * 7 * DAY + (total - weeks * 5) * DAY);
-    },
+    date: (i) => fmt(at(i)),
     index(s) {
-      const t = parse(toWorkday(s));
-      return Math.round((monday(t) - bm) / (7 * DAY)) * 5 + wd(t) - bw;
+      const t = parse(toWorkday(s, off));
+      if (t >= b) {
+        while (fwd[fwd.length - 1] < t) at(fwd.length);
+        return fwd.indexOf(t);
+      }
+      while (back[back.length - 1] > t) at(-back.length);
+      return -back.indexOf(t);
     },
   };
 }
@@ -105,6 +124,59 @@ export function schedule(tasks, deps, names = new Map()) {
 }
 
 const tenths = (v) => Math.round(Number(v) * 10);
+
+// Backward pass (ruta crítica): what schedule() computed forwards, read from
+// the end. tasks: [{ id, duration, group? }] (group: the obra), sched: the
+// Map schedule() returned. Each task's late finish is the end of its group
+// (the last end among its tasks) or what its successors allow, whichever is
+// sooner:
+//   FS  sucesora.inicio ≥ fin + lag      → fin tardío ≤ inicio tardío(S) − lag
+//   SS  sucesora.inicio ≥ inicio + lag   → fin tardío ≤ inicio tardío(S) − lag + duración
+//   FF  sucesora.fin ≥ fin + lag         → fin tardío ≤ fin tardío(S) − lag
+//   SF  sucesora.fin ≥ inicio + lag      → fin tardío ≤ fin tardío(S) − lag + duración
+// Holgura total = inicio tardío − inicio temprano (how far it can slip without
+// moving the end of its obra); holgura libre = how far it can slip without
+// moving any successor. Crítica = holgura total 0. In working days, tenths.
+// Returns Map id → { lateStart, lateEnd, slack, freeSlack, critical }.
+export function analyze(tasks, deps, sched) {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const succs = new Map(tasks.map((t) => [t.id, []]));
+  for (const d of deps) if (byId.has(d.partida_id) && byId.has(d.predecessor_id)) succs.get(d.predecessor_id).push(d);
+  const es = (id) => tenths(sched.get(id).start), ef = (id) => tenths(sched.get(id).end);
+  const groupEnd = new Map();
+  for (const t of tasks) { const g = t.group ?? null; groupEnd.set(g, Math.max(groupEnd.get(g) ?? -Infinity, ef(t.id))); }
+  // Successors before predecessors: the forward order (by early start, then
+  // early end) reversed is not always topological with SS/FF lags, so count.
+  const pending = new Map(tasks.map((t) => [t.id, succs.get(t.id).length]));
+  const preds = new Map(tasks.map((t) => [t.id, []]));
+  for (const t of tasks) for (const d of succs.get(t.id)) preds.get(d.partida_id).push(t.id);
+  const queue = tasks.filter((t) => !pending.get(t.id)).map((t) => t.id);
+  const lf = new Map();
+  while (queue.length) {
+    const id = queue.shift(), dur = tenths(byId.get(id).duration);
+    let f = groupEnd.get(byId.get(id).group ?? null);
+    for (const d of succs.get(id)) {
+      const sf = lf.get(d.partida_id), ss = sf - tenths(byId.get(d.partida_id).duration), lag = tenths(Number(d.lag_days) || 0);
+      const c = d.type === 'SS' ? ss - lag + dur : d.type === 'FF' ? sf - lag : d.type === 'SF' ? sf - lag + dur : ss - lag;
+      if (c < f) f = c;
+    }
+    lf.set(id, f);
+    for (const p of preds.get(id)) { pending.set(p, pending.get(p) - 1); if (!pending.get(p)) queue.push(p); }
+  }
+  const out = new Map();
+  for (const t of tasks) {
+    if (!lf.has(t.id)) continue; // only on a cycle, which schedule() already refused
+    const dur = tenths(t.duration), late = lf.get(t.id), slack = Math.max(0, late - dur - es(t.id));
+    let free = groupEnd.get(t.group ?? null) - ef(t.id);
+    for (const d of succs.get(t.id)) {
+      const lag = tenths(Number(d.lag_days) || 0), s = d.partida_id;
+      const c = d.type === 'SS' ? es(s) - lag - es(t.id) : d.type === 'FF' ? ef(s) - lag - ef(t.id) : d.type === 'SF' ? ef(s) - lag - es(t.id) : es(s) - lag - ef(t.id);
+      if (c < free) free = c;
+    }
+    out.set(t.id, { lateStart: (late - dur) / 10, lateEnd: late / 10, slack: slack / 10, freeSlack: Math.min(slack, Math.max(0, free)) / 10, critical: slack === 0 });
+  }
+  return out;
+}
 // Calendar days a task occupies: [first index, last index] and where in them
 // it starts / ends (fraction of the day, 0–1). A 0-day task sits on its start.
 export function span({ start, end }) {
@@ -207,23 +279,27 @@ export class GanttService {
     const codeOf = (l) => extra.get(l.id) || (/^PA-\d+$/i.test(String(l.code || '').trim()) ? String(l.code).trim().toUpperCase() : null);
     const { col, map: rend } = await this.rendimientos(db, [...new Set(lines.map(codeOf).filter(Boolean))]);
     const today = new Date().toISOString().slice(0, 10);
-    const obraStart = new Map(obras.map((o) => [o.id, toWorkday(o.startDate || view.project.startDate?.slice(0, 10) || today)]));
+    // Calendario laboral: Mon–Fri minus the company's and this project's festivos.
+    const festivos = await loadFestivos(db, projectId);
+    const off = new Set(festivos.map((f) => f.fecha));
+    const obraStart = new Map(obras.map((o) => [o.id, toWorkday(o.startDate || view.project.startDate?.slice(0, 10) || today, off)]));
     const base = [...obraStart.values()].sort()[0];
-    const cal = calendar(base);
+    const cal = calendar(base, off);
     const names = new Map(lines.map((l) => [l.id, `${l.code ? `${l.code} ` : ''}${l.name}`]));
     const tasks = lines.map((l) => {
       const code = codeOf(l), r = code ? rend.get(code) ?? null : null;
       const computed = durationFrom(l.quantity, r, col?.perHour, crews.get(l.obra_id) || 1);
       const override = overrides.get(l.id) ?? null;
-      return { l, code, r, computed, override, id: l.id, earliest: cal.index(obraStart.get(l.obra_id)), duration: override ?? computed ?? 1 };
+      return { l, code, r, computed, override, id: l.id, group: l.obra_id, earliest: cal.index(obraStart.get(l.obra_id)), duration: override ?? computed ?? 1 };
     });
-    const hitos = obras.map((o) => ({ id: o.id, earliest: cal.index(obraStart.get(o.id)), duration: 0 }));
+    const hitos = obras.map((o) => ({ id: o.id, group: o.id, earliest: cal.index(obraStart.get(o.id)), duration: 0 }));
     for (const o of obras) names.set(o.id, obras.length > 1 ? `Inicio de obra ${o.ref}` : 'Inicio de obra');
     const sched = schedule([...hitos, ...tasks], deps, names);
+    const crit = analyze([...hitos, ...tasks], deps, sched);
     const obraOf = new Map(obras.map((o) => [o.id, o]));
     const canEdit = (obraId) => this.user.role === 'admin' || obraOf.get(obraId)?.jefe?.id === this.user.id;
     const out = tasks.map((t) => {
-      const s = sched.get(t.id), l = t.l, sp = span(s);
+      const s = sched.get(t.id), l = t.l, sp = span(s), a = crit.get(t.id), late = span({ start: a.lateStart, end: a.lateEnd });
       const q = Number(l.quantity), ex = Number(l.executed);
       return {
         id: l.id, obraId: l.obra_id, presupuesto: { id: l.presupuesto_id, ref: l.ref, title: l.title, ampliacion: !!l.parent_id },
@@ -231,6 +307,8 @@ export class GanttService {
         rendimiento: t.r, computedDuration: t.computed, durationOverride: t.override, duration: t.duration,
         warning: t.override !== null ? null : !t.code ? 'Partida sin código de la base: 1 día; indica la duración' : t.r === null ? 'Sin rendimiento en la base: 1 día; indica la duración' : null,
         start: cal.date(sp.first), end: cal.date(sp.last), startAt: sp.from, endAt: sp.to,
+        // Ruta crítica: holgura total / libre in working days; critical = 0.
+        slack: a.slack, freeSlack: a.freeSlack, critical: a.critical, lateStart: cal.date(late.first), lateEnd: cal.date(late.last),
         executionPct: q > 0 ? Math.round(Math.min(ex, q) / q * 1000) / 10 : 0,
         predecessors: deps.filter((d) => d.partida_id === l.id).map((d) => ({ id: d.predecessor_id, type: d.type, lag: d.lag_days, ...(d.porDefecto ? { porDefecto: true } : {}) })),
         cuadrillas: crews.get(l.obra_id) || 1,
@@ -243,6 +321,7 @@ export class GanttService {
       obras.map((o) => ({ id: o.id, ref: o.ref, cuadrillas: crews.get(o.id) || 1 })), (i) => cal.date(i));
     const over = new Set(limitaciones.flatMap((x) => x.tareas));
     for (const t of out) t.sobreasignada = over.has(t.id);
+    const obraEnd = (id) => out.filter((t) => t.obraId === id).map((t) => t.end).sort().pop() || obraStart.get(id);
     const ordered = orderByDependencies(out);
     // Cuadrillas: who is in each one; the workers to choose from only for who edits.
     const obraIds = obras.map((o) => o.id);
@@ -263,7 +342,8 @@ export class GanttService {
     }
     return {
       project: { id: view.project.id, code: view.project.code, name: view.project.name },
-      obras: obras.map((o) => ({ id: o.id, ref: o.ref, title: o.title, startDate: o.startDate, plannedStart: obraStart.get(o.id), cuadrillas: crews.get(o.id) || 1,
+      obras: obras.map((o) => ({ id: o.id, ref: o.ref, title: o.title, startDate: o.startDate, plannedStart: obraStart.get(o.id), plannedEnd: obraEnd(o.id),
+        criticas: out.filter((t) => t.obraId === o.id && t.critical).length, cuadrillas: crews.get(o.id) || 1,
         equipos: eqs.get(o.id), equiposCompletos: completos(eqs.get(o.id)), canEdit: canEdit(o.id) })),
       // Active workers to choose the oficial and peón of each cuadrilla from
       // (null: this user edits no obra here, or there is no worker list).
@@ -271,6 +351,8 @@ export class GanttService {
       // Milestones a task may take as predecessor (id = the obra's id).
       hitos: obras.map((o) => ({ id: o.id, obraId: o.id, ref: o.ref, name: names.get(o.id), date: obraStart.get(o.id) })),
       start: starts[0] || base, end: ends[ends.length - 1] || base,
+      // Festivos that count in this plan (proyecto: false = whole company, true = only this project).
+      festivos, canEditFestivos: obras.some((o) => canEdit(o.id)), canEditFestivosEmpresa: this.user.role === 'admin',
       rendimiento: col ? { column: col.name, unit: col.perHour ? 'h por unidad' : 'unidades por jornada' } : null,
       limitaciones,
       tasks: ordered,
