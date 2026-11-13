@@ -53,13 +53,52 @@ export function sessionCookieOptions(req) {
   };
 }
 
-// Reusable guard for any route that should require a logged-in user —
-// the budget agent's CEO screen (#8) will also use this.
+// Ledens Mobile sends the same opaque session token as an
+// `Authorization: Bearer <token>` header instead of the cookie: same sessions
+// table, same expiry, same revocation. Off unless MOBILE_AUTH_ENABLED is
+// exactly 'true' — while off, the header is ignored and everything behaves
+// as it always did (cookie only). Read per request so tests can flip it.
+export const isMobileAuthEnabled = () => process.env.MOBILE_AUTH_ENABLED === 'true';
+
+// A session token is 32 random bytes in hex (createSession above). Anything
+// else after "Bearer " is refused outright; it never falls back to the cookie.
+const BEARER = /^Bearer ([a-f0-9]{64})$/;
+
+// Which credential a request carries, decided before any database lookup:
+//  - flag off, or no Authorization header → the cookie, exactly as before;
+//  - flag on, Authorization header and no session cookie → the Bearer token,
+//    which must be well formed;
+//  - flag on, Authorization header AND a session cookie → refused: two
+//    credentials could name two different people, and no client of ours
+//    sends both (the browser never sets Authorization, the app never stores
+//    cookies). Refusing, rather than picking one, keeps the cookie from ever
+//    riding along on a request that later checks treat as Bearer.
+// Returns { transport, token } or { error } (a reason for tests, never the
+// token itself).
+export function readSessionCredential(req) {
+  const cookie = req.cookies?.[SESSION_COOKIE];
+  const header = req.get?.('authorization');
+  if (!isMobileAuthEnabled() || header === undefined) return { transport: 'cookie', token: cookie };
+  if (cookie) return { error: 'cookie_and_bearer' };
+  const match = BEARER.exec(header);
+  if (!match) return { error: 'malformed_bearer' };
+  return { transport: 'bearer', token: match[1] };
+}
+
+// Reusable guard for any route that should require a logged-in user. Every
+// router (presupuestos, obras, invitaciones, finanzas, finance, bridge, admin,
+// /api/auth/me) authenticates through it: a Bearer token is only accepted once
+// it matches a live session row here, and req.authTransport says which
+// credential it was — any later check (e.g. an origin exemption for Bearer)
+// must rely on that, never on the raw header.
 export async function requireAuth(req, res, next) {
   try {
-    const user = await getSessionUser(req.cookies?.[SESSION_COOKIE]);
+    const credential = readSessionCredential(req);
+    if (credential.error) return res.status(401).json({ error: 'No autenticado' });
+    const user = await getSessionUser(credential.token);
     if (!user) return res.status(401).json({ error: 'No autenticado' });
     req.user = user;
+    req.authTransport = credential.transport;
     next();
   } catch (err) {
     next(err);
