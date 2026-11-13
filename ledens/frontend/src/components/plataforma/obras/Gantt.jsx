@@ -235,8 +235,13 @@ function Calendario({ data, projectId, readOnly, onChanged }) {
   const [form, setForm] = useState({ fecha: '', nombre: '', ambito: 'proyecto' });
   const [anio, setAnio] = useState(y0);
   const all = data.festivos || [];
-  // The ones of the years the plan spans (the rest do not move it).
-  const shown = all.filter((f) => +f.fecha.slice(0, 4) >= y0 && +f.fecha.slice(0, 4) <= y1);
+  // By default: every festivo of this project (whatever its year — adding one
+  // can push the plan into the next year, and it must stay removable) and the
+  // company's of the years the plan spans. «Ver todos» lists the rest too.
+  const [todos, setTodos] = useState(false);
+  const inYears = (f) => +f.fecha.slice(0, 4) >= y0 && +f.fecha.slice(0, 4) <= y1;
+  const shown = todos ? all : all.filter((f) => f.proyecto || inYears(f));
+  const hidden = all.length - all.filter((f) => f.proyecto || inYears(f)).length;
   const inPlan = all.filter((f) => f.fecha >= data.start && f.fecha <= data.end).length;
   const companyYears = new Set(all.filter((f) => !f.proyecto).map((f) => +f.fecha.slice(0, 4)));
   const missingYears = Array.from({ length: y1 - y0 + 1 }, (_, i) => y0 + i).filter((y) => !companyYears.has(y));
@@ -279,6 +284,13 @@ function Calendario({ data, projectId, readOnly, onChanged }) {
               ))}
             </ul>
           ) : <p className="fin-muted fin-small">{`No hay festivos en ${y0 === y1 ? y0 : `${y0}–${y1}`}: solo se descansan sábados y domingos.`}</p>}
+          {hidden ? (
+            <div>
+              <button type="button" className="fin-btn is-ghost is-small" onClick={() => setTodos(!todos)}>
+                {todos ? `Ver solo ${y0 === y1 ? y0 : `${y0}–${y1}`}` : `Ver todos los festivos (${hidden} de otros años)`}
+              </button>
+            </div>
+          ) : null}
           {canProject || canCompany ? (
             <form className="obr-gantt-cal-form" onSubmit={add}>
               <input type="date" required value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} aria-label="Fecha del festivo" />
