@@ -43,6 +43,13 @@ export default function Gantt({ projectId, readOnly, onBack }) {
     setSaving(null);
   };
 
+  // Number of cuadrillas and their oficial + peón: all of it or nothing.
+  const saveCuadrillas = async (obra, n, equipos) => {
+    setSaving(obra.id); setSaveError('');
+    try { setData(await api.saveGanttCuadrillas(projectId, obra.id, n, equipos)); } catch (e) { setSaveError(`${obra.ref}: ${e.message}`); }
+    setSaving(null);
+  };
+
   const back = <div><button type="button" className="fin-btn is-ghost is-small" onClick={onBack}><i className="ri-arrow-left-line"></i>Volver al proyecto</button></div>;
   if (error) return <div className="fin-stack">{back}<ErrorBox message={error} onRetry={load} /></div>;
   if (!data) return <div className="fin-loading fin-muted">Calculando la planificación…</div>;
@@ -60,7 +67,9 @@ export default function Gantt({ projectId, readOnly, onBack }) {
       <p className="fin-muted fin-small obr-hint-tight">
         {data.rendimiento ? `Duración = cantidad ÷ rendimiento de la partida en la base («${data.rendimiento.column}», ${data.rendimiento.unit}), redondeada a la décima de día (dos tareas de 0,5 seguidas ocupan un día). ` : 'La base de partidas no tiene columna de rendimiento: cada tarea dura 1 día hasta que indiques su duración. '}
         Cada obra empieza en su fecha de inicio. Cambia una predecesora, su relación, el desfase o la duración y el Gantt se recalcula al momento.
+        {' '}Las tareas sin planificar tienen «Inicio de obra» como predecesora por defecto; si la quitas, la tarea se queda sin predecesora.
       </p>
+      <Cuadrillas obras={data.obras || []} trabajadores={data.trabajadores} readOnly={readOnly} saving={saving} onSave={saveCuadrillas} />
       {missing ? <p className="fin-warn"><i className="ri-error-warning-line"></i><span>{`${missing} ${missing === 1 ? 'tarea no tiene' : 'tareas no tienen'} rendimiento en la base: cuentan 1 día hasta que indiques su duración.`}</span></p> : null}
       {saveError ? <ErrorBox message={saveError} /> : null}
       {tasks.length ? <Chart data={data} /> : <Empty icon="ri-calendar-line" title="Sin tareas" text="Los presupuestos aprobados de este proyecto no tienen partidas." />}
@@ -72,6 +81,122 @@ export default function Gantt({ projectId, readOnly, onBack }) {
 
 // «Inicio de obra» (hitos: one per obra, id = the obra's id) can be chosen as a
 // predecessor like any task; it is listed first.
+// Cuadrillas per obra: the rendimiento of the base is per cuadrilla, so with
+// N cuadrillas a duration computed from it is divided by N (a typed duration
+// stays as typed). Each cuadrilla is one oficial and one peón from the list of
+// workers (Gestión financiera → Trabajadores): choosing the number opens the
+// choice of who, and nothing is saved until every cuadrilla has both.
+const CREW_OPTIONS = Array.from({ length: 10 }, (_, i) => i + 1);
+const ROLES = [['oficial', 'Oficial'], ['peon', 'Peón']];
+function Cuadrillas({ obras, trabajadores, readOnly, saving, onSave }) {
+  if (!obras.length) return null;
+  return (
+    <div className="obr-gantt-crews">
+      {obras.map((o) => <CuadrillasObra key={o.id} o={o} many={obras.length > 1} trabajadores={trabajadores} editable={!readOnly && o.canEdit} busy={saving === o.id} onSave={onSave} />)}
+    </div>
+  );
+}
+
+function CuadrillasObra({ o, many, trabajadores, editable, busy, onSave }) {
+  // draft: null (showing what is saved) or [{ oficial, peon }] being chosen.
+  const [draft, setDraft] = useState(null);
+  const saved = JSON.stringify(o.equipos);
+  useEffect(() => { setDraft(null); }, [saved]);
+  const n = draft ? draft.length : o.cuadrillas;
+  const start = (count) => setDraft(Array.from({ length: count }, (_, i) => {
+    const e = (draft || o.equipos.map((x) => ({ oficial: x.oficial?.activo ? x.oficial.id : '', peon: x.peon?.activo ? x.peon.id : '' })))[i];
+    return e ? { ...e } : { oficial: '', peon: '' };
+  }));
+  const set = (i, rol, id) => setDraft((d) => d.map((e, j) => (j === i ? { ...e, [rol]: id } : e)));
+  const chosen = draft ? draft.flatMap((e) => [e.oficial, e.peon]).filter(Boolean) : [];
+  const missing = draft ? draft.reduce((a, e) => a + (e.oficial ? 0 : 1) + (e.peon ? 0 : 1), 0) : 0;
+  const repeated = new Set(chosen).size !== chosen.length;
+  const save = () => onSave(o, draft.length, draft);
+  const noList = editable && !trabajadores;
+
+  return (
+    <div className={`obr-gantt-crew-box${!o.equiposCompletos ? ' is-incomplete' : ''}`}>
+      <div className="obr-gantt-crew">
+        <span>{`Cuadrillas en la obra${many ? ` ${o.ref}` : ''}`}</span>
+        {editable && !noList ? (
+          <select value={n} disabled={busy} onChange={(e) => start(Number(e.target.value))} aria-label="Número de cuadrillas">
+            {[...new Set([...CREW_OPTIONS, n])].sort((a, b) => a - b).map((k) => <option key={k} value={k}>{k}</option>)}
+          </select>
+        ) : <strong>{o.cuadrillas}</strong>}
+        <span className="fin-muted fin-small">{n > 1 ? `las duraciones por rendimiento se dividen entre ${n}` : 'una cuadrilla trabajando'}</span>
+      </div>
+
+      {draft ? (
+        <>
+          <p className="fin-muted fin-small">Cada cuadrilla es un oficial y un peón de la lista de trabajadores. Elige los dos de cada una para guardar.</p>
+          <ul className="obr-gantt-crew-list">
+            {draft.map((e, i) => (
+              <li key={i}>
+                <strong>{`Cuadrilla ${i + 1}`}</strong>
+                {ROLES.map(([rol, label]) => (
+                  <label key={rol} className="obr-gantt-crew-pick">
+                    <span>{label}</span>
+                    <WorkerSelect rol={rol} value={e[rol]} trabajadores={trabajadores} taken={chosen.filter((id) => id !== e[rol])} onChange={(id) => set(i, rol, id)} label={`${label} de la cuadrilla ${i + 1}`} />
+                  </label>
+                ))}
+              </li>
+            ))}
+          </ul>
+          <div className="obr-actions obr-start">
+            <button type="button" className="fin-btn is-primary is-small" disabled={busy || missing > 0 || repeated} onClick={save}><i className="ri-save-line"></i>{busy ? 'Guardando…' : 'Guardar cuadrillas'}</button>
+            <button type="button" className="fin-btn is-ghost is-small" disabled={busy} onClick={() => setDraft(null)}>Cancelar</button>
+            {missing ? <span className="fin-warn-text fin-small">{`Falta${missing === 1 ? '' : 'n'} ${missing} ${missing === 1 ? 'trabajador' : 'trabajadores'} por elegir`}</span>
+              : repeated ? <span className="fin-warn-text fin-small">Un trabajador solo puede estar en una cuadrilla</span> : null}
+          </div>
+        </>
+      ) : (
+        <>
+          <ul className="obr-gantt-crew-list is-read">
+            {o.equipos.map((e) => (
+              <li key={e.cuadrilla}>
+                <strong>{`Cuadrilla ${e.cuadrilla}`}</strong>
+                {ROLES.map(([rol, label]) => (
+                  <span key={rol} className="obr-gantt-crew-pick">
+                    <span className="fin-muted">{label}</span>
+                    {e[rol] ? <span>{e[rol].name}{e[rol].activo ? '' : <em className="fin-muted"> (de baja)</em>}</span> : <em className="fin-warn-text">sin elegir</em>}
+                  </span>
+                ))}
+              </li>
+            ))}
+          </ul>
+          {!o.equiposCompletos ? (
+            <div className="obr-actions obr-start">
+              <span className="fin-warn-text fin-small"><i className="ri-error-warning-line"></i> Falta elegir el oficial y el peón de cada cuadrilla.</span>
+              {editable && !noList ? <button type="button" className="fin-btn is-small" onClick={() => start(o.cuadrillas)}><i className="ri-team-line"></i>Elegir trabajadores</button> : null}
+            </div>
+          ) : editable && !noList ? (
+            <div><button type="button" className="fin-btn is-ghost is-small" onClick={() => start(o.cuadrillas)}><i className="ri-team-line"></i>Cambiar trabajadores</button></div>
+          ) : null}
+          {noList ? <p className="fin-muted fin-small">No se pudo cargar la lista de trabajadores: no se pueden cambiar las cuadrillas.</p> : null}
+        </>
+      )}
+    </div>
+  );
+}
+
+// Workers whose puesto fits the role first, then everyone else; a worker
+// already chosen in another place of this obra cannot be picked twice.
+function WorkerSelect({ rol, value, trabajadores, taken, onChange, label }) {
+  const fit = trabajadores.filter((w) => w.rol === rol), rest = trabajadores.filter((w) => w.rol !== rol);
+  const opt = (w) => (
+    <option key={w.id} value={w.id} disabled={taken.includes(w.id)}>
+      {`${w.name}${w.puesto ? ` · ${w.puesto}` : ''}${w.otrasObras?.length ? ` · también en ${w.otrasObras.join(', ')}` : ''}`}
+    </option>
+  );
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label} required className={value ? '' : 'is-empty'}>
+      <option value="">{`Elige ${rol === 'oficial' ? 'el oficial' : 'el peón'}…`}</option>
+      {fit.length ? <optgroup label={rol === 'oficial' ? 'Oficiales' : 'Peones'}>{fit.map(opt)}</optgroup> : null}
+      {rest.length ? <optgroup label="Otros trabajadores">{rest.map(opt)}</optgroup> : null}
+    </select>
+  );
+}
+
 function Tabla({ tasks, hitos, readOnly, saving, onSave }) {
   const index = useMemo(() => new Map(tasks.map((t, i) => [t.id, i + 1])), [tasks]);
   const label = (t) => (t.hito ? `◆ ${t.name}` : `${index.get(t.id)}. ${t.code ? `${t.code} · ` : ''}${t.name}`);
@@ -202,7 +327,7 @@ function Fila({ t, n, tasks, label, editable, busy, onSave }) {
             <div key={i} className="obr-gantt-pred">
               {editable ? (
                 <>
-                  <select value={p.id} onChange={(e) => change(i, { id: e.target.value }, !!e.target.value)} aria-label="Actividad predecesora">
+                  <select value={p.id} onChange={(e) => change(i, { id: e.target.value, porDefecto: undefined }, !!e.target.value)} aria-label="Actividad predecesora" title={p.porDefecto ? 'Predecesora por defecto' : undefined}>
                     <option value="">Elige la predecesora…</option>
                     {options(p.id).map((x) => <option key={x.id} value={x.id}>{label(x)}</option>)}
                   </select>
@@ -212,9 +337,10 @@ function Fila({ t, n, tasks, label, editable, busy, onSave }) {
                   <input type="number" step="1" className="obr-gantt-num" value={p.lag} onChange={(e) => change(i, { lag: e.target.value })} onBlur={commitLag}
                     onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} aria-label="Desfase en días laborables" title="Desfase en días laborables (negativo = solape)" />
                   <button type="button" className="fin-btn is-ghost is-small" onClick={() => { const next = preds.filter((_, k) => k !== i); setPreds(next); if (p.id) onSave(t, { predecessors: next }); }} aria-label="Quitar predecesora"><i className="ri-close-line"></i></button>
+                  {p.porDefecto ? <span className="fin-muted fin-small obr-gantt-pred-default">por defecto</span> : null}
                 </>
               ) : (
-                <span className="fin-small">{`${label(tasks.find((x) => x.id === p.id) || { id: p.id, name: '?' })} · ${REL.find((r) => r[0] === p.type)?.[1]}${p.lag ? ` · ${p.lag > 0 ? '+' : ''}${p.lag} d` : ''}`}</span>
+                <span className="fin-small">{`${label(tasks.find((x) => x.id === p.id) || { id: p.id, name: '?' })} · ${REL.find((r) => r[0] === p.type)?.[1]}${p.lag ? ` · ${p.lag > 0 ? '+' : ''}${p.lag} d` : ''}${p.porDefecto ? ' (por defecto)' : ''}`}</span>
               )}
             </div>
           ))}
@@ -260,6 +386,7 @@ function Chart({ data }) {
   const arrows = [];
   for (const t of tasks) {
     for (const p of t.predecessors) {
+      if (p.porDefecto) continue; // «Inicio de obra» by default: one arrow per task would only clutter the chart
       const pt = tasks[row.get(p.id)];
       if (!pt) continue;
       const fromEnd = !pt.hito && (p.type === 'FS' || p.type === 'FF'), toEnd = p.type === 'FF' || p.type === 'SF';

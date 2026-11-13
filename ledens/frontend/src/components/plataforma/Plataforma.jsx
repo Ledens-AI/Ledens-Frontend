@@ -37,7 +37,7 @@ const TOOLS_SCREEN = { w_tools: 'mis', w_tool_req: 'solicitudes', a_tools: 'pane
 const TOOLS_HOME = { worker: 'w_tools', admin: 'a_tools' };
 // A scanned label lands on /plataforma?herramienta=<token> (App.jsx /h/:token): opaque, grants nothing.
 const scannedToken = () => { try { const t = new URLSearchParams(window.location.search).get('herramienta'); return t && /^[A-Za-z0-9_-]{8,40}$/.test(t) ? t : null; } catch { return null; } };
-const OBRAS_SCREEN = { c_home: 'home', c_presupuestos: 'presupuestos', c_obras: 'obras', w_home: 'home', w_obras: 'presupuestos', w_avance: 'avance', a_presu: 'presupuestos', a_avance: 'avance', a_propuestas: 'propuestas', a_partidas: 'partidas' };
+const OBRAS_SCREEN = { c_home: 'home', c_presupuestos: 'presupuestos', c_obras: 'obras', w_home: 'home', w_obras: 'presupuestos', w_avance: 'avance', w_recursos: 'recursos', a_presu: 'presupuestos', a_avance: 'avance', a_propuestas: 'propuestas', a_partidas: 'partidas', a_recursos: 'recursos' };
 
 class PlataformaView extends React.Component {
   toolToken=scannedToken();
@@ -82,9 +82,9 @@ class PlataformaView extends React.Component {
     const pc=s.presu||{},obrasScreen=OBRAS_SCREEN[s.screen]||null,toolsScreen=TOOLS_SCREEN[s.screen]||null;
     const ta=k=>(s.toolAlerts||[]).filter(a=>a.kind===k).reduce((n,a)=>n+a.count,0);
     const nav=role==='client'?[mk(L.nav.home,'ri-home-5-line','c_home'),mk(L.nav.presupuestos,'ri-file-list-3-line','c_presupuestos',pc.pendiente||0),mk(L.nav.obras,'ri-building-2-line','c_obras'),mk(L.nav.perfil,'ri-user-3-line','c_perfil')]
-      :role==='worker'?[mk('Hoy','ri-sun-line','w_home'),{header:'Operaciones'},mk('Obras asignadas','ri-building-2-line','w_obras',pc.cambios||0),mk('Actualizar avance','ri-bar-chart-horizontal-line','w_avance'),mk('Herramientas','ri-hammer-line','w_tools',ta('recepcion')),mk('Mis solicitudes','ri-inbox-archive-line','w_tool_req')]
+      :role==='worker'?[mk('Hoy','ri-sun-line','w_home'),{header:'Operaciones'},mk('Obras asignadas','ri-building-2-line','w_obras',pc.cambios||0),mk('Actualizar avance','ri-bar-chart-horizontal-line','w_avance'),mk('Recursos','ri-team-line','w_recursos'),mk('Herramientas','ri-hammer-line','w_tools',ta('recepcion')),mk('Mis solicitudes','ri-inbox-archive-line','w_tool_req')]
       :[mk('Panel','ri-dashboard-3-line','a_home'),mk('Usuarios','ri-group-line','a_users',rowsAll.filter(u=>u.issues.length).length,['a_users','a_user']),mk('Auditoría','ri-history-line','a_audit'),
-        {header:'Operaciones'},mk('Presupuestos y obras','ri-file-list-3-line','a_presu',pc.cambios||0),mk('Actualizar avance','ri-bar-chart-horizontal-line','a_avance'),mk('Partidas propuestas','ri-add-box-line','a_propuestas',s.propuestas||0),mk('Partidas','ri-stack-line','a_partidas'),
+        {header:'Operaciones'},mk('Presupuestos y obras','ri-file-list-3-line','a_presu',pc.cambios||0),mk('Actualizar avance','ri-bar-chart-horizontal-line','a_avance'),mk('Partidas propuestas','ri-add-box-line','a_propuestas',s.propuestas||0),mk('Partidas','ri-stack-line','a_partidas'),mk('Recursos','ri-team-line','a_recursos'),
         {header:'Herramientas'},mk('Panel de herramientas','ri-hammer-line','a_tools'),mk('Inventario','ri-archive-stack-line','a_tools_inv'),mk('Solicitudes','ri-inbox-archive-line','a_tool_req',ta('aprobar')),mk('Operaciones','ri-truck-line','a_tools_ops',ta('recepcion'))];
     const finScreen=PREFIX[role]+'fin',isFin=s.screen===finScreen;
     // Admin-only finance tabs follow the panel on screen: an admin in the jefe
@@ -93,7 +93,7 @@ class PlataformaView extends React.Component {
       return {label,icon,badge:k==='pendientes'?s.finPending:k==='cliente'?s.finClientPending:k==='pendiente-trabajador'?eurBadge(s.finWorkerPending):k==='conciliacion'?s.finConciliationPending:k==='concepto'?s.finConceptPending:0,go:()=>this.go(finScreen,{finTab:k}),bg:on?'#F2F4FA':'transparent',fg:on?'#3E4D85':'#3A3A38',fw:on?700:500};}));
     const U=this.props.user,shown=s.viewAs||U,meName=shown.name||shown.email;
     const me={name:meName,initials:initials(meName),role:shown.role&&shown.role!=='client'?ROLE_LABEL[shown.role]:L.clientRole,avBg:role==='client'?'#EC6090':role==='worker'?'#68C0B5':'#0C062B'};
-    const titles={c_home:[L.nav.home],c_obras:[L.nav.obras],c_presupuestos:[L.nav.presupuestos],c_perfil:[L.nav.perfil],w_home:['Hoy'],w_obras:['Obras asignadas'],a_home:['Panel de administración'],a_users:['Usuarios'],a_user:['Usuarios',user.name],a_audit:['Auditoría'],a_presu:['Presupuestos y obras'],w_avance:['Actualizar avance'],a_avance:['Actualizar avance'],a_propuestas:['Partidas propuestas'],a_partidas:['Partidas'],w_tools:['Herramientas'],w_tool_req:['Mis solicitudes'],a_tools:['Herramientas','Panel'],a_tools_inv:['Herramientas','Inventario'],a_tool_req:['Herramientas','Solicitudes'],a_tools_ops:['Herramientas','Operaciones']};
+    const titles={c_home:[L.nav.home],c_obras:[L.nav.obras],c_presupuestos:[L.nav.presupuestos],c_perfil:[L.nav.perfil],w_home:['Hoy'],w_obras:['Obras asignadas'],a_home:['Panel de administración'],a_users:['Usuarios'],a_user:['Usuarios',user.name],a_audit:['Auditoría'],a_presu:['Presupuestos y obras'],w_avance:['Actualizar avance'],a_avance:['Actualizar avance'],a_propuestas:['Partidas propuestas'],a_partidas:['Partidas'],w_recursos:['Recursos'],a_recursos:['Recursos'],w_tools:['Herramientas'],w_tool_req:['Mis solicitudes'],a_tools:['Herramientas','Panel'],a_tools_inv:['Herramientas','Inventario'],a_tool_req:['Herramientas','Solicitudes'],a_tools_ops:['Herramientas','Operaciones']};
     titles[finScreen]=['Gestión financiera',(FIN_TABS.find(t=>t[0]===s.finTab)||FIN_TABS[0])[1]];
     const parent={a_user:'a_users'};
     const tt=titles[s.screen];const crumbs=tt.map((l,i)=>({label:l,sep:i>0,fg:i===tt.length-1?'#1D1D1B':'#6B6B68',fw:i===tt.length-1?700:500,go:()=>i<tt.length-1&&(isFin?this.go(finScreen,{finTab:'resumen'}):this.go(parent[s.screen]))}));

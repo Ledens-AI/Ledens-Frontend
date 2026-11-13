@@ -10,6 +10,7 @@ import { translateDoc } from '../presupuestos/traducciones.js';
 import { PropuestasService } from '../presupuestos/propuestas.js';
 import { PartidasService } from '../presupuestos/partidas.js';
 import { GanttService } from '../presupuestos/gantt.js';
+import { RecursosService } from '../presupuestos/recursos.js';
 import { ganttAgenteDraft } from '../presupuestos/ganttAgente.js';
 import { agenteDraft, agenteFromEnv } from '../presupuestos/agente.js';
 import { agenteChat } from '../presupuestos/agenteChat.js';
@@ -89,6 +90,9 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   // Planificación (Gantt) of a project with an approved presupuesto.
   const gantt = (req) => new GanttService(pool || getPool(), req.user);
   router.get('/proyectos/:projectId/gantt', handle((req) => gantt(req).get(req.params.projectId)));
+  // Gestión de recursos: every worker, the obras whose cuadrillas they are in and overlaps (team).
+  router.get('/recursos', handle((req) => new RecursosService(pool || getPool(), req.user, (u) => new GanttService(pool || getPool(), u)).list()));
+  router.put('/proyectos/:projectId/gantt/obras/:obraId', handle((req) => gantt(req).setCuadrillas(req.params.projectId, req.params.obraId, req.body || {})));
   router.put('/proyectos/:projectId/gantt/:partidaId', handle((req) => gantt(req).update(req.params.projectId, req.params.partidaId, req.body || {})));
   // Several tasks at once — «guardar en bloque» after reviewing the planning
   // agent's suggestions (or any other multi-row edit): one transaction, the

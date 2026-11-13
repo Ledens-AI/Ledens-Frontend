@@ -11,7 +11,7 @@ import { canTransition, REQUEST_TRANSITIONS } from '../src/herramientas/requests
 import { createHerramientasRouter } from '../src/routes/herramientas.js';
 import { folderStorage } from '../src/obras/storage.js';
 
-// Ledens Tools (migration 043). On PGlite by default, with synthetic rows; with
+// Ledens Tools (migration 044). On PGlite by default, with synthetic rows; with
 // TOOLS_TEST_DATABASE_URL (a dedicated, disposable PostgreSQL 16 database, as in
 // CI) the same suite also runs the concurrency tests on real connections.
 const REAL = process.env.TOOLS_TEST_DATABASE_URL;
@@ -57,7 +57,7 @@ before(async () => {
       start_date date, municipio text, customer_id uuid, status_id uuid, end_date date);
     CREATE TABLE ledens.finance_project_permissions (user_id uuid NOT NULL, project_id uuid, can_write boolean NOT NULL DEFAULT false);
     CREATE TABLE ledens.employees (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text, activo boolean, user_id uuid);`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '043_herramientas.sql']) await db.exec(await migration(m));
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '044_herramientas.sql']) await db.exec(await migration(m));
   [admin, jefe, otroJefe, cliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES
     ('admin@t.test','Admin','admin'),('jefe@t.test','Jefe Casa','jefe'),('jefe2@t.test','Jefe Ortega','jefe'),('cliente@t.test','Cliente','client')
     RETURNING id,email,name,role`)).rows;
