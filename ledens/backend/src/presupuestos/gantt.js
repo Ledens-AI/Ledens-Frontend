@@ -1,5 +1,6 @@
 import { audit } from '../db/audit.js';
 import { PresupuestoError, PresupuestosService, isUuid } from './service.js';
+import { ROL_LABEL, completos, equipos, loadMembers, loadWorkers } from './recursos.js';
 
 // Planificación (Gantt) of a project of Gestión financiera with at least one
 // approved presupuesto (migration 035). Tasks are the approved lines of its
@@ -24,7 +25,10 @@ import { PresupuestoError, PresupuestosService, isUuid } from './service.js';
 // predecessor (FS 0, `porDefecto`) of every task with none stored, unless the
 // team removed it on purpose (gantt_tareas.sin_predecesoras, migration 042).
 // Cuadrillas (042, per obra, default 1): the rendimiento is per cuadrilla, so
-// a duration computed from it is divided by the obra's cuadrillas.
+// a duration computed from it is divided by the obra's cuadrillas. Each
+// cuadrilla is one oficial and one peón of the company's workers (043,
+// gantt_cuadrilla_miembros): choosing the number requires choosing them, and
+// the «Recursos» screen shows where every worker is (recursos.js).
 // Who: the team that may see the project reads it; the assigned jefe of the
 // obra (or an admin) changes its tasks.
 const fail = (status, message) => { throw new PresupuestoError(status, message); };
@@ -208,9 +212,30 @@ export class GanttService {
       };
     });
     const starts = out.map((t) => t.start).sort(), ends = out.map((t) => t.end).sort();
+    // Cuadrillas: who is in each one; the workers to choose from only for who edits.
+    const obraIds = obras.map((o) => o.id);
+    const members = await loadMembers(db, obraIds);
+    const workers = await loadWorkers(db, [...members.values()].flat().map((m) => m.employee_id));
+    const eqs = new Map(obras.map((o) => [o.id, equipos(crews.get(o.id) || 1, members.get(o.id), workers || new Map())]));
+    let trabajadores = null;
+    if (workers && obras.some((o) => canEdit(o.id))) {
+      // Where else each worker is (other obras), so the jefe sees who is busy.
+      const elsewhere = new Map();
+      for (const r of (await db.query(`SELECT DISTINCT m.employee_id, p.ref FROM gantt_cuadrilla_miembros m JOIN presupuestos p ON p.id = m.obra_id
+                                       LEFT JOIN gantt_obras g ON g.obra_id = m.obra_id
+                                       WHERE NOT (m.obra_id = ANY($1::uuid[])) AND m.cuadrilla <= coalesce(g.cuadrillas, 1) ORDER BY p.ref`, [obraIds])).rows) {
+        if (!elsewhere.has(r.employee_id)) elsewhere.set(r.employee_id, []);
+        elsewhere.get(r.employee_id).push(r.ref);
+      }
+      trabajadores = [...workers.values()].filter((w) => w.activo).map((w) => ({ ...w, otrasObras: elsewhere.get(w.id) || [] }));
+    }
     return {
       project: { id: view.project.id, code: view.project.code, name: view.project.name },
-      obras: obras.map((o) => ({ id: o.id, ref: o.ref, title: o.title, startDate: o.startDate, plannedStart: obraStart.get(o.id), cuadrillas: crews.get(o.id) || 1, canEdit: canEdit(o.id) })),
+      obras: obras.map((o) => ({ id: o.id, ref: o.ref, title: o.title, startDate: o.startDate, plannedStart: obraStart.get(o.id), cuadrillas: crews.get(o.id) || 1,
+        equipos: eqs.get(o.id), equiposCompletos: completos(eqs.get(o.id)), canEdit: canEdit(o.id) })),
+      // Active workers to choose the oficial and peón of each cuadrilla from
+      // (null: this user edits no obra here, or there is no worker list).
+      trabajadores,
       // Milestones a task may take as predecessor (id = the obra's id).
       hitos: obras.map((o) => ({ id: o.id, obraId: o.id, ref: o.ref, name: names.get(o.id), date: obraStart.get(o.id) })),
       start: starts[0] || base, end: ends[ends.length - 1] || base,
@@ -251,19 +276,48 @@ export class GanttService {
     return { partidaId, duration, keepDuration, preds };
   }
 
-  // Cuadrillas of one obra of the project (1–20): durations computed from the
-  // rendimiento are divided by them. Assigned jefe or admin; audited.
+  // Cuadrillas of one obra of the project (1–20) and who is in each one:
+  // { cuadrillas, equipos: [{ oficial, peon }] } — one oficial and one peón
+  // (ids of active ledens.employees) per cuadrilla, never the same person
+  // twice in the obra. Durations computed from the rendimiento are divided by
+  // the cuadrillas. Assigned jefe or admin; one transaction; audited.
   async setCuadrillas(projectId, obraId, body = {}) {
     const n = Number(body.cuadrillas);
     if (!Number.isInteger(n) || n < 1 || n > 20) fail(400, 'Las cuadrillas son un número entero de 1 a 20');
+    const list = body.equipos;
+    if (!Array.isArray(list) || list.length !== n) fail(400, `Elige el oficial y el peón de ${n === 1 ? 'la cuadrilla' : `las ${n} cuadrillas`}`);
+    const chosen = list.map((e, i) => {
+      for (const rol of ['oficial', 'peon']) if (!isUuid(e?.[rol])) fail(400, `Cuadrilla ${i + 1}: elige el ${ROL_LABEL[rol].toLowerCase()}`);
+      return { oficial: e.oficial, peon: e.peon };
+    });
+    const ids = chosen.flatMap((e) => [e.oficial, e.peon]);
+    if (new Set(ids).size !== ids.length) fail(400, 'Un trabajador solo puede estar en una cuadrilla de la obra, como oficial o como peón');
     const { obras } = await this.load(projectId);
     const obra = obras.find((o) => o.id === obraId);
     if (!obra) fail(404, 'Esa obra no está en este proyecto');
     if (this.user.role !== 'admin' && obra.jefe?.id !== this.user.id) fail(403, 'Solo el jefe de esta obra o un administrador cambia su planificación');
-    await this.pool.query(`INSERT INTO gantt_obras (obra_id, cuadrillas, updated_by) VALUES ($1,$2,$3)
-                           ON CONFLICT (obra_id) DO UPDATE SET cuadrillas=EXCLUDED.cuadrillas, updated_by=EXCLUDED.updated_by, updated_at=now()`, [obraId, n, this.user.id]);
-    await audit({ actor: { id: this.user.id, name: this.user.name || this.user.email }, action: 'Planificación modificada', target: { id: null, label: obra.ref },
-      detail: `${obra.ref}: ${n} ${n === 1 ? 'cuadrilla' : 'cuadrillas'}` }, this.pool);
+    const workers = await loadWorkers(this.pool);
+    if (!workers) fail(503, 'La lista de trabajadores no está disponible');
+    for (const id of ids) if (!workers.get(id)?.activo) fail(400, 'Ese trabajador no está en la lista de trabajadores activos');
+    const c = await this.pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query(`INSERT INTO gantt_obras (obra_id, cuadrillas, updated_by) VALUES ($1,$2,$3)
+                     ON CONFLICT (obra_id) DO UPDATE SET cuadrillas=EXCLUDED.cuadrillas, updated_by=EXCLUDED.updated_by, updated_at=now()`, [obraId, n, this.user.id]);
+      await c.query('DELETE FROM gantt_cuadrilla_miembros WHERE obra_id=$1', [obraId]);
+      for (const [i, e] of chosen.entries()) {
+        for (const rol of ['oficial', 'peon']) {
+          await c.query('INSERT INTO gantt_cuadrilla_miembros (obra_id, cuadrilla, rol, employee_id, updated_by) VALUES ($1,$2,$3,$4,$5)', [obraId, i + 1, rol, e[rol], this.user.id]);
+        }
+      }
+      const who = chosen.map((e, i) => `${i + 1}: oficial ${workers.get(e.oficial).name}, peón ${workers.get(e.peon).name}`).join('; ');
+      await audit({ actor: { id: this.user.id, name: this.user.name || this.user.email }, action: 'Planificación modificada', target: { id: null, label: obra.ref },
+        detail: `${obra.ref}: ${n} ${n === 1 ? 'cuadrilla' : 'cuadrillas'} — ${who}` }, c);
+      await c.query('COMMIT');
+    } catch (e) {
+      await c.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally { c.release(); }
     return this.get(projectId);
   }
 
