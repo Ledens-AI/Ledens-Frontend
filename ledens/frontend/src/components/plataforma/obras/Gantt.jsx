@@ -4,7 +4,8 @@ import { fecha } from '../finanzas/format.js';
 import { ErrorBox, Empty } from '../finanzas/ui.jsx';
 
 /* Planificación (Gantt) of a project with an approved presupuesto (backend:
- * presupuestos/gantt.js). One task per approved line of its obras: its
+ * presupuestos/gantt.js). Tasks come ordered by dependencies: each one right
+ * below the task it depends on (`nivel` = how deep, indented here). One task per approved line of its obras: its
  * duration comes from the rendimiento of the partida in the base (or the one
  * set here), its start from the predecessors table below. Every change in the
  * table is saved and the server answers with the whole plan recalculated, so
@@ -415,7 +416,7 @@ function Fila({ t, n, tasks, label, editable, busy, changed, onSave }) {
   return (
     <tr className={[busy ? 'is-staged' : '', changed ? 'is-draft' : '', t.sobreasignada ? 'is-sobre' : ''].filter(Boolean).join(' ')}>
       <td className="fin-muted">{n}</td>
-      <td><strong>{`${t.code ? `${t.code} · ` : ''}${t.name}`}</strong><div className="fin-muted fin-small">{[t.presupuesto.ref, t.presupuesto.ampliacion ? 'ampliación' : null, t.chapter].filter(Boolean).join(' · ')}</div></td>
+      <td style={t.nivel ? { paddingLeft: 12 + Math.min(t.nivel, 6) * 14 } : undefined}>{t.nivel ? <span className="fin-muted">↳ </span> : null}<strong>{`${t.code ? `${t.code} · ` : ''}${t.name}`}</strong><div className="fin-muted fin-small">{[t.presupuesto.ref, t.presupuesto.ampliacion ? 'ampliación' : null, t.chapter].filter(Boolean).join(' · ')}</div></td>
       <td className="fin-num fin-nowrap">{`${num(Number(t.quantity))} ${t.unit}`}</td>
       <td className="fin-num fin-nowrap">{t.rendimiento !== null ? `${num(t.rendimiento)} ${t.unit}/jornada` : <span className="fin-muted">—</span>}</td>
       <td className="fin-nowrap">
@@ -516,7 +517,7 @@ function Chart({ data }) {
         {tasks.map((t, i) => (
           <div key={t.id} className="obr-gantt-label" style={{ height: RH }} title={`${t.code || ''} ${t.name}`}>
             {t.hito ? <><span className="fin-muted">◆</span> <strong>{t.name}</strong></>
-              : <>{t.sobreasignada ? <i className="ri-error-warning-fill obr-gantt-sobre-icon" aria-label="Sobreasignada"></i> : null}<span className="fin-muted">{i + 1 - hitos.length}</span> {t.code ? <strong>{t.code}</strong> : null} {t.name}</>}
+              : <span style={{ paddingLeft: Math.min(t.nivel || 0, 6) * 12 }}>{t.sobreasignada ? <i className="ri-error-warning-fill obr-gantt-sobre-icon" aria-label="Sobreasignada"></i> : null}{t.nivel ? <span className="fin-muted">↳ </span> : null}<span className="fin-muted">{i + 1 - hitos.length}</span> {t.code ? <strong>{t.code}</strong> : null} {t.name}</span>}
           </div>
         ))}
       </div>

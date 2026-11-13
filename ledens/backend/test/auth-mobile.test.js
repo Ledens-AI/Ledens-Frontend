@@ -294,14 +294,25 @@ test('no browser may use the mobile endpoints: any Origin header is 403 before c
   }));
 });
 
-test('the existing origin (CSRF) guards still apply to a mobile token', { skip }, async () => {
-  const u = await makeUser('admin');
+test('a mobile token may write without Origin, never with a foreign one, and keeps its role limits', { skip }, async () => {
+  const admin = await makeUser('admin');
+  const client = await makeUser('client');
   await flagOn(() => withServer(async (call) => {
-    const { token } = await (await login(call, u)).json();
-    for (const [method, path] of [['POST', '/api/presupuestos'], ['PUT', '/api/finanzas/pagos-trabajadores/periodo'], ['POST', '/api/invitaciones/aceptacion/consultar']]) {
-      const res = await call(path, { method, auth: `Bearer ${token}`, body: {} });
-      assert.equal(res.status, 403, `${method} ${path} without Origin`);
+    const { token } = await (await login(call, admin)).json();
+    const { token: clientToken } = await (await login(call, client)).json();
+    const guardError = async (res) => res.status === 403 && /^(Origen no permitido|invalid_origin)$/.test((await res.clone().json()).error || '');
+    for (const [method, path] of [['POST', '/api/presupuestos'], ['PUT', '/api/finanzas/pagos-trabajadores/periodo']]) {
+      const native = await call(path, { method, auth: `Bearer ${token}`, body: {} });
+      assert.ok(!(await guardError(native)), `${method} ${path} without Origin passes the guard (${native.status})`);
+      const foreign = await call(path, { method, auth: `Bearer ${token}`, origin: 'https://evil.example', body: {} });
+      assert.ok(await guardError(foreign), `${method} ${path} with a foreign Origin is refused`);
     }
+    // Passing the guard grants nothing else: a client is still refused by role.
+    const res = await call('/api/finanzas/pagos-trabajadores/periodo', { method: 'PUT', auth: `Bearer ${clientToken}`, body: {} });
+    assert.equal(res.status, 403);
+    assert.equal((await res.json()).error, 'No tienes permiso para esto');
+    // Public invitation routes stay strict even with a valid token.
+    assert.ok(await guardError(await call('/api/invitaciones/aceptacion/consultar', { method: 'POST', auth: `Bearer ${token}`, body: {} })));
   }));
 });
 
@@ -365,4 +376,46 @@ test('tokens, passwords and emails never reach the logs', { skip }, async () => 
     assert.ok(!lines.some((l) => l.includes(secret)), `"${secret.slice(0, 6)}…" was written to the logs`);
   }
   assert.ok(lines.some((l) => l.includes('[auth] mobile login') && l.includes(u.id)), 'the login is logged by user id');
+});
+
+test('diagnóstico: answers with the flag off and on, and exposes only booleans and counts', { skip }, async () => {
+  for (const flag of [undefined, 'true']) {
+    await withEnv({ [FLAG]: flag }, () => withServer(async (call, ip) => {
+      const secret = 'a'.repeat(64);
+      const res = await call('/api/auth/mobile/diagnostico', {
+        auth: `Bearer ${secret}`, cookie: `${SESSION_COOKIE}=${secret}`, origin: 'https://evil.example',
+        headers: { 'X-Forwarded-Proto': 'https' },
+      });
+      assert.equal(res.status, 200, `flag=${flag}`);
+      assert.match(res.headers.get('cache-control') || '', /no-store/);
+      assert.equal(res.headers.get('set-cookie'), null);
+      const raw = await res.text();
+      for (const leak of [secret, ip, 'evil.example', '127.0.0.1']) assert.ok(!raw.includes(leak), `diagnóstico leaked ${leak}`);
+      const body = JSON.parse(raw);
+      assert.deepEqual(Object.keys(body).sort(), ['authorizationHeader', 'cookieHeader', 'forwardedFor', 'https', 'ipIsInternal', 'mobileAuthEnabled', 'originHeader', 'replica']);
+      assert.equal(body.mobileAuthEnabled, flag === 'true');
+      assert.equal(body.https, true);
+      assert.equal(body.authorizationHeader, true);
+      assert.equal(body.originHeader, true);
+      assert.equal(body.cookieHeader, true);
+      // With a single X-Forwarded-For entry, req.ip is that entry.
+      assert.deepEqual(body.forwardedFor, { entries: 1, ipIsFirstEntry: true, ipIsLastEntry: true });
+      assert.equal(body.ipIsInternal, false, '198.51.100.x is a public (documentation) address');
+      assert.match(body.replica, /^[a-f0-9]{8}$/);
+    }));
+  }
+  // Nothing sent: everything false, and a spoofed extra entry is visible as such.
+  await flagOn(() => withServer(async (call) => {
+    const plain = await (await call('/api/auth/mobile/diagnostico')).json();
+    assert.equal(plain.authorizationHeader, false);
+    assert.equal(plain.originHeader, false);
+    assert.equal(plain.cookieHeader, false);
+    assert.equal(plain.https, false, 'plain http in the test server');
+    // Production shape: <client, SWA hop>. req.ip is the client (trust proxy 2).
+    const azure = await (await call('/api/auth/mobile/diagnostico', { headers: { 'X-Forwarded-For': '203.0.113.9, 198.51.100.200' } })).json();
+    assert.deepEqual(azure.forwardedFor, { entries: 2, ipIsFirstEntry: true, ipIsLastEntry: false });
+    // A client that prepends its own entry does not change req.ip.
+    const spoofed = await (await call('/api/auth/mobile/diagnostico', { headers: { 'X-Forwarded-For': '192.0.2.66, 203.0.113.9, 198.51.100.200' } })).json();
+    assert.deepEqual(spoofed.forwardedFor, { entries: 3, ipIsFirstEntry: false, ipIsLastEntry: false });
+  }));
 });

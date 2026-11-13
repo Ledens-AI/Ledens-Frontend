@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { PresupuestosService } from '../src/presupuestos/service.js';
-import { GanttService, calendar, schedule, durationFrom, span } from '../src/presupuestos/gantt.js';
+import { GanttService, calendar, schedule, durationFrom, span, orderByDependencies } from '../src/presupuestos/gantt.js';
 import { RecursosService, rolDePuesto } from '../src/presupuestos/recursos.js';
 import { sobreasignaciones } from '../src/presupuestos/ganttLimitaciones.js';
 // Planificación (Gantt) of a project (migration 035), on PGlite with synthetic rows.
@@ -267,13 +267,14 @@ test('a plan that overallocates the cuadrillas of an obra cannot be saved; simul
   const cocina = (await db.query("SELECT id FROM presupuestos WHERE title='Cocina'")).rows[0].id;
   // Start from a known plan in the obra: dem, then tab and pin both right after dem (in parallel).
   let g = await G(jefe).get(proyecto);
-  const [dem, tab, pin] = g.tasks.filter((t) => t.obraId === obra);
+  // By code: the chart orders tasks by their dependencies, not by the budget.
+  const [dem, tab, pin] = ['PA-001', 'PA-002', 'PA-003'].map((c) => g.tasks.find((t) => t.obraId === obra && t.code === c));
   await G(jefe).updateMany(proyecto, [{ id: dem.id, duration: null, predecessors: [{ id: obra }] }, { id: tab.id, duration: null, predecessors: [{ id: dem.id }] }, { id: pin.id, duration: null, predecessors: [{ id: dem.id }] }]);
   g = await GL(jefe).get(proyecto);
   const mine = g.limitaciones.filter((x) => x.obraId === obra);
   assert.equal(mine.length, 1);
   assert.deepEqual(mine[0].tareas.sort(), [tab.id, pin.id].sort());
-  assert.deepEqual(g.tasks.filter((t) => t.obraId === obra).map((t) => t.sobreasignada), [false, true, true]);
+  assert.deepEqual([dem, tab, pin].map((x) => g.tasks.find((t) => t.id === x.id).sobreasignada), [false, true, true]);
 
   // Any save in that obra that leaves it overallocated is refused, and nothing changes.
   const audits = async () => (await db.query("SELECT count(*)::int n FROM audit_log WHERE action='Planificación modificada'")).rows[0].n;
@@ -306,4 +307,11 @@ test('a plan that overallocates the cuadrillas of an obra cannot be saved; simul
   g = await GL(jefe).update(proyecto, pin.id, { predecessors: [{ id: dem.id, type: 'FS' }] });
   assert.deepEqual(g.limitaciones.filter((x) => x.obraId === obra), []);
   await assert.rejects(GL(jefe).updateMany(proyecto, [{ id: tab.id, predecessors: [{ id: obra }] }, { id: pin.id, predecessors: [{ id: obra }] }]), { status: 409, message: /con 2 cuadrillas hay 3 tareas a la vez/ });
+});
+
+test('each task goes right below the task it depends on, in cascade', () => {
+  const t = (id, ...preds) => ({ id, predecessors: preds.map((p) => ({ id: p })) });
+  // A, B, C, D, E in budget order; C depends on A, E on C, B on «Inicio de obra» (not a task), D on B and A.
+  const order = orderByDependencies([t('A'), t('B', 'obra'), t('C', 'A'), t('D', 'B', 'A'), t('E', 'C')]);
+  assert.deepEqual(order.map((x) => [x.id, x.nivel]), [['A', 0], ['C', 1], ['E', 2], ['B', 0], ['D', 1]]);
 });

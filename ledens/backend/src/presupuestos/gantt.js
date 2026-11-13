@@ -122,6 +122,29 @@ export function durationFrom(quantity, rendimiento, perHour, cuadrillas = 1) {
   return Math.min(MAX_DAYS, Math.max(0.1, Math.ceil(days * 10 - 1e-6) / 10));
 }
 
+// Order of the Gantt (chart, table and the agent's numbering): each task right
+// below the predecessor it hangs from — its first predecessor that is a task,
+// not «Inicio de obra» — and its own dependents below it, in cascade; tasks
+// that hang from no task keep the budget's order, and siblings too. `nivel`
+// is the depth (0 = hangs from no task) for indenting.
+export function orderByDependencies(tasks) {
+  const ids = new Set(tasks.map((t) => t.id));
+  const parentOf = new Map(tasks.map((t) => [t.id, t.predecessors.find((p) => ids.has(p.id))?.id || null]));
+  const children = new Map(tasks.map((t) => [t.id, []]));
+  const roots = [];
+  for (const t of tasks) (parentOf.get(t.id) ? children.get(parentOf.get(t.id)) : roots).push(t);
+  const out = [], seen = new Set();
+  const visit = (t, nivel) => {
+    if (seen.has(t.id)) return;
+    seen.add(t.id);
+    out.push({ ...t, nivel });
+    for (const c of children.get(t.id)) visit(c, nivel + 1);
+  };
+  for (const t of roots) visit(t, 0);
+  for (const t of tasks) visit(t, 0); // never happens without a cycle (refused before); kept so no task is lost
+  return out;
+}
+
 const num = (v) => {
   if (v === null || v === undefined || v === '') return null;
   const t = String(v).trim().replace(/\s/g, '');
@@ -220,6 +243,7 @@ export class GanttService {
       obras.map((o) => ({ id: o.id, ref: o.ref, cuadrillas: crews.get(o.id) || 1 })), (i) => cal.date(i));
     const over = new Set(limitaciones.flatMap((x) => x.tareas));
     for (const t of out) t.sobreasignada = over.has(t.id);
+    const ordered = orderByDependencies(out);
     // Cuadrillas: who is in each one; the workers to choose from only for who edits.
     const obraIds = obras.map((o) => o.id);
     const members = await loadMembers(db, obraIds);
@@ -249,7 +273,7 @@ export class GanttService {
       start: starts[0] || base, end: ends[ends.length - 1] || base,
       rendimiento: col ? { column: col.name, unit: col.perHour ? 'h por unidad' : 'unidades por jornada' } : null,
       limitaciones,
-      tasks: out,
+      tasks: ordered,
     };
   }
 
