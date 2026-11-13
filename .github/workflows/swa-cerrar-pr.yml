@@ -1,0 +1,26 @@
+name: Static Web Apps — cerrar entorno de PR
+
+# Deletes the preview environment of a pull request when it is closed or
+# merged. Its own workflow, with no `paths` filter, so it always runs: with a
+# filter, a PR whose diff no longer touched the frontend when it was closed
+# skipped the cleanup and left its environment behind. A PR that never had an
+# environment (the usual case now: PRs no longer create previews) is a no-op.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  close_pull_request:
+    runs-on: ubuntu-latest
+    name: Close Pull Request
+    steps:
+      - name: Close Pull Request
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: "close"
