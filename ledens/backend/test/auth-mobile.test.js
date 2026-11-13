@@ -294,14 +294,21 @@ test('no browser may use the mobile endpoints: any Origin header is 403 before c
   }));
 });
 
-test('the existing origin (CSRF) guards still apply to a mobile token', { skip }, async () => {
+// The shared origin guard (src/auth/origin.js, test/origin-guard.test.js):
+// a mobile token writes without Origin, but never with a foreign one, and the
+// public invitation routes still need the web Origin.
+test('origin (CSRF) guard with a mobile token: no Origin passes, a foreign one and public routes are 403', { skip }, async () => {
   const u = await makeUser('admin');
+  const guarded = async (res) => res.status === 403 && /Origen no permitido|invalid_origin/.test((await res.json()).error);
   await flagOn(() => withServer(async (call) => {
     const { token } = await (await login(call, u)).json();
-    for (const [method, path] of [['POST', '/api/presupuestos'], ['PUT', '/api/finanzas/pagos-trabajadores/periodo'], ['POST', '/api/invitaciones/aceptacion/consultar']]) {
-      const res = await call(path, { method, auth: `Bearer ${token}`, body: {} });
-      assert.equal(res.status, 403, `${method} ${path} without Origin`);
+    for (const [method, path] of [['POST', '/api/presupuestos'], ['PUT', '/api/finanzas/pagos-trabajadores/periodo']]) {
+      assert.equal(await guarded(await call(path, { method, auth: `Bearer ${token}`, body: {} })), false, `${method} ${path} without Origin`);
+      const foreign = await call(path, { method, auth: `Bearer ${token}`, body: {}, headers: { Origin: 'https://evil.example' } });
+      assert.equal(await guarded(foreign), true, `${method} ${path} with a foreign Origin`);
     }
+    const res = await call('/api/invitaciones/aceptacion/consultar', { method: 'POST', auth: `Bearer ${token}`, body: {} });
+    assert.equal(res.status, 403, 'public route without Origin');
   }));
 });
 

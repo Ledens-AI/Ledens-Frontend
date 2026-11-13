@@ -2,6 +2,7 @@ import express, { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { getPool, isDbConfigured } from '../db/pool.js';
 import { requireAuth, checkRole } from '../auth/sessions.js';
+import { requireSameOrigin } from '../auth/origin.js';
 import { viewAs } from '../auth/viewAs.js';
 import { PresupuestosService, PresupuestoError } from '../presupuestos/service.js';
 import { pdfDraft, LayoutOcr } from '../presupuestos/pdf.js';
@@ -30,10 +31,9 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   });
   router.use(authenticate || requireAuth, viewAs({ findUser }), checkRole('admin', 'jefe', 'client'));
   router.use(rateLimit({ windowMs: 60 * 1000, max: 240, standardHeaders: true, legacyHeaders: false }));
-  router.use((req, res, next) => {
-    if (req.method !== 'GET' && (!origin || req.get('origin') !== origin)) return res.status(403).json({ error: 'Origen no permitido' });
-    next();
-  });
+  // Writes only from our own page, or from Ledens Mobile once requireAuth
+  // (above) validated its Bearer token: src/auth/origin.js.
+  router.use(requireSameOrigin({ origin }));
 
   const svc = (req) => new PresupuestosService(pool || getPool(), req.user);
   const translate = translator !== undefined ? translator : translatorFromEnv();

@@ -13,8 +13,9 @@ Código:
 - `src/routes/mobileAuth.js`: rutas de login y logout.
 - `src/auth/credentials.js`: verificación y limitador compartidos con la web.
 - `src/auth/sessions.js`: `readSessionCredential` y `requireAuth`.
+- `src/auth/origin.js`: `requireSameOrigin`, el guard de origen (CSRF) común a todos los routers con escrituras.
 
-Pruebas: `test/auth-mobile.test.js` y `test/auth-bearer.test.js`.
+Pruebas: `test/auth-mobile.test.js`, `test/auth-bearer.test.js` y `test/origin-guard.test.js`.
 
 ## Contratos
 
@@ -60,7 +61,23 @@ La app envía `Authorization: Bearer <token>` y **ninguna cookie**: en React Nat
 - `GET /api/auth/me` devuelve el mismo objeto `user` que en la web.
 - Todos los routers protegidos con `requireAuth` aplican los mismos roles y permisos que con cookie.
 - Cookie de sesión y Bearer a la vez → `401`.
-- Las escrituras de los routers con guard de origen (presupuestos, obras, invitaciones, finanzas, finance, bridge) siguen exigiendo el `Origin` de la web. Por tanto, de momento la app solo puede leer en ellos; el middleware común con excepción para Bearer validado llegará en un PR posterior.
+- Escrituras (todo lo que no es `GET`, `HEAD` u `OPTIONS`) en los siete routers con guard de origen (presupuestos, obras, invitaciones, herramientas, finanzas, finance y bridge): pasan todas por el mismo middleware, `requireSameOrigin` (`src/auth/origin.js`). La app **no envía `Origin`** y escribe con su Bearer.
+
+Regla de `requireSameOrigin`, en este orden:
+
+| Petición de escritura | Resultado |
+|---|---|
+| Cookie, o sin credencial | `Origin` debe ser exactamente `CORS_ORIGIN`; si no, `403` con el cuerpo de siempre de cada router |
+| Bearer validado por `requireAuth`, flag activado, **sin** `Origin` | Pasa |
+| Bearer validado con `Origin` igual a `CORS_ORIGIN` | Pasa |
+| Bearer validado con cualquier otro `Origin` (también `null`) | `403` |
+| Cualquier petición con `MOBILE_AUTH_ENABLED` distinto de `true` | Regla de la cookie: sin `Origin` correcto, `403` (o `401` antes, si no hay sesión) |
+| `CORS_ORIGIN` sin definir | `403` siempre |
+| Cookie y `Authorization` a la vez, o Bearer mal formado | `401 { error: "No autenticado" }` en `requireAuth`, antes del guard |
+
+Cuerpos del `403`, sin cambios: `{ error: "Origen no permitido" }` en presupuestos, obras, invitaciones, herramientas y finanzas; `{ error: "invalid_origin" }` en finance y bridge.
+
+Orden por router: el guard va siempre **después** de `requireAuth` (y de «Ver como» y del rol), salvo en invitaciones, cuyas rutas públicas `/aceptacion/*` no tienen sesión. Allí se divide en dos: antes de autenticar, `requireSameOriginBeforeAuth` responde igual que hoy a toda petición con cookie o anónima y solo deja seguir, sin comprobar, a la que no trae `Origin` y sí un Bearer bien formado (flag activado, sin cookie); después, `requireSameOrigin` completo: tras `requireAuth` en `/aceptacion/sesion` y en `/obras/*`, y sin autenticación en `consultar`, `contrasena` y `proveedor`, donde, al no haber `req.user`, se exige el `Origin` de la web aunque venga un Bearer. La app no puede aceptar una invitación con contraseña o con Google/Microsoft; sí con su sesión (`/aceptacion/sesion`).
 
 ## Decisiones de seguridad
 
@@ -69,6 +86,11 @@ La app envía `Authorization: Bearer <token>` y **ninguna cookie**: en React Nat
 - **Solo HTTPS en producción.** Se comprueba con `req.secure`, que llega por `X-Forwarded-Proto` gracias a `trust proxy`.
 - **Nada sensible en los logs.** Solo se registra el id de usuario en el login y el logout correctos; nunca el token, la contraseña ni el email.
 - **El token nunca va en una URL.** Solo viaja en el cuerpo de la respuesta y en la cabecera `Authorization`.
+- **La excepción de origen es solo para un Bearer validado.** `requireSameOrigin` nunca lee la cabecera `Authorization`: exige `req.authTransport === 'bearer'` y `req.user`, que solo pone `requireAuth` tras encontrar una sesión viva, y `MOBILE_AUTH_ENABLED=true` en esa petición. La mera presencia de la cabecera no exime de nada. Es seguro porque el CSRF necesita una credencial que el navegador añada solo (la cookie): un navegador nunca añade nuestro Bearer, una web ajena no puede poner `Authorization` sin un preflight CORS que solo pasa `CORS_ORIGIN`, y cookie más Bearer es `401`, así que una petición «bearer» no lleva sesión de cookie.
+- **Un Bearer con `Origin` sigue necesitando el nuestro.** Un navegador siempre envía `Origin` en una escritura y nunca debería tener un token móvil (el login móvil rechaza cualquier `Origin`); si llega uno ajeno junto a un Bearer, algo va mal y se rechaza. El `Origin` nunca se reescribe ni se inventa.
+- **Las peticiones anónimas no tienen excepción.** Las rutas públicas de invitaciones siguen exigiendo el `Origin` de la web.
+- **`HEAD` y `OPTIONS` pasan como `GET`.** Antes los guards en línea solo dejaban pasar `GET`, así que un `HEAD` recibía `403`. Son métodos seguros (Express responde a `HEAD` con el manejador `GET`) y el preflight `OPTIONS` lo responde antes `cors()`.
+- **bridge ya no deja escribir sin `CORS_ORIGIN`.** Su copia en línea comparaba con `process.env.CORS_ORIGIN` sin comprobar que existiera: con la variable sin definir, una escritura sin `Origin` pasaba. Ahora, como el resto, `403`.
 - **Revocación inmediata.** El logout borra la fila. Una contraseña nueva o una invitación borran todas las sesiones del usuario, web y móviles.
 
 ## Probar en local

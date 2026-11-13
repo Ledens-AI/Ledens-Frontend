@@ -2,6 +2,7 @@ import express, { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { getPool, isDbConfigured } from '../db/pool.js';
 import { requireAuth, checkRole } from '../auth/sessions.js';
+import { requireSameOrigin } from '../auth/origin.js';
 import { viewAs } from '../auth/viewAs.js';
 import { getStorage } from '../obras/storage.js';
 import { FileError, MAX_PHOTO, sniff } from '../obras/validation.js';
@@ -26,10 +27,9 @@ export function createHerramientasRouter({ authenticate, findUser, pool, storage
   });
   router.use(authenticate || requireAuth, viewAs({ findUser }), checkRole('admin', 'jefe'));
   router.use(rateLimit({ windowMs: 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false, message: { error: 'Demasiadas peticiones. Inténtalo de nuevo en un minuto.' } }));
-  router.use((req, res, next) => {
-    if (req.method !== 'GET' && (!origin || req.get('origin') !== origin)) return res.status(403).json({ error: 'Origen no permitido' });
-    next();
-  });
+  // Writes only from our own page, or from Ledens Mobile once requireAuth
+  // (above) validated its Bearer token: src/auth/origin.js.
+  router.use(requireSameOrigin({ origin }));
   const photo = express.raw({ type: () => true, limit: MAX_PHOTO });
   const csv = express.text({ type: () => true, limit: '1mb' });
 

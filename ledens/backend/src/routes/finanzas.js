@@ -2,6 +2,7 @@ import express, { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { getPool, isDbConfigured } from '../db/pool.js';
 import { requireAuth, checkRole } from '../auth/sessions.js';
+import { requireSameOrigin } from '../auth/origin.js';
 import { viewAs } from '../auth/viewAs.js';
 import {FinanceError} from '../finance/service.js';
 import { FinanzasService, FinError, TYPES, isUuid, DETAIL_MAX_BYTES, ORDER_MAX_FILES } from '../finanzas/service.js';
@@ -31,7 +32,9 @@ export function createFinanzasRouter({ service, projects, workers, payables, run
   // through an inbox; this module gets its own, per IP, after auth.
   router.use(rateLimit({ windowMs: 60 * 1000, max: 240, standardHeaders: true, legacyHeaders: false }));
 
-  router.use((req,res,next)=>{if(req.method!=='GET'&&(!origin||req.get('origin')!==origin))return res.status(403).json({error:'Origen no permitido'});next();});
+  // Writes only from our own page, or from Ledens Mobile once requireAuth
+  // (above) validated its Bearer token: src/auth/origin.js.
+  router.use(requireSameOrigin({ origin }));
   const svc = (req) => service || new FinanzasService(getPool(),req.user);
   const handle = (fn) => async (req, res, next) => { try { await fn(req, res); } catch (e) { next(e); } };
   const actor = (req) => ({ id: req.user.id, name: req.user.name, email: req.user.email });

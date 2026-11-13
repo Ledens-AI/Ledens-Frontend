@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { getPool, isDbConfigured } from '../db/pool.js';
 import { requireAuth, checkRole, getSessionUser, createSession, sessionCookieOptions, SESSION_COOKIE } from '../auth/sessions.js';
 import { viewAs } from '../auth/viewAs.js';
+import { requireSameOrigin, requireSameOriginBeforeAuth } from '../auth/origin.js';
 import { PresupuestoError } from '../presupuestos/service.js';
 import { isGoogleConfigured } from '../auth/providers/google.js';
 import { isMicrosoftConfigured } from '../auth/providers/microsoft.js';
@@ -29,11 +30,18 @@ export function createInvitacionesRouter({ authenticate, findUser, pool, origin 
     if (!pool && !isDbConfigured()) return res.status(503).json({ error: 'Invitaciones no disponibles todavía' });
     next();
   });
-  // Same CSRF guard as /api/presupuestos: writes only from our own page.
-  router.use((req, res, next) => {
-    if (req.method !== 'GET' && (!origin || req.get('origin') !== origin)) return res.status(403).json({ error: 'Origen no permitido' });
-    next();
-  });
+  // Same CSRF guard as every router (src/auth/origin.js): writes only from our
+  // own page. Here it runs before authentication because it also covers the
+  // public /aceptacion routes, so it is split in two:
+  //  - this one answers every cookie or anonymous request exactly as before
+  //    (403 before anything else) and only lets a request with no Origin
+  //    that names a Bearer token continue, unchecked, so requireAuth can
+  //    validate it;
+  //  - requireSameOrigin, after requireAuth on /aceptacion/sesion and /obras,
+  //    and after nothing on the other /aceptacion routes, applies the full
+  //    rule — with no validated Bearer (no req.user) that is the web Origin.
+  const sameOrigin = requireSameOrigin({ origin });
+  router.use(requireSameOriginBeforeAuth({ origin }));
   const handle = (fn, status = 200) => async (req, res, next) => {
     try { res.status(status).json(await fn(req, res)); } catch (e) {
       if (e instanceof InvitacionError || e instanceof PresupuestoError) return res.status(e.status).json({ error: e.message, ...(e.code ? { code: e.code } : {}) });
@@ -50,13 +58,16 @@ export function createInvitacionesRouter({ authenticate, findUser, pool, origin 
     res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
     return { user };
   };
+  accept.post('/sesion', authenticate || requireAuth, sameOrigin, handle((req) => acceptWithSession(db(), req.body?.token, req.user).then((user) => ({ user }))));
+  // Every route below is public: no req.user, so the web Origin is required
+  // whatever Authorization says. Keep new public routes below this line.
+  accept.use(sameOrigin);
   accept.post('/consultar', handle(async (req) => {
     const out = await describe(db(), req.body?.token, { providers: providers() });
     const current = await getSessionUser(req.cookies?.[SESSION_COOKIE]).catch(() => null);
     return { ...out, session: current ? { email: current.email, matches: current.email.toLowerCase() === out.email.toLowerCase(), verified: !!current.email_verified } : null };
   }));
   accept.post('/contrasena', handle(async (req, res) => login(req, res, await acceptWithPassword(db(), req.body?.token, req.body?.password))));
-  accept.post('/sesion', authenticate || requireAuth, handle((req) => acceptWithSession(db(), req.body?.token, req.user).then((user) => ({ user }))));
   accept.post('/proveedor', handle(async (req, res) => {
     const provider = req.body?.provider;
     const ok = { google: isGoogleConfigured, microsoft: isMicrosoftConfigured }[provider];
@@ -72,7 +83,7 @@ export function createInvitacionesRouter({ authenticate, findUser, pool, origin 
   // own, and sending is limited per person in the service.
   const team = Router();
   team.use(rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false, message: { error: 'Demasiadas peticiones. Inténtalo de nuevo en un minuto.' } }));
-  team.use(authenticate || requireAuth, viewAs({ findUser }), checkRole('admin', 'jefe'));
+  team.use(authenticate || requireAuth, viewAs({ findUser }), checkRole('admin', 'jefe'), sameOrigin);
   const svc = (req) => new InvitacionesService(db(), req.user);
   team.get('/:id', handle((req) => svc(req).list(req.params.id)));
   team.post('/:id', handle((req) => svc(req).invite(req.params.id, req.body || {}), 201));

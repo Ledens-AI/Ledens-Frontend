@@ -14,7 +14,7 @@ import {
 // PR 1 of Ledens Mobile: requireAuth also accepts the session token as
 // `Authorization: Bearer <token>` when MOBILE_AUTH_ENABLED=true. The cookie
 // flow of Ledens Web must not change, the origin (CSRF) guards must not be
-// relaxed, and a request carrying both credentials is refused.
+// relaxed for cookies, and a request carrying both credentials is refused.
 // The first block needs no database; the rest needs a real Postgres, same as
 // auth.test.js:
 //   DATABASE_URL=postgres://ledens:ledens_dev_password@localhost:5432/ledens npm test
@@ -312,7 +312,9 @@ test('«Ver como» through Bearer: only an admin, only reading', { skip }, async
   }));
 });
 
-test('origin (CSRF) guards are not relaxed: no Origin or a foreign one is 403 for cookie and for Bearer', { skip }, async () => {
+// Since the shared guard (src/auth/origin.js, tests in test/origin-guard.test.js)
+// a validated Bearer write WITHOUT Origin passes; everything else here holds.
+test('origin (CSRF) guards are not relaxed for cookies; a foreign Origin is 403 for Bearer too', { skip }, async () => {
   const admin = await makeUser('admin');
   // One write per router that carries the guard. Bodies are irrelevant: the
   // guard answers before the handler runs.
@@ -333,7 +335,8 @@ test('origin (CSRF) guards are not relaxed: no Origin or a foreign one is 403 fo
           const viaCookie = await req(base, path, { method, cookie: admin.cookie, origin, body: {} });
           assert.equal(viaCookie.status, 403, `cookie ${method} ${path} origin=${origin} flag=${flag}`);
           assert.match(await guardBody(viaCookie), /Origen no permitido|invalid_origin/);
-          if (flag === 'true') {
+          // Bearer without Origin: only a public /aceptacion route still refuses it.
+          if (flag === 'true' && (origin !== undefined || path.includes('/aceptacion/'))) {
             const viaBearer = await req(base, path, { method, auth: admin.bearer, origin, body: {} });
             assert.equal(viaBearer.status, 403, `bearer ${method} ${path} origin=${origin}`);
             assert.match(await guardBody(viaBearer), /Origen no permitido|invalid_origin/);

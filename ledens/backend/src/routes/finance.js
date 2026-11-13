@@ -1,11 +1,15 @@
 import {Router} from 'express';
 import {getPool,isDbConfigured} from '../db/pool.js';
 import {requireAuth} from '../auth/sessions.js';
+import {requireSameOrigin} from '../auth/origin.js';
 import {viewAs} from '../auth/viewAs.js';
 import {FinanceService,FinanceError,uuid} from '../finance/service.js';
 import {traced} from '../logs/runs.js';
 
-export function createFinanceRouter({service,authorize=[requireAuth,viewAs()],origin=process.env.CORS_ORIGIN}={}){
+// `origin` replaces CORS_ORIGIN in tests. Left out, CORS_ORIGIN is read per
+// request (like bridge): the default export below is built at import time,
+// before a test or a late env can set it.
+export function createFinanceRouter({service,authorize=[requireAuth,viewAs()],origin}={}){
  const router=Router();const get=()=>service||new FinanceService(getPool());
  const dates=(value,key='')=>value instanceof Date?(/_on$|^month$/.test(key)?value.toISOString().slice(0,10):value.toISOString()):
    Array.isArray(value)?value.map(v=>dates(v)):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,dates(v,k)])):value;
@@ -15,9 +19,11 @@ export function createFinanceRouter({service,authorize=[requireAuth,viewAs()],or
  router.use((req,res,next)=>{
    if(req.user.role==='client')return res.status(403).json({error:'finance_forbidden'});
    if(!service&&!isDbConfigured())return res.status(503).json({error:'database_unavailable'});
-   if(req.method!=='GET'&&(!origin||req.get('origin')!==origin))return res.status(403).json({error:'invalid_origin'});
    next();
  });
+ // Same guard as every router (src/auth/origin.js), after authorize so a
+ // validated Bearer token is known; same 403 body as before.
+ router.use(requireSameOrigin(origin===undefined?{body:{error:'invalid_origin'}}:{origin,body:{error:'invalid_origin'}}));
  for(const name of ['id','projectId'])router.param(name,(req,res,next,value)=>uuid(value)?next():res.status(400).json({error:'invalid_id'}));
  const pagination=req=>{
    const limit=req.query.limit===undefined?50:Number(req.query.limit),offset=req.query.offset===undefined?0:Number(req.query.offset);

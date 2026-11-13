@@ -2,6 +2,7 @@ import express, { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { getPool, isDbConfigured } from '../db/pool.js';
 import { requireAuth, checkRole } from '../auth/sessions.js';
+import { requireSameOrigin } from '../auth/origin.js';
 import { viewAs } from '../auth/viewAs.js';
 import { PresupuestoError } from '../presupuestos/service.js';
 import { ObraArchivosService } from '../obras/archivos.js';
@@ -24,10 +25,9 @@ export function createObrasRouter({ authenticate, findUser, pool, storage, origi
   router.use(authenticate || requireAuth, viewAs({ findUser }), checkRole('admin', 'jefe', 'client'));
   // A gallery loads one request per photo and thumbnail: its own, wider limit.
   router.use(rateLimit({ windowMs: 60 * 1000, max: 600, standardHeaders: true, legacyHeaders: false }));
-  router.use((req, res, next) => {
-    if (req.method !== 'GET' && (!origin || req.get('origin') !== origin)) return res.status(403).json({ error: 'Origen no permitido' });
-    next();
-  });
+  // Writes only from our own page, or from Ledens Mobile once requireAuth
+  // (above) validated its Bearer token: src/auth/origin.js.
+  router.use(requireSameOrigin({ origin }));
   const raw = express.raw({ type: () => true, limit: MAX_PDF });
 
   const svc = (req) => new ObraArchivosService(pool || getPool(), req.user, storage === undefined ? getStorage() : storage);
