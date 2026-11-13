@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { PresupuestosService } from '../src/presupuestos/service.js';
-import { GanttService, calendar, schedule, durationFrom, span } from '../src/presupuestos/gantt.js';
+import { GanttService, calendar, schedule, durationFrom, span, orderByDependencies } from '../src/presupuestos/gantt.js';
 import { RecursosService, rolDePuesto } from '../src/presupuestos/recursos.js';
 // Planificación (Gantt) of a project (migration 035), on PGlite with synthetic rows.
 let db, pool, admin, jefe, otroJefe, cliente, proyecto, vacio, obra, w;
@@ -232,4 +232,11 @@ test('Recursos: each worker with their obras, the Gantt period and overlaps', as
   // Long after both obras end, nothing overlaps any more.
   const later = await R(admin).list({ today: '2027-06-01' });
   assert.equal(later.trabajadores.find((t) => t.name === 'Luis').estado, 'libre');
+});
+
+test('each task goes right below the task it depends on, in cascade', () => {
+  const t = (id, ...preds) => ({ id, predecessors: preds.map((p) => ({ id: p })) });
+  // A, B, C, D, E in budget order; C depends on A, E on C, B on «Inicio de obra» (not a task), D on B and A.
+  const order = orderByDependencies([t('A'), t('B', 'obra'), t('C', 'A'), t('D', 'B', 'A'), t('E', 'C')]);
+  assert.deepEqual(order.map((x) => [x.id, x.nivel]), [['A', 0], ['C', 1], ['E', 2], ['B', 0], ['D', 1]]);
 });
