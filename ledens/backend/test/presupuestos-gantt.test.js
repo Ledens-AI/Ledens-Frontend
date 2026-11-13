@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { PresupuestosService } from '../src/presupuestos/service.js';
-import { GanttService, calendar, schedule, durationFrom, span } from '../src/presupuestos/gantt.js';
+import { GanttService, calendar, schedule, durationFrom, span, orderByDependencies } from '../src/presupuestos/gantt.js';
 // Planificación (Gantt) of a project (migration 035), on PGlite with synthetic rows.
 let db, pool, admin, jefe, otroJefe, cliente, proyecto, vacio, obra;
 const migration = (m) => fs.readFile(new URL('../src/db/migrations/' + m, import.meta.url), 'utf8');
@@ -157,4 +157,11 @@ test('cuadrillas divide the computed duration; «Inicio de obra» is the default
   g = await G(jefe).update(proyecto, dem.id, { predecessors: [{ id: obra, type: 'FS' }] });
   assert.deepEqual(g.tasks[0].predecessors, [{ id: obra, type: 'FS', lag: 0 }]);
   await G(admin).setCuadrillas(proyecto, obra, { cuadrillas: 1 });
+});
+
+test('each task goes right below the task it depends on, in cascade', () => {
+  const t = (id, ...preds) => ({ id, predecessors: preds.map((p) => ({ id: p })) });
+  // A, B, C, D, E in budget order; C depends on A, E on C, B on «Inicio de obra» (not a task), D on B and A.
+  const order = orderByDependencies([t('A'), t('B', 'obra'), t('C', 'A'), t('D', 'B', 'A'), t('E', 'C')]);
+  assert.deepEqual(order.map((x) => [x.id, x.nivel]), [['A', 0], ['C', 1], ['E', 2], ['B', 0], ['D', 1]]);
 });
