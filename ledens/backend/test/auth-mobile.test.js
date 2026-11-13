@@ -294,14 +294,25 @@ test('no browser may use the mobile endpoints: any Origin header is 403 before c
   }));
 });
 
-test('the existing origin (CSRF) guards still apply to a mobile token', { skip }, async () => {
-  const u = await makeUser('admin');
+test('a mobile token may write without Origin, never with a foreign one, and keeps its role limits', { skip }, async () => {
+  const admin = await makeUser('admin');
+  const client = await makeUser('client');
   await flagOn(() => withServer(async (call) => {
-    const { token } = await (await login(call, u)).json();
-    for (const [method, path] of [['POST', '/api/presupuestos'], ['PUT', '/api/finanzas/pagos-trabajadores/periodo'], ['POST', '/api/invitaciones/aceptacion/consultar']]) {
-      const res = await call(path, { method, auth: `Bearer ${token}`, body: {} });
-      assert.equal(res.status, 403, `${method} ${path} without Origin`);
+    const { token } = await (await login(call, admin)).json();
+    const { token: clientToken } = await (await login(call, client)).json();
+    const guardError = async (res) => res.status === 403 && /^(Origen no permitido|invalid_origin)$/.test((await res.clone().json()).error || '');
+    for (const [method, path] of [['POST', '/api/presupuestos'], ['PUT', '/api/finanzas/pagos-trabajadores/periodo']]) {
+      const native = await call(path, { method, auth: `Bearer ${token}`, body: {} });
+      assert.ok(!(await guardError(native)), `${method} ${path} without Origin passes the guard (${native.status})`);
+      const foreign = await call(path, { method, auth: `Bearer ${token}`, origin: 'https://evil.example', body: {} });
+      assert.ok(await guardError(foreign), `${method} ${path} with a foreign Origin is refused`);
     }
+    // Passing the guard grants nothing else: a client is still refused by role.
+    const res = await call('/api/finanzas/pagos-trabajadores/periodo', { method: 'PUT', auth: `Bearer ${clientToken}`, body: {} });
+    assert.equal(res.status, 403);
+    assert.equal((await res.json()).error, 'No tienes permiso para esto');
+    // Public invitation routes stay strict even with a valid token.
+    assert.ok(await guardError(await call('/api/invitaciones/aceptacion/consultar', { method: 'POST', auth: `Bearer ${token}`, body: {} })));
   }));
 });
 

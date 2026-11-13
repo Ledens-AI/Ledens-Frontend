@@ -2,10 +2,11 @@ import {Router} from 'express';
 import {getPool,isDbConfigured} from '../db/pool.js';
 import {requireAuth} from '../auth/sessions.js';
 import {viewAs} from '../auth/viewAs.js';
+import { requireSameOrigin } from '../auth/origin.js';
 import {FinanceService,FinanceError,uuid} from '../finance/service.js';
 import {traced} from '../logs/runs.js';
 
-export function createFinanceRouter({service,authorize=[requireAuth,viewAs()],origin=process.env.CORS_ORIGIN}={}){
+export function createFinanceRouter({service,authorize=[requireAuth,viewAs()],origin=()=>process.env.CORS_ORIGIN}={}){
  const router=Router();const get=()=>service||new FinanceService(getPool());
  const dates=(value,key='')=>value instanceof Date?(/_on$|^month$/.test(key)?value.toISOString().slice(0,10):value.toISOString()):
    Array.isArray(value)?value.map(v=>dates(v)):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,dates(v,k)])):value;
@@ -15,9 +16,10 @@ export function createFinanceRouter({service,authorize=[requireAuth,viewAs()],or
  router.use((req,res,next)=>{
    if(req.user.role==='client')return res.status(403).json({error:'finance_forbidden'});
    if(!service&&!isDbConfigured())return res.status(503).json({error:'database_unavailable'});
-   if(req.method!=='GET'&&(!origin||req.get('origin')!==origin))return res.status(403).json({error:'invalid_origin'});
    next();
  });
+ // Writes: our web Origin, or a validated Bearer without Origin (auth/origin.js).
+ router.use(requireSameOrigin({origin,message:'invalid_origin'}));
  for(const name of ['id','projectId'])router.param(name,(req,res,next,value)=>uuid(value)?next():res.status(400).json({error:'invalid_id'}));
  const pagination=req=>{
    const limit=req.query.limit===undefined?50:Number(req.query.limit),offset=req.query.offset===undefined?0:Number(req.query.offset);
