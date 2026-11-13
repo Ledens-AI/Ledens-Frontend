@@ -22,40 +22,110 @@ const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', '
 // Bar colours: red = no predecessor yet, blue = has one; the executed share
 // of the line (% de avance) fills the bar in green from the left.
 const BAR = { sinPredecesora: '#D14A4A', conPredecesora: '#4A7FB8', avance: '#3E9A5A' };
+// Outline of a task that breaks the sobreasignación limitación.
+const SOBRE = '#E08A00';
 const num = (v) => String(v).replace('.', ',');
 
+// Changes to the table are a draft: each one asks the server for the plan as
+// it would be (POST …/gantt/simular, nothing saved) and the chart shows it.
+// «Guardar» saves the whole draft at once and stays disabled while the draft
+// breaks a limitación (e.g. sobreasignación: more tasks at once than the
+// obra's cuadrillas) in an obra it changes — the server refuses it too.
 export default function Gantt({ projectId, readOnly, onBack }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [saveError, setSaveError] = useState('');
   const [saving, setSaving] = useState(null);
+  const [draft, setDraft] = useState(() => new Map()); // task id → { duration?, predecessors }
+  const [simulating, setSimulating] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const [savedMsg, setSavedMsg] = useState('');
+  const seq = useRef(0);
+  // The latest draft, ahead of the render: two quick changes in a row both count.
+  const latest = useRef(draft);
   const load = useCallback(() => api.gantt(projectId).then((d) => { setData(d); setError(''); }, (e) => setError(e.message)), [projectId]);
   useEffect(() => { load(); }, [load]);
+  const items = (m) => [...m.entries()].map(([id, b]) => ({ id, ...b }));
+  const setBoth = (m) => { latest.current = m; setDraft(m); };
 
-  // Saves one task's choices; the answer is the whole plan, recalculated.
-  const save = async (task, next) => {
+  // Recalculates the plan with the draft `next`; on a refusal (a cycle…) the
+  // draft stays as it was before that change.
+  const simulate = async (next, prev) => {
+    const n = ++seq.current;
+    setBoth(next);
+    setSimulating(true); setSaveError(''); setSavedMsg('');
+    try {
+      const plan = next.size ? await api.simulateGantt(projectId, items(next)) : await api.gantt(projectId);
+      if (n !== seq.current) return;
+      setData(plan);
+    } catch (e) {
+      if (n !== seq.current) return;
+      setBoth(prev); setSaveError(e.message);
+      setData((d) => (d ? { ...d, tasks: d.tasks.map((t) => ({ ...t })) } : d)); // rows go back to what the plan shows
+    }
+    if (n === seq.current) setSimulating(false);
+  };
+
+  // One task's choices go into the draft.
+  const stage = (task, next) => {
     const body = {
       duration: next.duration !== undefined ? next.duration : task.durationOverride,
       predecessors: (next.predecessors || task.predecessors).filter((p) => p.id).map((p) => ({ id: p.id, type: p.type, lag: p.lag === '' ? 0 : Number(p.lag) })),
     };
-    setSaving(task.id); setSaveError('');
-    try { setData(await api.saveGantt(projectId, task.id, body)); } catch (e) { setSaveError(`${task.code || task.name}: ${e.message}`); }
-    setSaving(null);
+    const prev = latest.current, m = new Map(prev); m.set(task.id, body);
+    simulate(m, prev);
+  };
+  // The agent's predecessors go into the draft too (the duration stays as it is).
+  const stageMany = (list) => {
+    const prev = latest.current, m = new Map(prev);
+    for (const t of list) m.set(t.id, { ...(m.get(t.id) || {}), predecessors: t.predecessors });
+    simulate(m, prev);
+  };
+  const discard = () => { seq.current++; setBoth(new Map()); setSaveError(''); setSimulating(false); load(); };
+
+  const obraOfTask = new Map((data?.tasks || []).map((t) => [t.id, t.obraId]));
+  const touched = new Set([...draft.keys()].map((id) => obraOfTask.get(id)));
+  const limitaciones = data?.limitaciones || [];
+  const blocking = limitaciones.filter((x) => touched.has(x.obraId));
+  const dirty = draft.size > 0;
+
+  const commit = async () => {
+    setCommitting(true); setSaveError('');
+    try {
+      const plan = await api.saveGanttMany(projectId, items(draft));
+      seq.current++; setBoth(new Map()); setData(plan);
+      setSavedMsg(`Planificación guardada (${draft.size} ${draft.size === 1 ? 'tarea' : 'tareas'}).`);
+    } catch (e) { setSaveError(e.message); }
+    setCommitting(false);
   };
 
-  // Number of cuadrillas and their oficial + peón: all of it or nothing.
+  // Number of cuadrillas and their oficial + peón: saved at once (not part of
+  // the draft); the draft, if any, is recalculated with the new cuadrillas.
   const saveCuadrillas = async (obra, n, equipos) => {
     setSaving(obra.id); setSaveError('');
-    try { setData(await api.saveGanttCuadrillas(projectId, obra.id, n, equipos)); } catch (e) { setSaveError(`${obra.ref}: ${e.message}`); }
+    try {
+      const plan = await api.saveGanttCuadrillas(projectId, obra.id, n, equipos);
+      if (latest.current.size) await simulate(latest.current, latest.current); else setData(plan);
+    } catch (e) { setSaveError(`${obra.ref}: ${e.message}`); }
     setSaving(null);
   };
 
-  const back = <div><button type="button" className="fin-btn is-ghost is-small" onClick={onBack}><i className="ri-arrow-left-line"></i>Volver al proyecto</button></div>;
+  // Leaving with unsaved changes asks first.
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+  const leave = () => { if (!dirty || window.confirm('Hay cambios en la planificación sin guardar. ¿Salir y descartarlos?')) onBack(); };
+
+  const back = <div><button type="button" className="fin-btn is-ghost is-small" onClick={leave}><i className="ri-arrow-left-line"></i>Volver al proyecto</button></div>;
   if (error) return <div className="fin-stack">{back}<ErrorBox message={error} onRetry={load} /></div>;
   if (!data) return <div className="fin-loading fin-muted">Calculando la planificación…</div>;
 
   const { tasks } = data;
   const missing = tasks.filter((t) => t.warning).length;
+  const save = stage;
   return (
     <div className="fin-stack obr">
       {back}
@@ -66,15 +136,32 @@ export default function Gantt({ projectId, readOnly, onBack }) {
       </div>
       <p className="fin-muted fin-small obr-hint-tight">
         {data.rendimiento ? `Duración = cantidad ÷ rendimiento de la partida en la base («${data.rendimiento.column}», ${data.rendimiento.unit}), redondeada a la décima de día (dos tareas de 0,5 seguidas ocupan un día). ` : 'La base de partidas no tiene columna de rendimiento: cada tarea dura 1 día hasta que indiques su duración. '}
-        Cada obra empieza en su fecha de inicio. Cambia una predecesora, su relación, el desfase o la duración y el Gantt se recalcula al momento.
+        Cada obra empieza en su fecha de inicio. Cambia una predecesora, su relación, el desfase o la duración y el Gantt se recalcula al momento; los cambios no se guardan hasta pulsar «Guardar».
+        {' '}Cada cuadrilla hace una tarea a la vez: en una obra no puede haber más tareas a la vez que cuadrillas.
         {' '}Las tareas sin planificar tienen «Inicio de obra» como predecesora por defecto; si la quitas, la tarea se queda sin predecesora.
       </p>
       <Cuadrillas obras={data.obras || []} trabajadores={data.trabajadores} readOnly={readOnly} saving={saving} onSave={saveCuadrillas} />
       {missing ? <p className="fin-warn"><i className="ri-error-warning-line"></i><span>{`${missing} ${missing === 1 ? 'tarea no tiene' : 'tareas no tienen'} rendimiento en la base: cuentan 1 día hasta que indiques su duración.`}</span></p> : null}
+      <Limitaciones list={limitaciones} touched={touched} />
+      {!readOnly && tasks.length ? (
+        <div className={`obr-gantt-savebar${dirty ? ' is-dirty' : ''}`}>
+          <button type="button" className="fin-btn is-primary" onClick={commit} disabled={!dirty || simulating || committing || blocking.length > 0}
+            title={blocking.length ? 'Resuelve las limitaciones de las obras que has cambiado para poder guardar' : undefined}>
+            <i className="ri-save-line"></i>{committing ? 'Guardando…' : 'Guardar'}
+          </button>
+          {dirty ? <button type="button" className="fin-btn is-ghost" onClick={discard} disabled={committing}>Descartar cambios</button> : null}
+          <span className="fin-small fin-muted">
+            {simulating ? 'Recalculando…'
+              : blocking.length ? `No se puede guardar: ${blocking.length === 1 ? 'hay una limitación' : `hay ${blocking.length} limitaciones`} sin cumplir.`
+                : dirty ? `${draft.size} ${draft.size === 1 ? 'tarea cambiada' : 'tareas cambiadas'} sin guardar.`
+                  : savedMsg || 'Sin cambios.'}
+          </span>
+        </div>
+      ) : null}
       {saveError ? <ErrorBox message={saveError} /> : null}
       {tasks.length ? <Chart data={data} /> : <Empty icon="ri-calendar-line" title="Sin tareas" text="Los presupuestos aprobados de este proyecto no tienen partidas." />}
-      {!readOnly && tasks.length > 1 ? <Sugerencias projectId={projectId} tasks={tasks} onApplied={load} /> : null}
-      {tasks.length ? <Tabla tasks={tasks} hitos={data.hitos || []} readOnly={readOnly} saving={saving} onSave={save} /> : null}
+      {!readOnly && tasks.length > 1 ? <Sugerencias projectId={projectId} tasks={tasks} onStage={stageMany} /> : null}
+      {tasks.length ? <Tabla tasks={tasks} hitos={data.hitos || []} readOnly={readOnly} saving={saving} changed={draft} onSave={save} /> : null}
     </div>
   );
 }
@@ -197,7 +284,30 @@ function WorkerSelect({ rol, value, trabajadores, taken, onChange, label }) {
   );
 }
 
-function Tabla({ tasks, hitos, readOnly, saving, onSave }) {
+// Limitaciones the plan breaks now (from the server, recalculated with the
+// draft). Those in an obra the draft changes block «Guardar»; the others are
+// shown so they can be fixed, but do not stop saving another obra.
+function Limitaciones({ list, touched }) {
+  if (!list.length) return null;
+  return (
+    <div className="fin-warn obr-gantt-limits" role="status">
+      <i className="ri-error-warning-line"></i>
+      <div>
+        <strong>{list.length === 1 ? 'La planificación no cumple una limitación' : `La planificación no cumple ${list.length} limitaciones`}</strong>
+        <ul>
+          {list.map((x, i) => (
+            <li key={i}>
+              <span className="obr-gantt-limit-tag">Sobreasignación</span> {x.mensaje}
+              {touched.has(x.obraId) ? null : <span className="fin-muted"> (no impide guardar cambios de otras obras)</span>}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function Tabla({ tasks, hitos, readOnly, saving, changed, onSave }) {
   const index = useMemo(() => new Map(tasks.map((t, i) => [t.id, i + 1])), [tasks]);
   const label = (t) => (t.hito ? `◆ ${t.name}` : `${index.get(t.id)}. ${t.code ? `${t.code} · ` : ''}${t.name}`);
   const choices = useMemo(() => [...hitos.map((h) => ({ ...h, hito: true })), ...tasks], [hitos, tasks]);
@@ -210,7 +320,7 @@ function Tabla({ tasks, hitos, readOnly, saving, onSave }) {
             <thead><tr><th>#</th><th>Partida</th><th className="fin-num">Cantidad</th><th className="fin-num">Rendimiento</th><th>Duración (días, 0,1)</th><th>Predecesoras · relación · desfase (días)</th><th>Inicio</th><th>Fin</th></tr></thead>
             <tbody>
               {tasks.map((t) => (
-                <Fila key={t.id} t={t} n={index.get(t.id)} tasks={choices} label={label} editable={!readOnly && t.canEdit} busy={saving === t.id} onSave={onSave} />
+                <Fila key={t.id} t={t} n={index.get(t.id)} tasks={choices} label={label} editable={!readOnly && t.canEdit} busy={saving === t.id} changed={changed?.has(t.id)} onSave={onSave} />
               ))}
             </tbody>
           </table>
@@ -222,14 +332,13 @@ function Tabla({ tasks, hitos, readOnly, saving, onSave }) {
 
 // El agente (backend: presupuestos/ganttAgente.js) solo propone — no guarda
 // nada él mismo. Aquí se revisa la propuesta (se puede quitar una a una) y
-// «guardar en bloque» aplica todas las que queden en una sola petición, en
-// vez de una petición por tarea como al editar la tabla a mano.
-function Sugerencias({ projectId, tasks, onApplied }) {
+// lo que quede pasa al borrador del Gantt: se ve en el diagrama, se comprueban
+// las limitaciones y se guarda con «Guardar», como un cambio hecho a mano.
+function Sugerencias({ projectId, tasks, onStage }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [proposal, setProposal] = useState(null); // { tasks: [{id, predecessors}], considered, accepted, warnings }
-  const [removed, setRemoved] = useState(new Set()); // `${tareaId}:${predId}` quitadas a mano antes de guardar
-  const [saving, setSaving] = useState(false);
+  const [removed, setRemoved] = useState(new Set()); // `${tareaId}:${predId}` quitadas a mano antes de pasarlas
   const [done, setDone] = useState('');
 
   const index = useMemo(() => new Map(tasks.map((t, i) => [t.id, i + 1])), [tasks]);
@@ -246,15 +355,10 @@ function Sugerencias({ projectId, tasks, onApplied }) {
     .filter((t) => t.predecessors.length);
   const total = kept.reduce((a, t) => a + t.predecessors.length, 0);
 
-  const guardar = async () => {
-    setSaving(true); setError('');
-    try {
-      await api.saveGanttMany(projectId, kept.map((t) => ({ id: t.id, predecessors: t.predecessors.map((p) => ({ id: p.id, type: p.type, lag: p.lag })) })));
-      setDone(`${total} predecesora${total === 1 ? '' : 's'} guardada${total === 1 ? '' : 's'}.`);
-      setProposal(null);
-      onApplied();
-    } catch (e) { setError(e.message); }
-    setSaving(false);
+  const pasar = () => {
+    onStage(kept.map((t) => ({ id: t.id, predecessors: t.predecessors.map((p) => ({ id: p.id, type: p.type, lag: p.lag })) })));
+    setDone(`${total} predecesora${total === 1 ? '' : 's'} en el borrador: revisa el Gantt y pulsa «Guardar».`);
+    setProposal(null);
   };
 
   return (
@@ -268,7 +372,7 @@ function Sugerencias({ projectId, tasks, onApplied }) {
       {proposal?.warnings?.length ? <ul className="obr-gantt-agente-warn fin-muted fin-small">{proposal.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul> : null}
       {kept.length ? (
         <>
-          <p className="fin-muted fin-small">Todavía no se ha guardado nada. Quita lo que no te cuadre y guarda el resto de una sola vez («en bloque»): una sola petición aplica todas las relaciones que queden, en vez de guardar tarea por tarea.</p>
+          <p className="fin-muted fin-small">Todavía no se ha guardado nada. Quita lo que no te cuadre y pasa el resto al borrador: se verá en el Gantt y se guarda con «Guardar» si cumple las limitaciones.</p>
           <ul className="obr-gantt-agente-list">
             {kept.flatMap((t) => t.predecessors.map((p) => (
               <li key={`${t.id}:${p.id}`}>
@@ -282,7 +386,7 @@ function Sugerencias({ projectId, tasks, onApplied }) {
             )))}
           </ul>
           <div className="obr-actions obr-start">
-            <button type="button" className="fin-btn is-primary" onClick={guardar} disabled={saving}>{saving ? 'Guardando…' : `Guardar estas ${total} predecesora${total === 1 ? '' : 's'} en bloque`}</button>
+            <button type="button" className="fin-btn is-primary" onClick={pasar}>{`Pasar estas ${total} predecesora${total === 1 ? '' : 's'} al borrador`}</button>
             <button type="button" className="fin-btn is-ghost" onClick={() => setProposal(null)}>Descartar la propuesta</button>
           </div>
         </>
@@ -291,7 +395,7 @@ function Sugerencias({ projectId, tasks, onApplied }) {
   );
 }
 
-function Fila({ t, n, tasks, label, editable, busy, onSave }) {
+function Fila({ t, n, tasks, label, editable, busy, changed, onSave }) {
   const [dur, setDur] = useState(t.durationOverride ?? '');
   const [preds, setPreds] = useState(t.predecessors);
   useEffect(() => { setDur(t.durationOverride ?? ''); setPreds(t.predecessors); }, [t]);
@@ -309,7 +413,7 @@ function Fila({ t, n, tasks, label, editable, busy, onSave }) {
   const used = new Set(preds.map((p) => p.id));
   const options = (current) => tasks.filter((x) => x.id !== t.id && (x.id === current || !used.has(x.id)));
   return (
-    <tr className={busy ? 'is-staged' : ''}>
+    <tr className={[busy ? 'is-staged' : '', changed ? 'is-draft' : '', t.sobreasignada ? 'is-sobre' : ''].filter(Boolean).join(' ')}>
       <td className="fin-muted">{n}</td>
       <td><strong>{`${t.code ? `${t.code} · ` : ''}${t.name}`}</strong><div className="fin-muted fin-small">{[t.presupuesto.ref, t.presupuesto.ampliacion ? 'ampliación' : null, t.chapter].filter(Boolean).join(' · ')}</div></td>
       <td className="fin-num fin-nowrap">{`${num(Number(t.quantity))} ${t.unit}`}</td>
@@ -403,6 +507,7 @@ function Chart({ data }) {
       <span><i style={{ background: BAR.sinPredecesora }}></i>Sin predecesora</span>
       <span><i style={{ background: BAR.conPredecesora }}></i>Con predecesora</span>
       <span><i style={{ background: BAR.avance }}></i>Avance ejecutado</span>
+      {data.tasks.some((t) => t.sobreasignada) ? <span><i className="obr-gantt-legend-sobre" style={{ borderColor: SOBRE }}></i>Sobreasignación (más tareas a la vez que cuadrillas)</span> : null}
       <span><b className="obr-gantt-legend-hito"></b>Inicio de obra (se puede elegir como predecesora)</span>
     </div>
     <div className="fin-card is-flush obr-gantt">
@@ -411,7 +516,7 @@ function Chart({ data }) {
         {tasks.map((t, i) => (
           <div key={t.id} className="obr-gantt-label" style={{ height: RH }} title={`${t.code || ''} ${t.name}`}>
             {t.hito ? <><span className="fin-muted">◆</span> <strong>{t.name}</strong></>
-              : <><span className="fin-muted">{i + 1 - hitos.length}</span> {t.code ? <strong>{t.code}</strong> : null} {t.name}</>}
+              : <>{t.sobreasignada ? <i className="ri-error-warning-fill obr-gantt-sobre-icon" aria-label="Sobreasignada"></i> : null}<span className="fin-muted">{i + 1 - hitos.length}</span> {t.code ? <strong>{t.code}</strong> : null} {t.name}</>}
           </div>
         ))}
       </div>
@@ -450,13 +555,14 @@ function Chart({ data }) {
             const clip = `obr-gantt-clip-${i}`;
             return (
               <g key={t.id}>
-                <title>{`${t.code ? `${t.code} · ` : ''}${t.name}\n${fecha(t.start)} → ${fecha(t.end)} · ${num(t.duration)} ${t.duration === 1 ? 'día' : 'días'} laborables · ${num(t.executionPct)} % ejecutado · ${t.predecessors.length ? `${t.predecessors.length} ${t.predecessors.length === 1 ? 'predecesora' : 'predecesoras'}` : 'sin predecesora'}`}</title>
+                <title>{`${t.code ? `${t.code} · ` : ''}${t.name}\n${fecha(t.start)} → ${fecha(t.end)} · ${num(t.duration)} ${t.duration === 1 ? 'día' : 'días'} laborables · ${num(t.executionPct)} % ejecutado · ${t.predecessors.length ? `${t.predecessors.length} ${t.predecessors.length === 1 ? 'predecesora' : 'predecesoras'}` : 'sin predecesora'}${t.sobreasignada ? '\nSobreasignación: coincide con otras tareas y no hay cuadrillas para todas' : ''}`}</title>
                 <clipPath id={clip}><rect x={bx} y={by} width={bw} height={bh} rx="4" /></clipPath>
                 <g clipPath={`url(#${clip})`}>
                   <rect x={bx} y={by} width={bw} height={bh} fill={c} />
                   {pct > 0 ? <rect x={bx} y={by} width={bw * pct / 100} height={bh} fill={BAR.avance} /> : null}
                 </g>
                 {t.warning ? <rect x={bx + 0.5} y={by + 0.5} width={bw - 1} height={bh - 1} rx="4" fill="none" stroke="#3A3A38" strokeDasharray="3 2" /> : null}
+                {t.sobreasignada ? <rect x={bx - 1.5} y={by - 2.5} width={bw + 3} height={bh + 5} rx="5" fill="none" stroke={SOBRE} strokeWidth="2.5" /> : null}
               </g>
             );
           })}

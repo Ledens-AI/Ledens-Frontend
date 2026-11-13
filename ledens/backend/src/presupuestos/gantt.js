@@ -1,6 +1,7 @@
 import { audit } from '../db/audit.js';
 import { PresupuestoError, PresupuestosService, isUuid } from './service.js';
 import { ROL_LABEL, completos, equipos, loadMembers, loadWorkers } from './recursos.js';
+import { sobreasignaciones } from './ganttLimitaciones.js';
 
 // Planificación (Gantt) of a project of Gestión financiera with at least one
 // approved presupuesto (migration 035). Tasks are the approved lines of its
@@ -129,7 +130,9 @@ const num = (v) => {
 };
 
 export class GanttService {
-  constructor(pool, user) { this.pool = pool; this.user = user; this.svc = new PresupuestosService(pool, user); }
+  // enforceLimitaciones: false only where the scheduling arithmetic itself is
+  // tested with tasks in parallel on purpose; the routes never pass it.
+  constructor(pool, user, { enforceLimitaciones = true } = {}) { this.pool = pool; this.user = user; this.enforce = enforceLimitaciones; this.svc = new PresupuestosService(pool, user); }
 
   // The rendimiento column of ledens.work_items (the import names it; read
   // from the catalog): numeric first, then the one about a crew / day.
@@ -212,6 +215,11 @@ export class GanttService {
       };
     });
     const starts = out.map((t) => t.start).sort(), ends = out.map((t) => t.end).sort();
+    // Limitaciones (ganttLimitaciones.js): a plan that breaks one in an obra cannot be saved.
+    const limitaciones = sobreasignaciones(tasks.map((t) => ({ id: t.id, obraId: t.l.obra_id, name: names.get(t.id), ...sched.get(t.id) })),
+      obras.map((o) => ({ id: o.id, ref: o.ref, cuadrillas: crews.get(o.id) || 1 })), (i) => cal.date(i));
+    const over = new Set(limitaciones.flatMap((x) => x.tareas));
+    for (const t of out) t.sobreasignada = over.has(t.id);
     // Cuadrillas: who is in each one; the workers to choose from only for who edits.
     const obraIds = obras.map((o) => o.id);
     const members = await loadMembers(db, obraIds);
@@ -240,6 +248,7 @@ export class GanttService {
       hitos: obras.map((o) => ({ id: o.id, obraId: o.id, ref: o.ref, name: names.get(o.id), date: obraStart.get(o.id) })),
       start: starts[0] || base, end: ends[ends.length - 1] || base,
       rendimiento: col ? { column: col.name, unit: col.perHour ? 'h por unidad' : 'unidades por jornada' } : null,
+      limitaciones,
       tasks: out,
     };
   }
@@ -332,7 +341,11 @@ export class GanttService {
   // a single task's save (update(), above) and by the «guardar en bloque»
   // of the planning agent's suggestions (ganttAgente.js never writes here
   // itself — only this method does, after the jefe has reviewed).
-  async updateMany(projectId, items = []) {
+  // Limitaciones: a save that leaves an obra it touches breaking one (e.g.
+  // two tasks at once with one cuadrilla) is refused (409), nothing applied.
+  // { simular: true }: applies the changes, answers the plan as it would be
+  // (with its limitaciones) and rolls everything back — the draft of Gantt.jsx.
+  async updateMany(projectId, items = [], { simular = false } = {}) {
     if (!Array.isArray(items) || !items.length) fail(400, 'No hay tareas que guardar');
     if (items.length > 200) fail(400, 'Demasiadas tareas de una vez');
     const prepared = items.map((body, n) => this.normalize(body, n + 1));
@@ -365,6 +378,10 @@ export class GanttService {
         details.push(`${line.ref} · ${line.code || line.name}: ${keepDuration ? 'misma duración' : duration !== null ? `${String(duration).replace('.', ',')} días` : 'duración según rendimiento'}${preds.length ? ` · predecesoras ${preds.map((p) => `${name(p.id)} ${p.type}${p.lag ? (p.lag > 0 ? `+${p.lag}` : p.lag) : ''}`).join(', ')}` : ' · sin predecesoras'}`);
       }
       const result = await this.get(projectId, c); // throws on a cycle → rollback, nothing applied
+      if (simular) { await c.query('ROLLBACK'); return { ...result, simulacion: true }; }
+      const touched = new Set(prepared.map((p) => obraOf.get(p.partidaId)?.id));
+      const broken = result.limitaciones.filter((x) => touched.has(x.obraId));
+      if (broken.length && this.enforce) fail(409, `No se puede guardar: ${broken.map((x) => x.mensaje).join(' ')}`);
       const label = prepared.length === 1 ? lines.find((l) => l.id === prepared[0].partidaId)?.ref : `${prepared.length} tareas`;
       await audit({ actor: { id: this.user.id, name: this.user.name || this.user.email }, action: 'Planificación modificada', target: { id: null, label }, detail: details.join('\n') }, c);
       await c.query('COMMIT');

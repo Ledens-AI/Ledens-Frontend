@@ -208,3 +208,13 @@
 .obr-rec-filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
 .obr-rec-filters input[type='search'] { flex: 1 1 220px; max-width: 320px; }
 .obr-gantt-pred-default { font-style: italic; }
+/* Limitaciones and the draft of the Gantt («Guardar») */
+.obr-gantt-savebar { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; background: #FFFFFF; border: 1px solid #E4E1DA; border-radius: 10px; }
+.obr-gantt-savebar.is-dirty { border-color: #8C9BD0; background: #F5F7FD; }
+.obr-gantt-limits ul { margin: 6px 0 0; padding-left: 18px; }
+.obr-gantt-limits li + li { margin-top: 4px; }
+.obr-gantt-limit-tag { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: #8A5300; background: #FCE3B8; border-radius: 4px; padding: 1px 6px; }
+.obr-gantt-legend-sobre { background: transparent !important; border: 2.5px solid; box-sizing: border-box; }
+.obr-gantt-sobre-icon { color: #E08A00; margin-right: 4px; }
+.obr-gantt-table tr.is-draft td:first-child { box-shadow: inset 3px 0 0 #3E4D85; }
+.obr-gantt-table tr.is-sobre td:nth-child(2) strong { color: #8A5300; }
