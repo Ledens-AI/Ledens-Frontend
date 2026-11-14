@@ -329,6 +329,7 @@ function TeamActions({ doc, can, busy, onEdit, onSend, onAmpliar, onApproveOnBeh
 
 // Admins: record an approval the client gave outside the platform (team-only, in Spanish).
 function BehalfDialog({ doc, version, options, busy, error, onClose, onConfirm }) {
+  const { tr } = useObrasI18n();
   const [reason, setReason] = useState(''), [chosen, setChosen] = useState([]);
   const draft = version.status === 'draft';
   return (
@@ -344,7 +345,7 @@ function BehalfDialog({ doc, version, options, busy, error, onClose, onConfirm }
           {options.map((o) => (
             <label key={o.id} className="fin-choice">
               <input type="checkbox" checked={chosen.includes(o.id)} onChange={(e) => setChosen((s) => (e.target.checked ? [...s, o.id] : s.filter((x) => x !== o.id)))} />
-              <span>{o.name}</span>
+              <span>{tr(o, 'name')}</span>
             </label>
           ))}
         </fieldset>

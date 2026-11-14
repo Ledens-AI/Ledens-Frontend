@@ -28,6 +28,8 @@ before(async () => {
   for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '032_traducciones_presupuesto.sql', '033_presupuestos_proyecto.sql']) {
     await db.exec(await fs.readFile(new URL('../src/db/migrations/' + m, import.meta.url), 'utf8'));
   }
+  // The Spanish cache (045) on its own line, so this setup does not collide with other branches editing the list above.
+  await db.exec(await fs.readFile(new URL('../src/db/migrations/045_traducciones_presupuesto_es.sql', import.meta.url), 'utf8'));
   [admin, cliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES ('admin@tr.test','Admin','admin'),('cliente@tr.test','Client','client') RETURNING id,email,name,role`)).rows;
   const svc = new PresupuestosService(pool, admin);
   const d = await svc.create({ title: 'Fontanería', vatRate: '21', clientId: cliente.id, notes: 'No incluye la red de desagües.',
@@ -80,6 +82,40 @@ test('in English: chapters, lines, descriptions and notes translated once, the S
     assert.equal(es.body.version.chapters[0].items[0].nameEn, undefined, 'in Spanish nothing is added');
     assert.equal(es.body.translation, undefined);
     assert.equal(calls.length, 1);
+  });
+});
+
+test('in Spanish: a line typed in English comes in Spanish, Spanish text is left as written', async () => {
+  await db.query('DELETE FROM presupuesto_traducciones');
+  const svc = new PresupuestosService(pool, admin);
+  const d = await svc.create({ title: 'Ampliación', vatRate: '21', clientId: cliente.id,
+    chapters: [{ name: 'Presupuesto', items: [
+      { code: 'PA-285', name: 'Technical review of the project’s preventive documentation', description: 'Includes the site visit.', unit: 'ud', quantity: '1', unitPrice: '120' },
+      { code: 'PA-026', name: 'Tubería de agua fría', unit: 'ml', quantity: '5', unitPrice: '12' }] }] });
+  await svc.send(d.id);
+  const ES = { 'Technical review of the project’s preventive documentation': 'Revisión técnica de la documentación preventiva del proyecto', 'Includes the site visit.': 'Incluye la visita a obra.' };
+  const seen = [];
+  // Like Azure: a text already in the target language comes back as it is, with its detected language.
+  const bilingual = { translate: async (texts, { to }) => { seen.push({ texts, to }); return texts.map((t) => (ES[t] ? { text: ES[t], from: 'en' } : { text: `${t}!`, from: 'es' })); } };
+  await withRouter({ translator: bilingual }, async (call) => {
+    const r = await call(`/${d.id}`, cliente, 'es');
+    assert.equal(r.status, 200);
+    const [en, es] = r.body.version.chapters[0].items;
+    assert.equal(en.nameEs, 'Revisión técnica de la documentación preventiva del proyecto');
+    assert.equal(en.descriptionEs, 'Incluye la visita a obra.');
+    assert.equal(en.name, 'Technical review of the project’s preventive documentation', 'what was typed stays for the editor');
+    assert.equal(es.nameEs, undefined, 'detected as Spanish: never rewritten');
+    assert.equal(r.body.version.chapters[0].nameEs, undefined);
+    assert.equal(r.body.translation, undefined, 'the Spanish screen reports nothing');
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].to, 'es');
+    await call(`/${d.id}`, cliente, 'es');
+    assert.equal(seen.length, 1, 'the second time every text, Spanish ones included, comes from the cache');
+  });
+  await withRouter({ translator: null }, async (call) => {
+    const r = await call(`/${d.id}`, cliente, 'es');
+    assert.equal(r.status, 200);
+    assert.equal(r.body.version.chapters[0].items[0].nameEs, 'Revisión técnica de la documentación preventiva del proyecto', 'cached');
   });
 });
 
