@@ -7,7 +7,7 @@ import { createApp, trustProxyHops } from '../src/app.js';
 // req.ip — the key of every rate limiter — must be the client's address as
 // Static Web Apps saw it, not the SWA hop shared by all users, and must not be
 // something the client can set. Production X-Forwarded-For shape (verified
-// with /api/auth/mobile/diagnostico): "<client>, <SWA hop>". No database needed.
+// with the temporary /api/auth/mobile/diagnostico, removed 15 Nov 2026): "<client>, <SWA hop>". No database needed.
 const SWA = '198.51.100.200';
 
 async function withServer(fn) {
