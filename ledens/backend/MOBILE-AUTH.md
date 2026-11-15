@@ -111,31 +111,30 @@ La app envía `Authorization: Bearer <token>` y **ninguna cookie**: en React Nat
 
 Desde un móvil físico, usa la IP LAN del equipo (`http://192.168.x.x:4000`). Es HTTP plano y solo vale en local, porque fuera de `NODE_ENV=production` no se exige HTTPS.
 
-## Antes de activar el flag en producción
+## Activación en producción
 
-Requiere aprobación explícita. Las comprobaciones se hacen sin credenciales con `GET /api/auth/mobile/diagnostico`. Responde con el flag activado o no, y devuelve solo booleanos y conteos sobre la propia petición, nunca direcciones ni valores:
+`MOBILE_AUTH_ENABLED=true` está activo en el Container App desde el **15-11-2026**.
+
+Antes de activarlo se comprobó, sin credenciales y con un endpoint de diagnóstico temporal que ya se ha retirado:
+- **HTTPS:** Express detecta `req.secure` detrás de SWA y Container Apps.
+- **Cabeceras:** Static Web Apps no añade `Authorization`, `Origin` ni `Cookie` a las peticiones web, así que la regla de cookie + Bearer no afecta a la web.
+- **`req.ip`**, la clave de los limitadores:
+  - es la IP del cliente desde `trust proxy 2` (#150);
+  - con `trust proxy 1` era el salto de SWA, común a todos, y el limitador de login era global;
+  - una entrada `X-Forwarded-For` inventada no la cambia.
+
+Después de activarlo se comprobaron:
+- el login móvil desde un navegador (403);
+- el login sin credenciales (401, `no-store`, sin cookie);
+- el logout idempotente;
+- los tokens inválidos (401);
+- que el Container App sigue en 401 si se accede directamente;
+- el login y las escrituras en la web, con una sesión real.
+
+**Riesgo aceptado:** cuando hay varias réplicas, cada una guarda su propio contador en memoria, así que el límite efectivo es N × 10 intentos. Corregirlo requiere un almacén compartido, es decir, un recurso nuevo.
+
+**Volver atrás** (las sesiones móviles dejan de aceptarse; no hay que borrar nada):
 
 ```bash
-# Como la app: sin Origin, sin cookie, sin Authorization
-curl -s https://ledens.es/api/auth/mobile/diagnostico
-# Con una entrada X-Forwarded-For inventada, para ver si req.ip se puede falsificar
-curl -s https://ledens.es/api/auth/mobile/diagnostico -H 'X-Forwarded-For: 203.0.113.9'
+az containerapp update -g rg-ledens -n ledens-backend --remove-env-vars MOBILE_AUTH_ENABLED
 ```
-
-| Campo | Valor esperado | Si no |
-|---|---|---|
-| `https` | `true` | El login móvil respondería 403 «Se requiere HTTPS» |
-| `authorizationHeader` (petición sin `Authorization`) | `false` | SWA inyecta `Authorization`: con el flag activo, la regla cookie + Bearer rompería la web. **No activar** |
-| `originHeader` / `cookieHeader` (petición sin ellos) | `false` | Un proxy añade cabeceras; revisar antes de activar |
-| `forwardedFor.ipIsFirstEntry` sin XFF propio, `ipIsInternal` | `true`, `false` | `req.ip` es un proxy de Azure: el limitador de login (10 / 15 min) sería **global** para todos los usuarios |
-| con XFF inventado: `ipIsFirstEntry` | `false` | `req.ip` sale de una cabecera que controla el cliente: el limitador se podría esquivar |
-| `replica` en varias llamadas | uno o varios ids | Con N réplicas, cada una guarda su propio contador en memoria: el límite efectivo es N × 10 |
-
-**Resultado del 13-11-2026 en producción**, sin credenciales:
-- `https: true`, `authorizationHeader: false`, `originHeader: false` y `cookieHeader: false`: correctos;
-- la cadena `X-Forwarded-For` trae 2 entradas de Azure: cliente y salto SWA → Container Apps;
-- con `trust proxy 1`, `req.ip` era la **última** entrada, el salto de SWA, compartido por todos los usuarios. El limitador de login era global, y lo era ya para la web.
-
-Corregido con `TRUST_PROXY_HOPS` (2 por defecto, en `src/app.js`). Tras desplegarlo hay que repetir el diagnóstico: en una petición sin XFF propio debe salir `ipIsFirstEntry: true`.
-
-Además, una vez activado el flag, hay que comprobar desde la app (o con `curl`) que la app nativa no envía `Origin`.
