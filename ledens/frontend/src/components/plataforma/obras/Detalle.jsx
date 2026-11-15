@@ -6,6 +6,7 @@ import PdfImport from './PdfImport.jsx';
 import BaseMatch from './BaseMatch.jsx';
 import Archivos from './Archivos.jsx';
 import Clientes from './Clientes.jsx';
+import Necesidades from './Necesidades.jsx';
 import ProjectPicker from '../finanzas/ProjectPicker.jsx';
 import { useObrasI18n } from './i18n.js';
 const ObraHerramientas = React.lazy(() => import('../herramientas/ObraHerramientas.jsx'));
@@ -180,6 +181,8 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
               </div>
             </div>
           )) : <Empty icon="ri-file-list-3-line" title={t.noItems} text={t.noItemsText} />}
+          {/* Team only (clients never get `project`): materials and tools from the recetas of the partidas. */}
+          {'project' in doc && v.chapters.length ? <Necesidades key={v.id} id={doc.id} versionId={v.id} /> : null}
           <BudgetDocs id={doc.parent?.id || doc.id} />
           {v.notes ? <div className="fin-card"><h3>{t.notes}</h3><p className="obr-pre">{tr(v, 'notes')}</p></div> : null}
           {doc.ampliaciones.length ? (
@@ -203,7 +206,7 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
       {tab === 'archivos' && doc.obra ? <Archivos obraId={doc.id} readOnly={readOnly} toast={toast} /> : null}
 
       {tab === 'clientes' && doc.can?.invite ? <Clientes obraId={doc.id} readOnly={readOnly} toast={toast} /> : null}
-      {tab === 'herramientas' && doc.project?.id ? <React.Suspense fallback={<div className="fin-loading fin-muted">Cargando herramientas…</div>}><ObraHerramientas projectId={doc.project.id} readOnly={readOnly} toast={toast} /></React.Suspense> : null}
+      {tab === 'herramientas' && doc.project?.id ? <React.Suspense fallback={<div className="fin-loading fin-muted">Cargando herramientas…</div>}><ObraHerramientas projectId={doc.project.id} obraId={doc.obra ? doc.id : null} readOnly={readOnly} toast={toast} /></React.Suspense> : null}
 
       {tab === 'conversacion' ? (
         <div className="fin-card">

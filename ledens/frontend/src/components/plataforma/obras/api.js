@@ -90,6 +90,14 @@ export const api = {
   // The base de partidas (admins; backend: presupuestos/partidas.js).
   partidas: (params) => request('GET', `${base}/partidas?${new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v !== '' && v != null))}`),
   guardarPartida: (id, body) => request('PATCH', `${base}/partidas/${id}`, body),
+  // Recetas of a partida (by its PA-### code): tools it requires and materials per unit (backend: presupuestos/recetas.js).
+  herramientasTipos: () => request('GET', `${base}/partidas/herramientas-tipos`),
+  receta: (code) => request('GET', `${base}/partidas/${encodeURIComponent(code)}/receta`),
+  recetaAdd: (code, kind, body) => request('POST', `${base}/partidas/${encodeURIComponent(code)}/${kind}`, body),
+  recetaUpdate: (code, kind, id, body) => request('PATCH', `${base}/partidas/${encodeURIComponent(code)}/${kind}/${id}`, body),
+  recetaRemove: (code, kind, id) => request('DELETE', `${base}/partidas/${encodeURIComponent(code)}/${kind}/${id}`),
+  // What a presupuesto (version) or a whole obra (ambito 'obra') needs, from the recetas of its lines.
+  necesidades: (id, params) => request('GET', `${base}/${id}/necesidades?${new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v))}`),
   assignJefe: (id, body) => request('PUT', `${base}/${id}/jefe`, body),
   // «Analizar existentes»: a PDF draft against the obra's approved lines (saves nothing).
   compare: (id, body) => request('POST', `${base}/${id}/comparar`, body),

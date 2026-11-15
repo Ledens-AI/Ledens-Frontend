@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { getPool, closePool } from '../db/pool.js';
 import { importApproved } from '../presupuestos/import.js';
 import { repararNombresDesdePdf } from '../presupuestos/repararNombres.js';
+import { seedRecetas } from '../presupuestos/recetasIniciales.js';
 
 // Operator tool: loads an already-approved presupuesto (with its progress so
 // far) as an obra en curso. Run it where DATABASE_URL points at the right
@@ -17,11 +18,17 @@ import { repararNombresDesdePdf } from '../presupuestos/repararNombres.js';
 // The client (and jefe) accounts must exist: `npm run users -- create …`.
 // `reparar-nombres [--simular]`: re-reads the budget PDFs kept in obras and
 // restores partida names the old PDF reader cut (repararNombres.js).
-const USAGE = 'Uso: npm run presupuestos -- importar <fichero.json> | reparar-nombres [--simular]';
+// `recetas-iniciales [--simular]`: first herramientas and materiales, by rule,
+// for the partidas of the base that have none yet (recetasIniciales.js) — e.g.
+// partidas brought in by the accounting import after the startup job ran.
+const USAGE = 'Uso: npm run presupuestos -- importar <fichero.json> | reparar-nombres [--simular] | recetas-iniciales [--simular]';
 
 const [command, file] = process.argv.slice(2);
 try {
-  if (command === 'reparar-nombres') {
+  if (command === 'recetas-iniciales') {
+    const r = await seedRecetas(getPool(), { simulate: file === '--simular', actorLabel: 'Sistema (consola)' });
+    console.log(`${r.conReceta} de ${r.partidas} partidas sin receta ${file === '--simular' ? 'recibirían' : 'reciben'} una inicial (${r.herramientas} herramientas, ${r.materiales} materiales). Sin regla: ${r.sinRegla.join(', ') || 'ninguna'}`);
+  } else if (command === 'reparar-nombres') {
     await repararNombresDesdePdf(getPool(), { simulate: file === '--simular' });
   } else {
     if (command !== 'importar' || !file) throw new Error(USAGE);

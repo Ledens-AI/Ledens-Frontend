@@ -18,7 +18,10 @@ export default function SolicitudForm({ options, preset, toast, onCancel, onSave
     return d || {
       projectId: preset?.projectId || (projects.length === 1 ? projects[0].id : ''),
       neededFrom: todayISO(1), returnBy: todayISO(8), notes: '',
-      items: preset?.tool ? [{ typeId: preset.tool.type.id, assetId: preset.tool.id, assetLabel: `${preset.tool.code} · ${preset.tool.name}`, quantity: 1 }] : [{ typeId: '', quantity: 1 }],
+      // preset.items: the tools an obra needs and lacks (ObraHerramientas, from the recetas of its partidas).
+      items: preset?.tool ? [{ typeId: preset.tool.type.id, assetId: preset.tool.id, assetLabel: `${preset.tool.code} · ${preset.tool.name}`, quantity: 1 }]
+        : preset?.items?.length ? preset.items.map((i) => ({ typeId: i.typeId, quantity: i.quantity })) : [{ typeId: '', quantity: 1 }],
+      ...(preset?.notes ? { notes: preset.notes } : {}),
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [f, setF] = useState(initial);

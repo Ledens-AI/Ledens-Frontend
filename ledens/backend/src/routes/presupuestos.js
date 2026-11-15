@@ -10,6 +10,7 @@ import { translatorFromEnv } from '../presupuestos/translate.js';
 import { translateDoc } from '../presupuestos/traducciones.js';
 import { PropuestasService } from '../presupuestos/propuestas.js';
 import { PartidasService } from '../presupuestos/partidas.js';
+import { RecetasService } from '../presupuestos/recetas.js';
 import { GanttService } from '../presupuestos/gantt.js';
 import { FestivosService } from '../presupuestos/festivos.js';
 import { RecursosService } from '../presupuestos/recursos.js';
@@ -82,7 +83,23 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   router.post('/propuestas/:pid/rechazar', handle((req) => propuestas(req).reject(req.params.pid, req.body || {})));
   // The base de partidas (ledens.work_items): admins read and correct it.
   const partidas = (req) => new PartidasService(pool || getPool(), req.user);
-  router.get('/partidas', handle((req) => partidas(req).list({ q: req.query.q, categoria: req.query.categoria, activa: req.query.activa, page: req.query.pagina })));
+  // Each partida of the page carries its receta (herramientas + materiales, migration 046).
+  const recetas = (req) => new RecetasService(pool || getPool(), req.user);
+  router.get('/partidas', handle(async (req) => {
+    const d = await partidas(req).list({ q: req.query.q, categoria: req.query.categoria, activa: req.query.activa, page: req.query.pagina });
+    const r = await recetas(req).forCodes(d.partidas.map((p) => p.values.id_partida));
+    for (const p of d.partidas) p.receta = r.get(p.values.id_partida) || null;
+    return d;
+  }));
+  // Recetas de las partidas: tools each one requires and materials per unit (admins edit; team reads).
+  router.get('/partidas/herramientas-tipos', handle((req) => recetas(req).toolTypes()));
+  router.get('/partidas/:code/receta', handle((req) => recetas(req).get(req.params.code)));
+  router.post('/partidas/:code/herramientas', handle((req) => recetas(req).addTool(req.params.code, req.body || {})));
+  router.patch('/partidas/:code/herramientas/:rid', handle((req) => recetas(req).updateTool(req.params.code, req.params.rid, req.body || {})));
+  router.delete('/partidas/:code/herramientas/:rid', handle((req) => recetas(req).removeTool(req.params.code, req.params.rid)));
+  router.post('/partidas/:code/materiales', handle((req) => recetas(req).addMaterial(req.params.code, req.body || {})));
+  router.patch('/partidas/:code/materiales/:rid', handle((req) => recetas(req).updateMaterial(req.params.code, req.params.rid, req.body || {})));
+  router.delete('/partidas/:code/materiales/:rid', handle((req) => recetas(req).removeMaterial(req.params.code, req.params.rid)));
   router.patch('/partidas/:wid', handle((req) => partidas(req).update(req.params.wid, req.body || {})));
   // A project of Gestión financiera with the presupuestos linked to it (team only).
   router.get('/proyectos', handle(async (req) => ({ proyectos: await svc(req).projectsList() })));
@@ -112,6 +129,8 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   // itself (src/presupuestos/ganttAgente.js). Same Anthropic client as /agente.
   router.post('/proyectos/:projectId/gantt/agente', rateLimit({ windowMs: 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false }),
     handle((req) => ganttAgenteDraft(req.user, req.params.projectId, { db: pool || getPool(), anthropic: agent })));
+  // Materials and tools its lines need (version on screen, or the whole obra). Team only.
+  router.get('/:id/necesidades', handle((req) => recetas(req).necesidades(req.params.id, { versionId: req.query.version || undefined, ambito: req.query.ambito })));
   router.get('/:id', handle((req) => svc(req).get(req.params.id, { versionId: req.query.version || undefined })));
   router.post('/', handle((req) => svc(req).create(req.body || {})));
   router.put('/:id', handle((req) => svc(req).saveDraft(req.params.id, req.body || {})));

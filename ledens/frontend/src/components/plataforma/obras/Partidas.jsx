@@ -2,13 +2,22 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
 import { eur, num } from '../finanzas/format.js';
 import { Badge, Dialog, Empty, ErrorBox, Pager } from '../finanzas/ui.jsx';
+import { KINDS, RecetaDialog, RecetaResumen } from './PartidaReceta.jsx';
 
 /* Partidas (admins): the base de partidas (ledens.work_items, backend:
  * presupuestos/partidas.js). The table shows the important columns (name,
  * description, unit, prices, rendimiento…); «Editar» opens every value of the
  * partida. The columns come from the database itself, so a column added to
  * the base by the accounting import shows up here without a code change. The
- * code (PA-###) is never edited: budgets keep it. Spanish only. */
+ * code (PA-###) is never edited: budgets keep it. Spanish only.
+ * Three apartados: «Partidas» (the values), «Herramientas» (tools each one
+ * requires) and «Materiales» (receta per unit); see PartidaReceta.jsx. */
+const APARTADOS = [['partidas', 'Partidas'], ['herramientas', 'Herramientas'], ['materiales', 'Materiales']];
+const INTRO = {
+  partidas: 'La base de partidas con la que se valoran los presupuestos (PDF, documentación de la visita y editor). Aquí se ven los valores principales de cada partida; «Editar» abre todos sus campos. Cada cambio queda en Auditoría. El código PA-### no se cambia: los presupuestos lo conservan.',
+  herramientas: 'Las herramientas obligatorias de cada partida. Al presupuestar se ve qué herramientas necesitará la obra y, al comenzarla, cuáles faltan en ella para solicitarlas. Las herramientas son los tipos del inventario de Herramientas.',
+  materiales: 'La receta de materiales de cada partida: cuánto material consume una unidad de la partida (por m², ml, ud…), más la merma. Al presupuestar se multiplica por la medición de cada línea.',
+};
 const isPrice = (k) => /price|precio/.test(k);
 const show = (col, v, categoryCode) => {
   if (v == null || v === '') return '—';
@@ -29,6 +38,8 @@ export default function Partidas({ toast, readOnly }) {
   const [activa, setActiva] = useState('');
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState(null);
+  const [apartado, setApartado] = useState('partidas');
+  const [receta, setReceta] = useState(null); // partida whose herramientas/materiales are open
   const [reload, setReload] = useState(0);
   // Search as you type, without one request per key.
   useEffect(() => { const t = setTimeout(() => { setQuery(q.trim()); setPage(1); }, 300); return () => clearTimeout(t); }, [q]);
@@ -46,7 +57,10 @@ export default function Partidas({ toast, readOnly }) {
     <div className="fin obr">
       <div className="fin-page-head">
         <h1>Partidas</h1>
-        <p>La base de partidas con la que se valoran los presupuestos (PDF, documentación de la visita y editor). Aquí se ven los valores principales de cada partida; «Editar» abre todos sus campos. Cada cambio queda en Auditoría. El código PA-### no se cambia: los presupuestos lo conservan.</p>
+        <p>{INTRO[apartado]}</p>
+      </div>
+      <div className="fin-segmented" role="tablist">
+        {APARTADOS.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={apartado === k} className={apartado === k ? 'is-on' : ''} onClick={() => setApartado(k)}>{l}</button>)}
       </div>
       <div className="fin-card fin-filters">
         <label className="fin-field fin-grow"><span>Buscar</span><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Código, nombre, descripción o palabras clave" /></label>
@@ -61,13 +75,30 @@ export default function Partidas({ toast, readOnly }) {
           </select></label>
         <button className="fin-btn" type="button" onClick={() => setReload((n) => n + 1)}>Actualizar</button>
       </div>
+      {receta ? <RecetaDialog partida={receta} kind={apartado} readOnly={readOnly} onClose={() => setReceta(null)}
+        onChange={(r) => setData((d) => ({ ...d, partidas: d.partidas.map((x) => (x.id === receta.id ? { ...x, receta: r } : x)) }))} /> : null}
       {editing ? <Editar partida={editing} data={data} readOnly={readOnly} onClose={() => setEditing(null)}
         onSaved={(p, changed) => { setEditing(null); if (changed) { toast?.(p.values.id_partida ? `Partida ${p.values.id_partida} guardada` : 'Partida guardada'); setData((d) => ({ ...d, partidas: d.partidas.map((x) => (x.id === p.id ? p : x)) })); } else toast?.('Sin cambios'); }} /> : null}
       <div className="fin-card is-flush">
         {error ? <ErrorBox message={error} onRetry={load} /> : null}
         {!error && !data ? <div className="fin-loading fin-muted">Cargando…</div> : null}
         {data && !data.partidas.length ? <Empty icon="ri-search-line" title="Ninguna partida coincide" text="Prueba con otros filtros." /> : null}
-        {data && data.partidas.length ? <>
+        {data && data.partidas.length && apartado !== 'partidas' ? <>
+          <div className="fin-table-wrap"><table className="fin-table">
+            <thead><tr><th>Código</th><th>Partida</th><th>Unidad</th><th>{KINDS[apartado].title}</th><th><span className="fin-sr">Acciones</span></th></tr></thead>
+            <tbody>{data.partidas.map((p) => (
+              <tr key={p.id}>
+                <td className="fin-nowrap"><strong>{p.values.id_partida || '—'}</strong></td>
+                <td className="fin-ellipsis is-wide" title={p.values.name || ''}>{p.values.name || '—'}</td>
+                <td className="fin-nowrap">{p.values.unit_source || '—'}</td>
+                <td>{p.receta ? <RecetaResumen receta={p.receta} kind={apartado} unit={p.values.unit_source} /> : <span className="fin-muted">Sin código PA-###: no admite receta</span>}</td>
+                <td>{p.receta ? <button type="button" className="fin-btn" onClick={() => setReceta(p)}>{readOnly ? 'Ver' : KINDS[apartado].edit}</button> : null}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+          <Pager page={data.page} pageSize={data.pageSize} total={data.total} onPage={setPage} />
+        </> : null}
+        {data && data.partidas.length && apartado === 'partidas' ? <>
           <div className="fin-table-wrap"><table className="fin-table">
             <thead><tr>
               <th>{codeCol?.label || 'Código'}</th>
