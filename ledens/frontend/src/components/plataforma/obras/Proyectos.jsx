@@ -287,7 +287,7 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
                 hint={pendienteCobro < 0 ? `Cobrado ${eur(-pendienteCobro)} por encima de lo aprobado` : 'Aprobado con IVA − cobrado'} />
               <Kpi label="Costes" value={eur(costes)} icon="ri-shopping-cart-2-line"
                 hint={`Materiales ${eur(fin.materiales)} · Mano de obra ${eur(fin.trabajadores)}`} />
-              <Kpi label="Resultado" value={eur(t.resultado)} icon="ri-line-chart-line" tone={Number(t.resultado) < 0 ? 'bad' : undefined}
+              <Kpi label="Resultado" value={eur(t.resultado)} icon="ri-line-chart-line" tone={Number(t.resultado) < 0 ? 'bad' : Number(t.resultado) > 0 ? 'good' : undefined}
                 hint={costePct !== null ? `Costes: ${pctS(costePct)} del presupuesto aprobado sin IVA` : 'Ingresos − costes'} />
             </div>
             <p className="fin-muted fin-small obr-hint-tight">{`Desde Rentabilidad por proyecto: los ${t.movimientos} movimientos asignados al proyecto, validados o no.`}</p>
