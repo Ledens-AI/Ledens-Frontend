@@ -1,6 +1,7 @@
 import { audit } from '../db/audit.js';
 import { createInBase } from './propuestas.js';
 import { unitKey } from './catalog.js';
+import { queueProgressAlerts } from './avisoAvance.js';
 
 // Presupuestos para clientes y seguimiento de obra (migration 020). One
 // service per request, built with the effective user (after «Ver como»).
@@ -20,7 +21,7 @@ const fail = (status, message) => { throw new PresupuestoError(status, message);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (v) => typeof v === 'string' && UUID.test(v);
 export const KINDS = ['confirmada', 'condicionada', 'decision', 'opcion'];
-const COUNTED = "(l.kind IN ('confirmada','condicionada') OR l.selected)";
+export const COUNTED = "(l.kind IN ('confirmada','condicionada') OR l.selected)";
 // Line amounts are summed unrounded and only totals are rounded, so net prices
 // converted from VAT-inclusive ones add back up to the original total.
 const LINE = 'l.quantity*l.unit_price';
@@ -824,15 +825,18 @@ export class PresupuestosService {
       if (p.parent_id) fail(400, 'La producción se declara en la obra principal');
       if (!p.start_date) fail(409, 'La obra aún no tiene fecha de inicio');
       const lines = new Map((await this.obraLines([p.id], db)).map((l) => [l.id, l]));
-      let changed = 0;
+      let changed = 0, firstId = null;
       for (const i of parsed) {
         const l = lines.get(i.partidaId);
         if (!l) fail(400, 'Esa partida no pertenece a lo aprobado en esta obra');
         if (Number(i.executed) > Number(l.quantity) * 10) fail(400, `«${l.name}»: la cantidad ejecutada es más de diez veces la presupuestada`);
         if (Number(i.executed) === Number(l.executed) && !i.note) continue;
-        await db.query('INSERT INTO presupuesto_produccion (partida_id, executed, note, declared_by) VALUES ($1,$2,$3,$4)', [i.partidaId, i.executed, i.note, this.user.id]);
+        const { id: rowId } = (await db.query('INSERT INTO presupuesto_produccion (partida_id, executed, note, declared_by) VALUES ($1,$2,$3,$4) RETURNING id::text', [i.partidaId, i.executed, i.note, this.user.id])).rows[0];
+        firstId ??= rowId;
         changed++;
       }
+      // The clients of the obra get one email summarising the change (avisoAvance.js).
+      if (changed) await queueProgressAlerts(db, p.id, firstId);
       if (changed) await audit({ actor: this.actor(), action: 'Producción declarada', target: { id: p.client_id, label: p.ref }, detail: `${p.ref} · ${changed} partida${changed === 1 ? '' : 's'}` }, db);
     });
     return this.get(id);

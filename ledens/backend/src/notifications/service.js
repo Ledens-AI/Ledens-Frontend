@@ -1,6 +1,7 @@
 import {randomUUID,createHash} from 'node:crypto';
 import {invitationMessage} from '../invitaciones/service.js';
 import {passwordLinkMessage} from '../auth/passwordLinks.js';
+import {progressMessage} from '../presupuestos/avisoAvance.js';
 const escape=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const reasons={duplicate_content:'El archivo ya estaba registrado; no se ha duplicado el documento',invoice_date_requires_review:'La fecha del documento no se ha validado',ocr_failed:'El extractor no ha podido leer el documento',ocr_rejected_document:'El extractor ha rechazado el documento',no_match:'No se ha encontrado un movimiento compatible',ambiguous_match:'Existen varios movimientos posibles',insufficient_evidence:'No hay evidencias suficientes para conciliar',auto_confirmed:'Conciliación automática confirmada',partial_or_existing_allocation:'Existen imputaciones previas o parciales',invoice_issue:'El documento requiere revisión',awaiting_evaluation:'Pendiente de evaluar'};
 const states={duplicate:'Duplicado detectado; documento conservado sin duplicar',received:'Recibido',ready:'Extracción correcta',review:'Revisión necesaria',archived:'Original archivado',pending:'Conciliación pendiente',matched:'Conciliado',Confirmado:'Conciliación confirmada',Revisar:'Conciliación en revisión',error:'Fallo técnico',replace_allocations:'Asignación a proyecto actualizada',recognition:'Validación contable actualizada',review_flag:'Revisión actualizada'};
@@ -25,7 +26,7 @@ export class AlertService{
   for(const a of rows){
    // Client invitations and password links go to the person, not to the fixed recipients (the Logic App sends to `to` when present).
    // One no longer open (accepted, revoked, used, expired or replaced since) is closed without sending.
-   const personal={invitation:invitationMessage,password_link:passwordLinkMessage}[a.event_type];
+   const personal={invitation:invitationMessage,password_link:passwordLinkMessage,obra_avance:progressMessage}[a.event_type];
    if(personal){
     const mail=await personal(this.pool,a);
     if(mail)messages.push({id:a.id,lease_token:token,...mail});

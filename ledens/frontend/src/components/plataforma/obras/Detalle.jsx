@@ -515,6 +515,7 @@ function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
       {editing ? (<>
         <button type="button" className="fin-btn" onClick={() => setEditing(false)} disabled={busy}>Cancelar</button>
         <button type="button" className="fin-btn is-primary" onClick={save} disabled={busy}><i className="ri-save-line"></i>{busy ? 'Guardando…' : 'Guardar avance'}</button>
+        <span className="fin-muted"><i className="ri-mail-line"></i> El cliente recibirá por email un resumen de los cambios de esta sesión (unos 30 min después del primero).</span>
       </>) : <button type="button" className="fin-btn is-primary" onClick={startEdit}><i className="ri-edit-2-line"></i>Actualizar avance</button>}
       {localError || error ? <span className="fin-error-inline">{localError || error}</span> : null}
     </div>

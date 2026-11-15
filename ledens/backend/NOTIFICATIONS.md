@@ -29,6 +29,17 @@ Los **enlaces para crear o restablecer la contraseña** (migración 025, `src/au
 
 `PUBLIC_APP_URL` (opcional) es la base del enlace; por defecto el host de SWA de producción.
 
+## Mensajes con destinatario propio: avance de obra al cliente
+
+Cuando el equipo guarda «Actualizar avance» (`PUT /api/presupuestos/:id/produccion`, `declare()` en `src/presupuestos/service.js`), `src/presupuestos/avisoAvance.js` encola un aviso por cada cliente que sigue la obra, con `event_type = 'obra_avance'`, en la misma transacción.
+
+- **Destinatarios:** el cliente titular y los invitados a la obra (`obra_clientes`), solo si ya han entrado alguna vez (`registered_at`) y su acceso no está retenido (`access_held` sin email verificado). Se vuelve a comprobar al reclamar: quien ya no sigue la obra no recibe nada (`obra_avance_not_pending`).
+- **Un correo por sesión de trabajo, no por clic:** el primer cambio deja la fila con `next_attempt_at = now() + AVISO_AVANCE_MINUTOS` (opcional, por defecto 30, de 0 a 1440); los cambios que llegan antes de que se reclame se suman a ese mismo correo.
+- **La fila solo guarda ids:** `payload = { obra_id, user_id, desde, lang }`. Al reclamar se fija `hasta` (último id de `presupuesto_produccion` de la obra, con el mismo bloqueo de la obra que `declare()`) y se construye el resumen de las filas `desde`..`hasta`: por partida, cantidad y % antes → ahora, la nota del jefe, y el % de ejecución de toda la obra antes → ahora. Un reintento tras un fallo de Outlook envía el mismo resumen; un cambio posterior abre un correo nuevo.
+- **Idioma:** el de la última invitación de esa persona a la obra, si no español. En inglés se usan las traducciones ya guardadas en `presupuesto_traducciones` (y el traductor si está configurado); sin ellas, los nombres de las partidas quedan en español.
+- **Sin importes:** el correo no lleva precios ni totales en euros, solo cantidades y porcentajes, y un botón a `<PUBLIC_APP_URL>/plataforma`.
+- No hay baja de estos avisos todavía: quien no los quiera debe pedirlo al equipo.
+
 ## Despliegue
 
 1. Fusionar y desplegar backend; el mecanismo habitual aplica migración 011. CI ejecuta integración PostgreSQL 16.
