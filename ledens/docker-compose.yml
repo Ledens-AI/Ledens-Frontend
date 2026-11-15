@@ -31,6 +31,9 @@ services:
       NODE_ENV: production
       PORT: 4000
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+      # One proxy here (frontend nginx appends the client to X-Forwarded-For);
+      # production has two (Static Web App + Container Apps ingress), the default.
+      TRUST_PROXY_HOPS: "1"
       DATA_DIR: /data
       DATABASE_URL: postgres://ledens:${POSTGRES_PASSWORD:-ledens_dev_password}@db:5432/ledens
       # Empty until a Google Cloud Console app exists — the backend then just
