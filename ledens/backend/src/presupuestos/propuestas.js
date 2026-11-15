@@ -1,5 +1,6 @@
 import { audit } from '../db/audit.js';
 import { PresupuestoError, isUuid } from './service.js';
+import { seedRecetaNueva } from './recetasIniciales.js';
 
 // New partidas for the base (partida_propuestas): lines of a budget that no
 // partida of the base covers. Saving the presupuesto creates them at once
@@ -156,5 +157,7 @@ export async function createInBase(c, p, body = {}, user, { auto = false } = {})
     [p.id, actor.id, note, pa, cat.id_categoria, name, definition, unit, price]);
   await link(pa, `Partida nueva creada en la base como ${pa} · ${cat.id_categoria} ${cat.name} (${price == null ? 'inactiva, precio pendiente de valoración' : 'activa'}).`);
   await audit({ actor, action: 'Partida creada en la base', target: { id: null, label: pa }, detail: `${pa} «${name}» (${unit}${price == null ? ', sin precio' : `, ${price} € IVA incl.`}) · ${cat.id_categoria}${p.ref ? ` · desde ${p.ref}` : ''}${auto ? ' · al guardar el presupuesto' : ''}` }, c);
+  // Its first herramientas and materiales, by rule (recetasIniciales.js); the team corrects them in «Partidas».
+  await seedRecetaNueva(c, pa);
   return { code: pa, category: cat.id_categoria, active: price != null };
 }

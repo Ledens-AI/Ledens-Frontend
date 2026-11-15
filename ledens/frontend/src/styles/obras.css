@@ -235,3 +235,16 @@
 .obr-gantt-cal-tag.is-project { background: #FBE9D7; color: #8A4B12; }
 .obr-gantt-cal-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .obr-gantt-cal-form input[type="text"] { flex: 1 1 220px; min-width: 0; }
+
+/* Recetas de las partidas (Partidas → Herramientas / Materiales; necesidades del presupuesto). */
+.obr-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.obr-chip { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #F1F0EC; color: #3A3A38; white-space: nowrap; }
+.obr-chip.is-missing { background: #FDECEA; color: #A42A1E; }
+.obr-chip.is-ok { background: #E6F4EA; color: #1E7B34; }
+.obr-receta { margin: 0; padding: 0; list-style: none; font-size: 13px; display: grid; gap: 2px; }
+.obr-num-input { width: 84px; text-align: right; }
+.obr-unit-input { width: 90px; }
+.obr-receta-add { margin-top: 14px; display: grid; gap: 10px; justify-items: start; }
+.obr-receta-add .obr-grid { width: 100%; }
+.obr-necesidades summary { cursor: pointer; font-weight: 600; }
+.obr-necesidades-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 12px; }
