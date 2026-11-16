@@ -9,11 +9,6 @@
   },
   "routes": [
     {
-      "route": "/movil",
-      "redirect": "/movil/",
-      "statusCode": 301
-    },
-    {
       "route": "/movil/_expo/*",
       "headers": {
         "cache-control": "public, max-age=31536000, immutable"
