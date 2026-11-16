@@ -9,8 +9,67 @@
   },
   "routes": [
     {
+      "route": "/movil",
+      "redirect": "/movil/",
+      "statusCode": 301
+    },
+    {
+      "route": "/movil/_expo/*",
+      "headers": {
+        "cache-control": "public, max-age=31536000, immutable"
+      }
+    },
+    {
+      "route": "/movil/assets/*",
+      "headers": {
+        "cache-control": "public, max-age=31536000, immutable"
+      }
+    },
+    {
+      "route": "/movil/",
+      "headers": {
+        "cache-control": "no-cache"
+      }
+    },
+    {
+      "route": "/movil/index.html",
+      "headers": {
+        "cache-control": "no-cache"
+      }
+    },
+    {
+      "route": "/movil/acceso*",
+      "rewrite": "/movil/index.html",
+      "headers": {
+        "cache-control": "no-cache"
+      }
+    },
+    {
+      "route": "/movil/admin*",
+      "rewrite": "/movil/index.html",
+      "headers": {
+        "cache-control": "no-cache"
+      }
+    },
+    {
+      "route": "/movil/jefe*",
+      "rewrite": "/movil/index.html",
+      "headers": {
+        "cache-control": "no-cache"
+      }
+    },
+    {
+      "route": "/movil/cliente*",
+      "rewrite": "/movil/index.html",
+      "headers": {
+        "cache-control": "no-cache"
+      }
+    },
+    {
       "route": "/assets/*",
-      "headers": { "cache-control": "public, max-age=31536000, immutable" }
+      "headers": {
+        "cache-control": "public, max-age=31536000, immutable"
+      }
     }
   ],
   "globalHeaders": {
