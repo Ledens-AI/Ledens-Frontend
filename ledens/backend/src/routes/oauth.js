@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getPool, isDbConfigured } from '../db/pool.js';
-import { createSession, sessionCookieOptions, SESSION_COOKIE } from '../auth/sessions.js';
+import { createSession, isMobileAuthEnabled, sessionCookieOptions, SESSION_COOKIE } from '../auth/sessions.js';
+import { createHandoff, isChallenge } from '../auth/handoffs.js';
 import { findOrCreateUserFromIdentity, EmailInUseError } from '../auth/identities.js';
 import * as google from '../auth/providers/google.js';
 import * as microsoft from '../auth/providers/microsoft.js';
@@ -16,12 +17,49 @@ const router = Router();
 const STATE_COOKIE = 'oauth_state';
 const STATE_MAX_AGE_MS = 10 * 60 * 1000;
 
+// Ledens Mobile (GET /api/auth/<provider>/mobile): the PKCE challenge of the
+// app that opened the browser. With it, the callback answers with a one-time
+// handoff code on MOBILE_OAUTH_REDIRECT_URI instead of a session cookie.
+const MOBILE_COOKIE = 'oauth_mobile';
+// The web version of Ledens Mobile (/movil/, Safari): `?destino=movil` brings
+// the person back there instead of to the landing page. A fixed value, never
+// a URL from the request, so there is no open redirect.
+const DEST_COOKIE = 'oauth_destino';
+const AUTH_PATH = '/api/auth';
+const mobileRedirectUri = () => process.env.MOBILE_OAUTH_REDIRECT_URI || 'ledens://auth/callback';
+const flowCookie = (req) => ({ ...sessionCookieOptions(req), path: AUTH_PATH, maxAge: STATE_MAX_AGE_MS });
+
+// Every start says which flow the next callback belongs to, so a cookie left
+// behind by an abandoned attempt (same Chrome on Android) can't redirect a
+// later web login to the app, or the other way round.
+function setFlow(req, res, { mobileChallenge = null } = {}) {
+  if (mobileChallenge) res.cookie(MOBILE_COOKIE, mobileChallenge, flowCookie(req));
+  else res.clearCookie(MOBILE_COOKIE, { path: AUTH_PATH });
+  if (!mobileChallenge && req.query.destino === 'movil') res.cookie(DEST_COOKIE, 'movil', flowCookie(req));
+  else res.clearCookie(DEST_COOKIE, { path: AUTH_PATH });
+}
+
+const toApp = (params) => `${mobileRedirectUri()}?${new URLSearchParams(params)}`;
+
 // Ends a provider login in a session. With an invitation link in progress
 // (cookie set by /api/invitaciones/aceptacion/proveedor) the provider account
 // must carry the invited email; the link proves that email, so the login
 // counts as verified and the invitation is accepted. Otherwise the login is the
 // ordinary one and the provider alone decides whether the email is verified.
 async function signIn(req, res, provider, profile) {
+  const mobileChallenge = req.cookies?.[MOBILE_COOKIE];
+  if (mobileChallenge) {
+    // Ledens Mobile: no cookie session for the browser; the app redeems the
+    // code with its PKCE verifier (POST /api/auth/mobile/exchange).
+    res.clearCookie(MOBILE_COOKIE, { path: AUTH_PATH });
+    if (!isMobileAuthEnabled() || !isChallenge(mobileChallenge)) return res.redirect(toApp({ error: `${provider}_failed` }));
+    const user = await findOrCreateUserFromIdentity({ provider, ...profile });
+    const code = await createHandoff(user.id, mobileChallenge, provider);
+    console.info('[auth] mobile oauth handoff', { user: user.id, provider });
+    return res.redirect(toApp({ code }));
+  }
+  const toMovil = req.cookies?.[DEST_COOKIE] === 'movil';
+  res.clearCookie(DEST_COOKIE, { path: AUTH_PATH });
   const invite = req.cookies?.[INVITE_COOKIE];
   let user;
   if (invite) {
@@ -39,18 +77,26 @@ async function signIn(req, res, provider, profile) {
   }
   const { token } = await createSession(user.id, { userAgent: req.get('user-agent'), ip: req.ip });
   res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
-  res.redirect(invite ? '/plataforma' : '/');
+  res.redirect(invite ? '/plataforma' : toMovil ? '/movil/' : '/');
 }
 
 // A failed or cancelled provider login goes back to the page it started from:
 // the invitation page while a link is in progress, /auth otherwise.
 function failTo(req, res, code) {
+  if (req.cookies?.[MOBILE_COOKIE]) {
+    res.clearCookie(MOBILE_COOKIE, { path: AUTH_PATH });
+    return res.redirect(toApp({ error: code }));
+  }
+  if (req.cookies?.[DEST_COOKIE] === 'movil') {
+    res.clearCookie(DEST_COOKIE, { path: AUTH_PATH });
+    return res.redirect(`/movil/acceso?error=${code}`);
+  }
   if (!req.cookies?.[INVITE_COOKIE]) return res.redirect(`/auth?error=${code}`);
   res.clearCookie(INVITE_COOKIE, { path: '/api/auth' });
   res.redirect(`/invitacion?error=${code}`);
 }
 
-router.get('/google', (req, res) => {
+function startGoogle(req, res, flow = {}) {
   if (!google.isGoogleConfigured()) {
     return res.status(503).json({ error: 'Login con Google no disponible todavía' });
   }
@@ -58,10 +104,29 @@ router.get('/google', (req, res) => {
     return res.status(503).json({ error: 'Login no disponible todavía' });
   }
 
+  setFlow(req, res, flow);
   const state = google.randomState();
   res.cookie(STATE_COOKIE, state, { ...sessionCookieOptions(req), maxAge: STATE_MAX_AGE_MS });
   res.redirect(google.buildAuthUrl(state));
-});
+}
+router.get('/google', (req, res) => startGoogle(req, res));
+
+// Ledens Mobile: same provider app, same registered redirect_uri as the web;
+// only the end of the callback differs (handoff code, see signIn). An invitation
+// in progress in this browser is dropped: invitations are accepted on the web.
+function mobileStart(start) {
+  return (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    if (!isMobileAuthEnabled()) return res.status(404).json({ error: 'No encontrado' });
+    const challenge = req.query.code_challenge;
+    if (!isChallenge(challenge) || (req.query.code_challenge_method ?? 'S256') !== 'S256') {
+      return res.status(400).json({ error: 'Solicitud no válida' });
+    }
+    res.clearCookie(INVITE_COOKIE, { path: '/api/auth' });
+    start(req, res, { mobileChallenge: challenge });
+  };
+}
+router.get('/google/mobile', mobileStart(startGoogle));
 
 router.get('/google/callback', async (req, res) => {
   const { code, state, error } = req.query;
@@ -94,16 +159,21 @@ router.get('/google/callback', async (req, res) => {
 // fails («No se pudo iniciar sesión»): when the browser started on another
 // address of the site (as forwarded by the Static Web App), go through that
 // host first. /inicio never redirects again, so this can't loop.
-function onCallbackHost(req, res, provider, redirectUri) {
+function onCallbackHost(req, res, provider, redirectUri, path = 'inicio') {
   const forwarded = String(req.get('x-forwarded-host') || '').split(',')[0].trim().toLowerCase();
   let target;
   try { target = new URL(redirectUri); } catch { return false; }
   if (!forwarded || forwarded === target.host.toLowerCase()) return false;
-  res.redirect(`${target.origin}/api/auth/${provider}/inicio`);
+  // Only the known, validated parameters travel to the other host.
+  const keep = new URLSearchParams();
+  if (path === 'mobile' && isChallenge(req.query.code_challenge)) keep.set('code_challenge', req.query.code_challenge);
+  if (path === 'inicio' && req.query.destino === 'movil') keep.set('destino', 'movil');
+  const qs = keep.toString();
+  res.redirect(`${target.origin}/api/auth/${provider}/${path}${qs ? `?${qs}` : ''}`);
   return true;
 }
 
-function startMicrosoft(req, res) {
+function startMicrosoft(req, res, flow = {}) {
   if (!microsoft.isMicrosoftConfigured()) {
     return res.status(503).json({ error: 'Login con Microsoft no disponible todavía' });
   }
@@ -111,6 +181,7 @@ function startMicrosoft(req, res) {
     return res.status(503).json({ error: 'Login no disponible todavía' });
   }
 
+  setFlow(req, res, flow);
   const state = microsoft.randomState();
   res.cookie(STATE_COOKIE, state, { ...sessionCookieOptions(req), maxAge: STATE_MAX_AGE_MS });
   res.redirect(microsoft.buildAuthUrl(state));
@@ -119,7 +190,11 @@ router.get('/microsoft', (req, res) => {
   if (microsoft.isMicrosoftConfigured() && onCallbackHost(req, res, 'microsoft', process.env.MICROSOFT_REDIRECT_URI)) return;
   startMicrosoft(req, res);
 });
-router.get('/microsoft/inicio', startMicrosoft);
+router.get('/microsoft/inicio', (req, res) => startMicrosoft(req, res));
+router.get('/microsoft/mobile', mobileStart((req, res, flow) => {
+  if (microsoft.isMicrosoftConfigured() && onCallbackHost(req, res, 'microsoft', process.env.MICROSOFT_REDIRECT_URI, 'mobile')) return;
+  startMicrosoft(req, res, flow);
+}));
 
 router.get('/microsoft/callback', async (req, res) => {
   const { code, state, error } = req.query;

@@ -103,6 +103,7 @@ export async function usePasswordLink(pool, token, password) {
     if (!u.email_verified) await db.query('DELETE FROM auth_identities WHERE user_id=$1', [u.id]);
     await db.query('UPDATE users SET password_hash=$2, email_verified=true, updated_at=now() WHERE id=$1', [u.id, hashPassword(password)]);
     await db.query('DELETE FROM sessions WHERE user_id=$1', [u.id]); // a new password closes every session
+    await db.query('DELETE FROM auth_handoffs WHERE user_id=$1', [u.id]); // …and every Ledens Mobile login still in flight
     await db.query('UPDATE password_links SET used_at=now(), token_hash=NULL WHERE id=$1', [l.id]);
     await audit({ actor: { id: u.id, name: u.name || u.email }, action: l.has_password ? 'Contraseña restablecida' : 'Contraseña creada', target: { id: u.id, label: u.email },
       detail: l.requested_by ? 'Con el enlace enviado por un administrador' : 'Con el enlace pedido desde «Iniciar sesión»' }, db);

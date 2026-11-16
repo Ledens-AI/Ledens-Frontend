@@ -78,6 +78,7 @@ export async function findOrCreateUserFromIdentity(identity, _retried = false) {
         [found.id, name ?? null],
       );
       await client.query('DELETE FROM sessions WHERE user_id = $1', [found.id]);
+      await client.query('DELETE FROM auth_handoffs WHERE user_id = $1', [found.id]);
       user = reclaimed.rows[0];
     } else {
       const created = await client.query(
