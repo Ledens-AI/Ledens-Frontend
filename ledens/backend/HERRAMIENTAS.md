@@ -105,6 +105,7 @@ Errores: `{ error: 'texto en español', ...extra }` con el código HTTP adecuado
 | POST | `/tipos`, `/ubicaciones` | `tools.manage` | Catálogo. |
 | POST | `/importar[?simular=1]` | `tools.manage` | CSV (texto, 1 MB, 2000 filas). Todo o nada. |
 | POST | `/` · PATCH `/:id` | `tools.manage` | Alta · edición de ficha (`version` obligatoria; 409 si cambió). |
+| POST | `/alta` | `tools.register` (admin y jefe) | **«Nueva herramienta» con foto obligatoria**, en una sola petición. El cuerpo es la foto (JPG/PNG/HEIC, comprobada por su contenido, 15 MB). La ficha va en `X-Herramienta`, como JSON codificado con `encodeURIComponent`. Sin foto no se da de alta nada, y si falla después de guardar la foto, la foto se borra. El admin envía la ficha completa (por defecto, en el almacén central). El jefe solo envía `name`, `typeId` (opcional; sin tipo → «Sin clasificar», que se crea una vez), `acquiredOn` (fecha de compra), `notes` y `projectId`, que debe ser una de sus obras y es obligatorio si tiene alguna. Sin obras, la herramienta queda a su cargo en «Ubicación pendiente de confirmar». Nunca envía datos económicos ni kits. Queda auditado como «Herramienta dada de alta». |
 | GET | `/:id` | lectura | Ficha (id o código) + `actions` permitidas. |
 | GET | `/:id/historial` | su ámbito | Movimientos, asignaciones, reservas, incidencias, mantenimientos. |
 | GET | `/:id/qr.svg` | `tools.manage` | Etiqueta QR (SVG). |

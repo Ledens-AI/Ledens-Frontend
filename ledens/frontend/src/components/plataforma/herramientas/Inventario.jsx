@@ -39,6 +39,9 @@ export default function Inventario({ admin, initialFilter, readOnly, options, to
     <div className="tl">
       <div className="tl-head">
         <div><h2>Inventario</h2><p>{data ? `${data.total} herramienta${data.total === 1 ? '' : 's'}` : 'Herramientas y equipos de Ledens'}</p></div>
+        {!admin && !readOnly && options?.permissions?.includes('tools.register') ? (
+          <div className="obr-actions"><button type="button" className="fin-btn is-primary" onClick={() => setAdding(true)}><i className="ri-add-line" aria-hidden="true"></i>Nueva herramienta</button></div>
+        ) : null}
         {admin && !readOnly ? (
           <div className="obr-actions">
             {selecting ? <>
@@ -47,7 +50,7 @@ export default function Inventario({ admin, initialFilter, readOnly, options, to
             </> : <>
               <button type="button" className="fin-btn" onClick={() => setSelecting(new Set())}><i className="ri-qr-code-line" aria-hidden="true"></i>Etiquetas QR</button>
               <button type="button" className="fin-btn" onClick={() => setImporting(true)}><i className="ri-upload-2-line" aria-hidden="true"></i>Importar CSV</button>
-              <button type="button" className="fin-btn is-primary" onClick={() => setAdding(true)}><i className="ri-add-line" aria-hidden="true"></i>Dar de alta</button>
+              <button type="button" className="fin-btn is-primary" onClick={() => setAdding(true)}><i className="ri-add-line" aria-hidden="true"></i>Nueva herramienta</button>
             </>}
           </div>
         ) : null}
@@ -67,8 +70,8 @@ export default function Inventario({ admin, initialFilter, readOnly, options, to
         <ul className="tl-cards">{data.herramientas.map((h) => <ToolCard key={h.id} tool={h} onOpen={(x) => onOpen(x.id)} selected={selecting?.has(h.id)} onSelect={selecting ? toggle : undefined} />)}</ul>
       ) : null}
       {data && data.herramientas.length < data.total ? <button type="button" className="fin-btn" style={{ alignSelf: 'center' }} onClick={() => setPage((p) => p + 1)}>Cargar más</button> : null}
-      {adding ? <Sheet title="Dar de alta una herramienta" onClose={() => setAdding(false)}>
-        <ToolForm options={options} toast={toast} onTypes={onOptions} onCancel={() => setAdding(false)} onSaved={(d) => { setAdding(false); onOpen(d.herramienta.id); }} />
+      {adding ? <Sheet title="Nueva herramienta" onClose={() => setAdding(false)}>
+        <ToolForm admin={admin} options={options} toast={toast} onTypes={onOptions} onCancel={() => setAdding(false)} onSaved={(d) => { setAdding(false); onOpen(d.herramienta.id); }} />
       </Sheet> : null}
       {importing ? <ImportSheet toast={toast} onClose={(done) => { setImporting(false); if (done) { setPage(1); setTick((t) => t + 1); } }} /> : null}
     </div>

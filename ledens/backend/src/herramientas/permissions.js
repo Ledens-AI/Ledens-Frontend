@@ -6,6 +6,7 @@ export const TOOL_PERMS = [
   'tools.read', // see the tools of one's own obras and the availability one may consult
   'tools.read.all', // see the whole company's inventory, with every location and custodian
   'tools.manage', // register, edit, retire, label; economic data (cost, supplier, invoice)
+  'tools.register', // «+ Nueva herramienta»: register a tool with its photo (name, type, purchase date, where)
   'tools.request', // ask for tools for an obra
   'tools.requests.approve', // approve / reject / prepare / dispatch requests; reserve directly
   'tools.transfer', // send tools that are in one's obras or custody
@@ -17,7 +18,7 @@ export const TOOL_PERMS = [
 
 const BY_ROLE = {
   admin: TOOL_PERMS,
-  jefe: ['tools.read', 'tools.request', 'tools.transfer', 'tools.receive', 'tools.maintenance.report'],
+  jefe: ['tools.read', 'tools.register', 'tools.request', 'tools.transfer', 'tools.receive', 'tools.maintenance.report'],
   client: [], // no access to Ledens Tools in the MVP
 };
 

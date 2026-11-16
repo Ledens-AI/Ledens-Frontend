@@ -319,6 +319,52 @@ test('4/5/6/7 · requests: availability, approval (partial), reservations and co
   assert.ok(!(await H(otroJefe).listRequests({})).solicitudes.some((s) => s.id === req.id), 'el otro jefe no ve solicitudes ajenas');
 });
 
+test('«+ Nueva herramienta»: photo required, jefe in their obras without economic data, admin with the whole ficha', async () => {
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 1)]);
+  const alta = (who, ficha, body = jpeg) => call('/alta', who, { method: 'POST', body, headers: { 'content-type': 'application/octet-stream', 'x-herramienta': encodeURIComponent(JSON.stringify(ficha)) } });
+
+  // No photo, or something that is not a photo: nothing is registered.
+  const before = (await db.query('SELECT count(*)::int n FROM inventory.assets')).rows[0].n;
+  assert.equal((await alta(jefe, { name: 'Taladro', projectId: casa }, Buffer.alloc(0))).status, 400);
+  assert.equal((await alta(jefe, { name: 'Taladro', projectId: casa }, Buffer.from('MZ not an image'))).status, 415);
+  assert.equal((await alta(jefe, {}, jpeg)).status, 400, 'the name is required');
+  assert.equal((await call('/alta', jefe, { method: 'POST', body: jpeg, headers: { 'content-type': 'application/octet-stream', 'x-herramienta': '%E0%A4%A' } })).status, 400);
+  assert.equal((await db.query('SELECT count(*)::int n FROM inventory.assets')).rows[0].n, before);
+
+  // Jefe: in one of their obras, no type → «Sin clasificar», economic fields ignored.
+  const r = await json(await alta(jefe, { name: 'Taladro percutor Bosch', acquiredOn: '2026-10-02', projectId: casa, cost: '999', supplier: 'X' }));
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  const h = r.body.herramienta;
+  assert.match(h.code, /^LED-TOOL-\d{6}$/);
+  assert.equal(h.type.name, 'Sin clasificar');
+  assert.equal(h.location.project.id, casa);
+  assert.equal(h.cost, undefined, 'a jefe never sees costs');
+  const row = (await db.query('SELECT acquired_on::text d, cost, supplier, photo_key, photo_mime, created_by FROM inventory.assets WHERE id=$1', [h.id])).rows[0];
+  assert.deepEqual([row.d, row.cost, row.supplier, row.photo_mime, row.created_by], ['2026-10-02', null, null, 'image/jpeg', jefe.id]);
+  assert.ok(row.photo_key);
+  assert.equal((await call(`/${h.id}/foto`, jefe)).status, 200, 'the photo is there at once');
+  assert.ok((await db.query("SELECT 1 FROM audit_log WHERE action='Herramienta dada de alta' AND detail LIKE $1", [`${h.code}%`])).rows.length);
+
+  // Jefe: never in someone else's obra, never a kit; with obras, the obra is required.
+  assert.equal((await alta(jefe, { name: 'Radial', projectId: ortega })).status, 403);
+  assert.equal((await alta(jefe, { name: 'Radial', locationId: almacen })).status, 400, 'a jefe with obras picks one of them');
+  assert.equal((await alta(jefe, { name: 'Kit', projectId: casa, typeId: tipoKit })).status, 403);
+  // A client never.
+  assert.equal((await alta(cliente, { name: 'Radial' })).status, 403);
+
+  // Admin: the whole ficha, default the central warehouse.
+  const a = await json(await alta(admin, { name: 'Nivel láser Leica', typeId: tipoLaser, acquiredOn: '2026-09-01', cost: '320.50', supplier: 'Leica' }));
+  assert.equal(a.status, 201, JSON.stringify(a.body));
+  assert.equal(a.body.herramienta.location.id, almacen);
+  assert.equal(a.body.herramienta.cost, '320.50');
+
+  // Storage failing: no asset left behind.
+  const n = (await db.query('SELECT count(*)::int n FROM inventory.assets')).rows[0].n;
+  const broken = new HerramientasService(pool, admin, { storage: { put: async () => { throw new Error('blob down'); }, remove: async () => {} } });
+  await assert.rejects(broken.register({ name: 'Martillo' }, { content: jpeg, mime: 'image/jpeg' }), /blob down/);
+  assert.equal((await db.query('SELECT count(*)::int n FROM inventory.assets')).rows[0].n, n);
+});
+
 test('request transitions are a closed table', () => {
   assert.equal(canTransition('solicitada', 'entregada'), false);
   assert.equal(canTransition('borrador', 'aprobada'), false);
