@@ -30,12 +30,17 @@ export async function createHandoff(userId, challenge, provider) {
 // The user id when `code` is a live, unused handoff and `verifier` matches its
 // challenge; null otherwise. The code is spent by the first attempt (atomic
 // UPDATE … WHERE used_at IS NULL), right or wrong, so it can't be guessed at.
+// Every operation that closes all of a user's sessions (new password, account
+// reclaimed by a verified login, invitation link) also deletes their pending
+// handoffs; on top of that, the identity that started the login must still be
+// linked to the account (an unproven identity dropped meanwhile can't finish).
 export async function redeemHandoff(code, verifier) {
   if (typeof code !== 'string' || !CODE_RE.test(code) || typeof verifier !== 'string' || !VERIFIER_RE.test(verifier)) return null;
   const { rows } = await getPool().query(
-    `UPDATE auth_handoffs SET used_at = now()
-      WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
-      RETURNING user_id, code_challenge`,
+    `UPDATE auth_handoffs h SET used_at = now()
+      WHERE h.code_hash = $1 AND h.used_at IS NULL AND h.expires_at > now()
+        AND EXISTS (SELECT 1 FROM auth_identities i WHERE i.user_id = h.user_id AND i.provider = h.provider)
+      RETURNING h.user_id, h.code_challenge`,
     [hashToken(code)],
   );
   const row = rows[0];

@@ -79,6 +79,7 @@ export async function dropUnproven(db, userId) {
   if (!rowCount) return false;
   await db.query('DELETE FROM auth_identities WHERE user_id=$1', [userId]);
   await db.query('DELETE FROM sessions WHERE user_id=$1', [userId]);
+  await db.query('DELETE FROM auth_handoffs WHERE user_id=$1', [userId]); // Ledens Mobile logins still in flight
   return true;
 }
 
@@ -255,6 +256,7 @@ export async function acceptWithPassword(pool, token, password) {
     await dropUnproven(db, user.id);
     await db.query('UPDATE users SET password_hash=$2, updated_at=now() WHERE id=$1', [user.id, hashPassword(password)]);
     await db.query('DELETE FROM sessions WHERE user_id=$1', [user.id]);
+    await db.query('DELETE FROM auth_handoffs WHERE user_id=$1', [user.id]);
     return finish(db, inv, user, 'contraseña nueva');
   });
 }

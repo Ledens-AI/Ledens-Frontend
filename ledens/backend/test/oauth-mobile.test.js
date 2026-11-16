@@ -1,4 +1,4 @@
-import { test, before, after, beforeEach } from 'node:test';
+import { test, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import http from 'node:http';
@@ -6,6 +6,7 @@ import { once } from 'node:events';
 import { createApp } from '../src/app.js';
 import { runMigrations } from '../src/db/migrate.js';
 import { getPool, closePool, isDbConfigured } from '../src/db/pool.js';
+import { dropUnproven } from '../src/invitaciones/service.js';
 
 // Google / Microsoft login for Ledens Mobile (routes/oauth.js + auth/handoffs.js
 // + POST /api/auth/mobile/exchange), end to end against a local stand-in for
@@ -39,18 +40,27 @@ before(async () => {
     GOOGLE_TOKEN_URL: `${fakeGoogleBase}/token`,
     GOOGLE_USERINFO_URL: `${fakeGoogleBase}/userinfo`,
   });
+});
+
+after(async () => {
+  delete process.env.MOBILE_AUTH_ENABLED;
+  if (fakeGoogle) await new Promise((r) => fakeGoogle.close(r));
+  if (!skip) await getPool().query('DELETE FROM users WHERE lower(email) = lower($1)', [EMAIL]);
+  await closePool();
+});
+
+// A fresh app per test: each has its own 30/min API limiter, and these tests
+// make more requests than that between them.
+beforeEach(async () => {
+  if (skip) return;
   appServer = http.createServer(createApp());
   appServer.listen(0);
   await once(appServer, 'listening');
   appBase = `http://127.0.0.1:${appServer.address().port}`;
 });
-
-after(async () => {
-  delete process.env.MOBILE_AUTH_ENABLED;
+afterEach(async () => {
   if (appServer) await new Promise((r) => appServer.close(r));
-  if (fakeGoogle) await new Promise((r) => fakeGoogle.close(r));
-  if (!skip) await getPool().query('DELETE FROM users WHERE lower(email) = lower($1)', [EMAIL]);
-  await closePool();
+  appServer = null;
 });
 
 beforeEach(() => {
@@ -135,6 +145,25 @@ test('an expired code gets 401', { skip }, async () => {
   const { verifier, challenge } = pkce();
   const code = new URL((await mobileLogin(challenge)).headers.get('location')).searchParams.get('code');
   await getPool().query("UPDATE auth_handoffs SET expires_at = now() - interval '1 second' WHERE code_hash = encode(sha256($1::bytea), 'hex')", [code]);
+  assert.equal((await exchange({ code, codeVerifier: verifier })).status, 401);
+});
+
+test('reclaiming the account (identities and sessions dropped) also ends a login still in flight', { skip }, async () => {
+  const { verifier, challenge } = pkce();
+  const code = new URL((await mobileLogin(challenge)).headers.get('location')).searchParams.get('code');
+  const { rows } = await getPool().query('SELECT id FROM users WHERE lower(email) = lower($1)', [EMAIL]);
+  // As an invitation or password link does for an account whose email is not proven yet.
+  await getPool().query('UPDATE users SET email_verified = false WHERE id = $1', [rows[0].id]);
+  assert.equal(await dropUnproven(getPool(), rows[0].id), true);
+  assert.equal((await getPool().query('SELECT count(*)::int AS n FROM auth_handoffs WHERE user_id = $1', [rows[0].id])).rows[0].n, 0);
+  assert.equal((await exchange({ code, codeVerifier: verifier })).status, 401);
+  await getPool().query('UPDATE users SET email_verified = true WHERE id = $1', [rows[0].id]);
+});
+
+test('a handoff whose identity is no longer linked to the account is refused', { skip }, async () => {
+  const { verifier, challenge } = pkce();
+  const code = new URL((await mobileLogin(challenge)).headers.get('location')).searchParams.get('code');
+  await getPool().query("DELETE FROM auth_identities WHERE provider = 'google' AND provider_user_id = $1", ['google-oauth-mobile-1']);
   assert.equal((await exchange({ code, codeVerifier: verifier })).status, 401);
 });
 

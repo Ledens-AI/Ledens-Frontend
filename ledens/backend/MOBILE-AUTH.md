@@ -68,6 +68,8 @@ Por qué el código puede ir en una URL y el token no:
 - Sin el `codeVerifier`, que nunca sale de la app, no sirve: otra app que registrara el esquema `ledens://` no podría canjearlo.
 - El token de sesión nunca pasa por el navegador ni por una URL.
 
+Si se cierran todas las sesiones de una persona (contraseña nueva, cuenta recuperada con un login verificado, enlace de invitación), también se borran sus códigos pendientes. Además, al canjear un código, la identidad que inició el login tiene que seguir vinculada a la cuenta.
+
 Cualquier inicio de login web borra `oauth_mobile`, para que un intento móvil abandonado en el mismo Chrome no desvíe un login web posterior.
 
 **Versión web (`/movil/`, Safari):** usa el login web de siempre con cookie, añadiendo `?destino=movil` (`/api/auth/google?destino=movil`). Así vuelve a `/movil/`, y los errores van a `/movil/acceso?error=…`. Solo se acepta ese valor fijo, nunca una URL.
