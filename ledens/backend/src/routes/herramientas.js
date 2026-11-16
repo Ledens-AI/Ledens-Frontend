@@ -102,6 +102,16 @@ export function createHerramientasRouter({ authenticate, findUser, pool, storage
 
   // One asset (uuid or code such as LED-TOOL-000042)
   router.post('/', handle((req) => svc(req).create(req.body || {}), 201));
+  // «+ Nueva herramienta»: the photo is the body (JPG/PNG/HEIC, checked from its
+  // bytes) and the ficha travels URL-encoded JSON in X-Herramienta, like the
+  // X-Archivo-* headers of obra uploads. One step: no photo, no tool.
+  router.post('/alta', photo, handle((req) => {
+    let body;
+    try { body = JSON.parse(decodeURIComponent(req.get('x-herramienta') || '{}')); } catch { throw new FileError(400, 'Datos de la herramienta no válidos'); }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new FileError(400, 'Datos de la herramienta no válidos');
+    if (!Buffer.isBuffer(req.body) || !req.body.length) throw new FileError(400, 'La foto de la herramienta es obligatoria');
+    return svc(req).register(body, { content: req.body, mime: image(req) });
+  }, 201));
   router.get('/:id', handle((req) => svc(req).get(req.params.id)));
   router.patch('/:id', handle((req) => svc(req).update(req.params.id, req.body || {})));
   router.get('/:id/historial', handle((req) => svc(req).history(req.params.id)));

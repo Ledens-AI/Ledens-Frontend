@@ -16,7 +16,7 @@ const BY_STATUS = {
 // answers the first result instead of registering it twice (backend `once`).
 export const newKey = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`);
 
-export async function request(method, url, body, { key, raw, contentType } = {}) {
+export async function request(method, url, body, { key, raw, contentType, headers: extra } = {}) {
   let r;
   try {
     r = await fetch(url, {
@@ -25,6 +25,7 @@ export async function request(method, url, body, { key, raw, contentType } = {})
         ...(body !== undefined ? { 'Content-Type': contentType || (raw ? 'application/octet-stream' : 'application/json') } : {}),
         ...(key ? { 'Idempotency-Key': key } : {}),
         ...viewAsHeaders(),
+        ...(extra || {}),
       },
       body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
     });
@@ -55,6 +56,8 @@ export const tools = {
   resolveLabel: (token) => request('GET', `${base}/etiqueta/${enc(token)}`),
   history: (id) => request('GET', `${base}/${enc(id)}/historial`),
   create: (body) => request('POST', base, body),
+  // «+ Nueva herramienta»: the photo is the body, the ficha goes in X-Herramienta (backend POST /alta).
+  register: (file, ficha) => request('POST', `${base}/alta`, file, { raw: true, headers: { 'X-Herramienta': encodeURIComponent(JSON.stringify(ficha)) } }),
   update: (id, body) => request('PATCH', `${base}/${enc(id)}`, body),
   retire: (id, body) => request('POST', `${base}/${enc(id)}/baja`, body),
   relabel: (id, body) => request('POST', `${base}/${enc(id)}/etiqueta`, body),

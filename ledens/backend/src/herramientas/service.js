@@ -383,12 +383,78 @@ export class HerramientasService {
   // POST /api/herramientas — alta. An individual asset or a kit; consumables are stock, not assets.
   async create(body = {}, { db: outer } = {}) {
     this.need('tools.manage', 'Solo administración da de alta herramientas');
+    return this.insertAsset(body, { db: outer });
+  }
+
+  // «+ Nueva herramienta» (POST /api/herramientas/alta): the tool and its photo in
+  // one step — without a photo nothing is registered. An admin may send every
+  // field of the ficha; a jefe de obra only name, type, purchase date, notes and
+  // where it is (one of their obras or the central warehouse), never economic
+  // data. No type chosen → «Sin clasificar» (created once). If anything fails
+  // after the photo was stored, the photo is removed again.
+  async register(body = {}, { content, mime } = {}) {
+    this.need('tools.register', 'No puedes dar de alta herramientas');
+    if (!Buffer.isBuffer(content) || !content.length || !mime) fail(400, 'La foto de la herramienta es obligatoria');
+    if (!this.storage) fail(503, 'El almacenamiento de fotos no está configurado');
+    const manage = this.can('tools.manage');
+    const input = manage ? { ...body } : {
+      name: body.name, acquiredOn: body.acquiredOn, notes: body.notes, typeId: body.typeId, ownership: 'propia',
+    };
+    let stored = null;
+    let id;
+    try {
+      ({ id } = await this.tx(async (db) => {
+        if (!input.typeId) input.typeId = await this.unclassifiedType(db);
+        input.locationId = await this.registerLocation(db, body, manage, input);
+        const { id: assetId } = await this.insertAsset(input, { db, kitless: !manage });
+        stored = await this.putPhoto(assetId, content);
+        await db.query('UPDATE inventory.assets SET photo_key=$2, photo_mime=$3 WHERE id=$1', [assetId, stored, mime]);
+        return { id: assetId };
+      }));
+    } catch (e) {
+      // Only before the commit: after it, the photo belongs to a registered tool.
+      if (stored) await this.storage.remove?.(stored).catch(() => {});
+      throw e;
+    }
+    return this.get(id);
+  }
+  // The open projects of this jefe: the ones «Nueva herramienta» offers (same
+  // rule as the form, which lists /opciones projects with open !== false).
+  async openProjects(db) {
+    const mine = await this.myProjects(db);
+    if (!mine?.size || !(await this.hasTable(db, 'ledens.projects'))) return [];
+    return (await new PresupuestosService(db, this.user).projectsList()).filter((p) => mine.has(p.id) && p.open !== false);
+  }
+  async unclassifiedType(db) {
+    await db.query(`INSERT INTO inventory.tool_types (name, category, tracking) VALUES ('Sin clasificar', 'General', 'individual') ON CONFLICT DO NOTHING`);
+    const t = (await db.query("SELECT id FROM inventory.tool_types WHERE lower(name)='sin clasificar' AND tracking='individual' AND active ORDER BY created_at LIMIT 1")).rows[0];
+    if (!t) fail(409, 'Elige un tipo para la herramienta');
+    return t.id;
+  }
+  // Where a registered tool starts. Admin: any active location (default the
+  // central warehouse). Jefe: one of their obras (projectId), so they keep
+  // seeing it; with no open obra, in their own custody at «Ubicación
+  // pendiente de confirmar» until an admin places it.
+  async registerLocation(db, body, manage, input) {
+    if (body.projectId) {
+      const projectId = uuid(body.projectId, 'Obra');
+      if (!(await this.isMine(db, projectId))) fail(403, 'Solo puedes dar de alta herramientas en tus obras');
+      return this.obraLocation(db, projectId);
+    }
+    if (manage) return body.locationId ? uuid(body.locationId, 'Ubicación') : this.systemLocation(db, 'almacen');
+    if ((await this.openProjects(db)).length) fail(400, 'Elige la obra donde está la herramienta');
+    input.custodian = { type: 'user', id: this.user.id };
+    return this.systemLocation(db, 'pendiente');
+  }
+
+  async insertAsset(body = {}, { db: outer, kitless = false } = {}) {
     const typeId = uuid(body.typeId, 'Tipo');
     const fields = this.parseAssetFields(body);
     const run = async (db) => {
       const type = (await db.query('SELECT id, name, tracking FROM inventory.tool_types WHERE id=$1 AND active', [typeId])).rows[0];
       if (!type) fail(400, 'Tipo no encontrado');
       if (type.tracking === 'consumible') fail(400, 'Los consumibles se gestionan por existencias, no como herramienta individual');
+      if (kitless && type.tracking === 'kit') fail(403, 'Los kits los da de alta administración');
       const locationId = body.locationId ? uuid(body.locationId, 'Ubicación') : await this.systemLocation(db, 'almacen');
       const loc = (await db.query('SELECT id, kind, project_id FROM inventory.locations WHERE id=$1 AND active', [locationId])).rows[0];
       if (!loc) fail(400, 'Ubicación no encontrada');
