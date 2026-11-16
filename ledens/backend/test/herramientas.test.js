@@ -358,6 +358,23 @@ test('«+ Nueva herramienta»: photo required, jefe in their obras without econo
   assert.equal(a.body.herramienta.location.id, almacen);
   assert.equal(a.body.herramienta.cost, '320.50');
 
+  // A jefe whose only project is closed: nothing to choose, so it goes to his custody (the form shows no obra either).
+  const cerrado = (await db.query("INSERT INTO ledens.project_statuses(id, code, name) VALUES (gen_random_uuid(), 'CERRADO', 'Cerrado') RETURNING id")).rows[0].id;
+  await db.query('UPDATE ledens.projects SET status_id=$1 WHERE id=$2', [cerrado, ortega]);
+  const c = await json(await alta(otroJefe, { name: 'Escalera' }));
+  assert.equal(c.status, 201, JSON.stringify(c.body));
+  assert.equal(c.body.herramienta.location.kind, 'pendiente');
+  assert.equal(c.body.herramienta.custodian?.id, otroJefe.id);
+  await db.query('UPDATE ledens.projects SET status_id=NULL WHERE id=$1', [ortega]);
+
+  // Reading the answer after the commit fails: the tool is registered, so its photo stays.
+  const svcGetFails = new HerramientasService(pool, admin, { storage: folderStorage(dir) });
+  svcGetFails.get = async () => { throw new Error('read after commit'); };
+  await assert.rejects(svcGetFails.register({ name: 'Martillo con foto' }, { content: jpeg, mime: 'image/jpeg' }), /read after commit/);
+  const kept = (await db.query("SELECT photo_key FROM inventory.assets WHERE name='Martillo con foto'")).rows[0];
+  assert.ok(kept?.photo_key);
+  assert.ok((await H(admin).storage.get(kept.photo_key)), 'the photo of a registered tool is never deleted');
+
   // Storage failing: no asset left behind.
   const n = (await db.query('SELECT count(*)::int n FROM inventory.assets')).rows[0].n;
   const broken = new HerramientasService(pool, admin, { storage: { put: async () => { throw new Error('blob down'); }, remove: async () => {} } });

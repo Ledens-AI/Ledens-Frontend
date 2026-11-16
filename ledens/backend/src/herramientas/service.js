@@ -401,19 +401,29 @@ export class HerramientasService {
       name: body.name, acquiredOn: body.acquiredOn, notes: body.notes, typeId: body.typeId, ownership: 'propia',
     };
     let stored = null;
+    let id;
     try {
-      return await this.tx(async (db) => {
+      ({ id } = await this.tx(async (db) => {
         if (!input.typeId) input.typeId = await this.unclassifiedType(db);
         input.locationId = await this.registerLocation(db, body, manage, input);
-        const { id } = await this.insertAsset(input, { db, kitless: !manage });
-        stored = await this.putPhoto(id, content);
-        await db.query('UPDATE inventory.assets SET photo_key=$2, photo_mime=$3 WHERE id=$1', [id, stored, mime]);
-        return { id };
-      }).then(({ id }) => this.get(id));
+        const { id: assetId } = await this.insertAsset(input, { db, kitless: !manage });
+        stored = await this.putPhoto(assetId, content);
+        await db.query('UPDATE inventory.assets SET photo_key=$2, photo_mime=$3 WHERE id=$1', [assetId, stored, mime]);
+        return { id: assetId };
+      }));
     } catch (e) {
+      // Only before the commit: after it, the photo belongs to a registered tool.
       if (stored) await this.storage.remove?.(stored).catch(() => {});
       throw e;
     }
+    return this.get(id);
+  }
+  // The open projects of this jefe: the ones «Nueva herramienta» offers (same
+  // rule as the form, which lists /opciones projects with open !== false).
+  async openProjects(db) {
+    const mine = await this.myProjects(db);
+    if (!mine?.size || !(await this.hasTable(db, 'ledens.projects'))) return [];
+    return (await new PresupuestosService(db, this.user).projectsList()).filter((p) => mine.has(p.id) && p.open !== false);
   }
   async unclassifiedType(db) {
     await db.query(`INSERT INTO inventory.tool_types (name, category, tracking) VALUES ('Sin clasificar', 'General', 'individual') ON CONFLICT DO NOTHING`);
@@ -423,7 +433,7 @@ export class HerramientasService {
   }
   // Where a registered tool starts. Admin: any active location (default the
   // central warehouse). Jefe: one of their obras (projectId), so they keep
-  // seeing it; with no obra at all, in their own custody at «Ubicación
+  // seeing it; with no open obra, in their own custody at «Ubicación
   // pendiente de confirmar» until an admin places it.
   async registerLocation(db, body, manage, input) {
     if (body.projectId) {
@@ -432,7 +442,7 @@ export class HerramientasService {
       return this.obraLocation(db, projectId);
     }
     if (manage) return body.locationId ? uuid(body.locationId, 'Ubicación') : this.systemLocation(db, 'almacen');
-    if ((await this.myProjects(db))?.size) fail(400, 'Elige la obra donde está la herramienta');
+    if ((await this.openProjects(db)).length) fail(400, 'Elige la obra donde está la herramienta');
     input.custodian = { type: 'user', id: this.user.id };
     return this.systemLocation(db, 'pendiente');
   }
