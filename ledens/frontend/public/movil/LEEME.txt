@@ -1,0 +1,4 @@
+Versión web de pruebas de Ledens Mobile (para Safari en iPhone sin compilación nativa).
+NO SE EDITA A MANO: se genera en Ledens-AI/Ledens-mobile con `scripts/export-web.sh`
+y se copia aquí tal cual. Usa la sesión de Ledens Web (cookie HttpOnly) y rutas
+relativas /api; nunca un token Bearer. Abrir en https://ledens.es/movil/
