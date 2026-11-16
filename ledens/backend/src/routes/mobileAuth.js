@@ -1,5 +1,7 @@
 import { Router } from 'express';
-import { isDbConfigured } from '../db/pool.js';
+import rateLimit from 'express-rate-limit';
+import { getPool, isDbConfigured } from '../db/pool.js';
+import { redeemHandoff } from '../auth/handoffs.js';
 import { loginLimiter, verifyCredentials } from '../auth/credentials.js';
 import {
   createSession, destroySession, getSessionUser, isMobileAuthEnabled, readSessionCredential,
@@ -22,6 +24,15 @@ import {
 //    `trust proxy`), so the token never travels in clear;
 //  - no Set-Cookie, ever, and `Cache-Control: no-store` on every answer;
 //  - no token, password or email in logs; the token never in a URL.
+// Handoff codes are 256-bit and single-use, so this only bounds noise.
+const exchangeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' },
+});
+
 export function createMobileAuthRouter() {
   const router = Router();
 
@@ -47,6 +58,27 @@ export function createMobileAuthRouter() {
       res.json({ token, tokenType: 'Bearer', expiresAt: expiresAt.toISOString(), user });
     } catch (err) {
       console.error('[auth] mobile login failed', err.code || err.name);
+      res.status(500).json({ error: 'No se pudo iniciar sesión' });
+    }
+  });
+
+  // Google / Microsoft (routes/oauth.js, GET /api/auth/<provider>/mobile): the
+  // browser came back to the app with a one-time handoff code; the app proves
+  // it started that login with its PKCE verifier and gets the same answer as
+  // /login. The code is spent by the first try, right or wrong; every failure
+  // is the same 401.
+  router.post('/exchange', exchangeLimiter, async (req, res) => {
+    const { code, codeVerifier } = req.body || {};
+    try {
+      const userId = await redeemHandoff(code, codeVerifier);
+      if (!userId) return res.status(401).json({ error: 'No se pudo iniciar sesión' });
+      const { rows } = await getPool().query('SELECT id, email, name, role, created_at FROM users WHERE id = $1', [userId]);
+      if (!rows[0]) return res.status(401).json({ error: 'No se pudo iniciar sesión' });
+      const { token, expiresAt } = await createSession(userId, { userAgent: req.get('user-agent'), ip: req.ip });
+      console.info('[auth] mobile oauth login', { user: userId });
+      res.json({ token, tokenType: 'Bearer', expiresAt: expiresAt.toISOString(), user: rows[0] });
+    } catch (err) {
+      console.error('[auth] mobile exchange failed', err.code || err.name);
       res.status(500).json({ error: 'No se pudo iniciar sesión' });
     }
   });

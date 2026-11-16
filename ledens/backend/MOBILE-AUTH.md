@@ -54,6 +54,24 @@ Authorization: Bearer <token>
 
 Esta ruta nunca toca una sesión de cookie. La web sigue usando `POST /api/auth/logout`.
 
+### Google y Microsoft (`GET /api/auth/<proveedor>/mobile` + `POST /api/auth/mobile/exchange`)
+
+Flujo de una app nativa con el navegador del sistema (RFC 8252) y PKCE S256 (RFC 7636). No hace falta registrar nada nuevo en Google ni en Microsoft: se usa la misma `redirect_uri` que la web.
+
+1. La app genera `codeVerifier` y abre `https://ledens.es/api/auth/google/mobile?code_challenge=<base64url(sha256(verifier))>` en el navegador del sistema.
+2. El backend fija `oauth_state` y `oauth_mobile = <challenge>` (httpOnly, `path=/api/auth`, 10 min) y redirige al proveedor. Si hay una invitación en curso en ese navegador, la descarta: las invitaciones se aceptan en la web.
+3. El callback de siempre, al ver `oauth_mobile`, **no** crea cookie de sesión. Guarda un código de un solo uso (solo su SHA-256, 60 s, ligado al challenge) y redirige a `ledens://auth/callback?code=…` (`MOBILE_OAUTH_REDIRECT_URI`, fijo por entorno, nunca del request). Si el login falla o se cancela, redirige a `?error=google_cancelled`, `?error=google_failed`, etc.
+4. La app envía `POST /api/auth/mobile/exchange { code, codeVerifier }` sin `Origin` y recibe lo mismo que `/login`: `{ token, tokenType, expiresAt, user }`.
+
+Por qué el código puede ir en una URL y el token no:
+- El código caduca en 60 s y se gasta en el primer intento, sea correcto o no.
+- Sin el `codeVerifier`, que nunca sale de la app, no sirve: otra app que registrara el esquema `ledens://` no podría canjearlo.
+- El token de sesión nunca pasa por el navegador ni por una URL.
+
+Cualquier inicio de login web borra `oauth_mobile`, para que un intento móvil abandonado en el mismo Chrome no desvíe un login web posterior.
+
+**Versión web (`/movil/`, Safari):** usa el login web de siempre con cookie, añadiendo `?destino=movil` (`/api/auth/google?destino=movil`). Así vuelve a `/movil/`, y los errores van a `/movil/acceso?error=…`. Solo se acepta ese valor fijo, nunca una URL.
+
 ### El resto de la API
 
 La app envía `Authorization: Bearer <token>` y **ninguna cookie**: en React Native, `fetch` con `credentials: 'omit'`.
