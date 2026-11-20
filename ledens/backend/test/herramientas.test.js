@@ -57,7 +57,7 @@ before(async () => {
       start_date date, municipio text, customer_id uuid, status_id uuid, end_date date);
     CREATE TABLE ledens.finance_project_permissions (user_id uuid NOT NULL, project_id uuid, can_write boolean NOT NULL DEFAULT false);
     CREATE TABLE ledens.employees (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text, activo boolean, user_id uuid);`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '044_herramientas.sql']) await db.exec(await migration(m));
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '044_herramientas.sql', '048_partidas_eliminadas.sql']) await db.exec(await migration(m));
   [admin, jefe, otroJefe, cliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES
     ('admin@t.test','Admin','admin'),('jefe@t.test','Jefe Casa','jefe'),('jefe2@t.test','Jefe Ortega','jefe'),('cliente@t.test','Cliente','client')
     RETURNING id,email,name,role`)).rows;

@@ -29,7 +29,7 @@ before(async () => {
       ('PA-002','Fontanería','Instalación de agua fría con multicapa','ml','SI'),
       ('PA-003','Varios','Partida sin regla conocida','ud','SI'),
       ('PA-004','Pintura','Pintura plástica en paredes','m2','SI');`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '041_mantenimientos.sql', '044_herramientas.sql', '046_partida_recetas.sql']) await db.exec(await migration(m));
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '041_mantenimientos.sql', '044_herramientas.sql', '046_partida_recetas.sql', '048_partidas_eliminadas.sql']) await db.exec(await migration(m));
   [admin, jefe, otroJefe, cliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES ('a@r.test','Admin','admin'),('j@r.test','Jefe','jefe'),('j2@r.test','Otro','jefe'),('c@r.test','Cliente','client')
     RETURNING id,email,name,role`)).rows;
   // A tool already in the inventory is reused, never duplicated.

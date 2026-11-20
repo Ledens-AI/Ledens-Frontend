@@ -29,7 +29,7 @@ before(async () => {
     CREATE TABLE ledens.customers (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), display_name text NOT NULL);
     CREATE TABLE ledens.finance_project_permissions (user_id uuid NOT NULL, project_id uuid NOT NULL, PRIMARY KEY (user_id, project_id));
     INSERT INTO ledens.project_statuses VALUES ('00000000-0000-0000-0000-000000000001','EN_CURSO','En curso');`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql']) await db.exec(await migration(m));
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '048_partidas_eliminadas.sql']) await db.exec(await migration(m));
   [admin, jefe, otroJefe, cliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES
     ('admin@pp.test','Admin','admin'),('jefe@pp.test','Jefe','jefe'),('jefe2@pp.test','Otro Jefe','jefe'),('cliente@pp.test','Cliente','client')
     RETURNING id,email,name,role`)).rows;

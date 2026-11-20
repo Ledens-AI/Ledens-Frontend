@@ -20,7 +20,9 @@ const fail = (status, message) => { throw new PresupuestoError(status, message);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (v) => typeof v === 'string' && UUID.test(v);
 export const KINDS = ['confirmada', 'condicionada', 'decision', 'opcion'];
-const COUNTED = "(l.kind IN ('confirmada','condicionada') OR l.selected)";
+// A line removed from an approved presupuesto (removed_at, migration 048) never counts, not even as optional.
+const COUNTED = "(l.removed_at IS NULL AND (l.kind IN ('confirmada','condicionada') OR l.selected))";
+const OPTIONAL = "(l.removed_at IS NULL AND NOT (l.kind IN ('confirmada','condicionada') OR l.selected))";
 // Line amounts are summed unrounded and only totals are rounded, so net prices
 // converted from VAT-inclusive ones add back up to the original total.
 const LINE = 'l.quantity*l.unit_price';
@@ -199,7 +201,7 @@ export class PresupuestosService {
         JOIN users c ON c.id=vis.client_id LEFT JOIN users j ON j.id=vis.jefe_id
         LEFT JOIN presupuestos par ON par.id=vis.parent_id
         LEFT JOIN LATERAL (SELECT sum(${LINE}) FILTER (WHERE ${COUNTED}) base,
-                                  sum(${LINE}) FILTER (WHERE NOT ${COUNTED}) optional
+                                  sum(${LINE}) FILTER (WHERE ${OPTIONAL}) optional
                              FROM presupuesto_partidas l WHERE l.version_id=cur.id) t ON true
        ORDER BY coalesce(cur.sent_at, cur.created_at) DESC, vis.ref DESC`, [this.user.id])).rows;
     const obras = await this.obraTotals(rows.filter((r) => !r.parent_id && r.status === 'approved').map((r) => r.id));
@@ -303,7 +305,7 @@ export class PresupuestosService {
       SELECT v.id, v.number, v.status, v.vat_rate, v.notes, v.sent_at, v.decided_at, v.created_at,
              s.name sent_by, d.name decided_by,
              (SELECT sum(${LINE}) FILTER (WHERE ${COUNTED}) FROM presupuesto_partidas l WHERE l.version_id=v.id) base,
-             (SELECT sum(${LINE}) FILTER (WHERE NOT ${COUNTED}) FROM presupuesto_partidas l WHERE l.version_id=v.id) optional
+             (SELECT sum(${LINE}) FILTER (WHERE ${OPTIONAL}) FROM presupuesto_partidas l WHERE l.version_id=v.id) optional
         FROM presupuesto_versiones v LEFT JOIN users s ON s.id=v.sent_by LEFT JOIN users d ON d.id=v.decided_by
        WHERE v.presupuesto_id=$1 ${this.versionFilter()} ORDER BY v.number DESC`, [p.id])).rows;
     const shown = versionId ? versions.find((v) => v.id === versionId) : versions[0];
@@ -311,6 +313,7 @@ export class PresupuestosService {
     const lines = (await this.pool.query(`
       SELECT ch.id capitulo_id, ch.position chapter_position, ch.name chapter_name, l.id, l.position, l.code, l.name, l.description,
              l.unit, l.quantity::text, l.unit_price::text, l.kind, l.selected, ${LINE} amount, ${COUNTED} counted, l.base_code, l.annotations,
+             l.removed_at, l.removed_reason, (SELECT u.name FROM users u WHERE u.id=l.removed_by) removed_by,
              (SELECT to_jsonb(x) FROM (SELECT pp.id, pp.status, pp.name, pp.definition, pp.unit, pp.price_incl_vat::text "priceInclVat", pp.category_code "categoryCode",
                      pp.category_name "categoryName", pp.nearest_code "nearestCode", pp.reason, pp.created_code "createdCode"
                 FROM partida_propuestas pp WHERE pp.partida_id=l.id ORDER BY pp.created_at DESC LIMIT 1) x) proposal
@@ -323,6 +326,8 @@ export class PresupuestosService {
       if (!l.id) continue;
       if (l.counted) c.base += cents(l.amount);
       c.items.push({ id: l.id, code: l.code, name: l.name, description: l.description, unit: l.unit, quantity: l.quantity, unitPrice: l.unit_price, kind: l.kind, selected: l.selected, counted: l.counted, amount: money(cents(l.amount)),
+        // Removed from the approved presupuesto: shown struck through; why and by whom only to the team.
+        removed: l.removed_at ? { at: l.removed_at, ...(team ? { by: l.removed_by, reason: l.removed_reason } : {}) } : null,
         // How the line relates to the base de partidas: internal, team only.
         ...(team ? { baseCode: l.base_code, annotations: l.annotations || [], proposal: l.proposal && l.proposal.status === 'pending' ? l.proposal : null } : {}) });
     }
@@ -362,6 +367,8 @@ export class PresupuestosService {
         ampliar: team && !p.parent_id && approved,
         assignJefe: this.user.role === 'admin' && !p.parent_id,
         rename: team,
+        // Remove a line of the version on screen when it is the latest one (removeLine).
+        removeLine: team && !!latestAll && shown.id === latestAll.id && ['draft', 'sent', 'changes_requested', 'approved'].includes(shown.status),
         // The project lives on the obra; an ampliación follows it.
         linkProject: team && !p.parent_id,
         // Clients are invited to the obra (root presupuesto): /api/invitaciones.
@@ -504,6 +511,59 @@ export class PresupuestosService {
       await this.writeContent(db, versionId, content);
     });
     return this.get(id);
+  }
+
+  // Removes a line of the latest version, from the presupuesto's page (team):
+  //  - draft: the line is deleted;
+  //  - sent / changes_requested: the client has that version in hand, so a new
+  //    draft version without the line is prepared (as the editor does); the
+  //    team sends it and the client approves it again;
+  //  - approved (obra en curso): the line stays, marked removed (who, when,
+  //    why), and stops counting in totals, progress, Gantt and materials; the
+  //    client is told in the conversation. A reason is required.
+  // Audited «Partida eliminada del presupuesto».
+  async removeLine(id, partidaId, body = {}) {
+    if (!isUuid(partidaId)) fail(404, 'Partida no encontrada');
+    const reason = text(body.reason, 'el motivo', { max: 1000 });
+    let mode;
+    await this.tx(async (db) => {
+      const p = await this.load(db, id, { lock: true });
+      if (!this.isTeam(p)) fail(403, 'No tienes permiso para cambiar este presupuesto');
+      const l = (await db.query(`SELECT l.*, v.status, v.number, ch.name chapter_name FROM presupuesto_partidas l JOIN presupuesto_versiones v ON v.id=l.version_id
+                                   JOIN presupuesto_capitulos ch ON ch.id=l.capitulo_id WHERE l.id=$1 AND v.presupuesto_id=$2`, [partidaId, p.id])).rows[0];
+      if (!l) fail(404, 'Partida no encontrada');
+      const last = await this.latest(db, p.id);
+      if (l.version_id !== last.id) fail(409, 'La partida es de una versión anterior: elimínala de la última versión del presupuesto');
+      if (l.removed_at) fail(409, 'Esta partida ya está eliminada');
+      const label = `«${l.name}»${l.code ? ` (${l.code})` : ''}`;
+      if (l.status === 'draft') {
+        await db.query('DELETE FROM presupuesto_partidas WHERE id=$1', [l.id]);
+        mode = 'borrada';
+      } else if (['sent', 'changes_requested'].includes(l.status)) {
+        if (!reason) fail(400, 'Indica el motivo: el cliente ya tiene esta versión');
+        const v = (await db.query('INSERT INTO presupuesto_versiones (presupuesto_id, number, created_by, vat_rate, notes) SELECT presupuesto_id, number + 1, $2, vat_rate, notes FROM presupuesto_versiones WHERE id=$1 RETURNING id',
+          [last.id, this.user.id])).rows[0];
+        const chs = (await db.query('SELECT id, position, name FROM presupuesto_capitulos WHERE version_id=$1 ORDER BY position', [last.id])).rows;
+        for (const ch of chs) {
+          const nc = (await db.query('INSERT INTO presupuesto_capitulos (version_id, position, name) VALUES ($1,$2,$3) RETURNING id', [v.id, ch.position, ch.name])).rows[0];
+          await db.query(`INSERT INTO presupuesto_partidas (version_id, capitulo_id, position, code, name, description, unit, quantity, unit_price, kind, base_code, annotations)
+                          SELECT $2, $3, position, code, name, description, unit, quantity, unit_price, kind, base_code, annotations
+                            FROM presupuesto_partidas WHERE capitulo_id=$1 AND id<>$4 AND removed_at IS NULL ORDER BY position`, [ch.id, v.id, nc.id, l.id]);
+        }
+        mode = 'nueva_version';
+      } else if (l.status === 'approved') {
+        if (!reason || reason.length < 5) fail(400, 'Explica por qué se elimina la partida (al menos 5 caracteres)');
+        await db.query('UPDATE presupuesto_partidas SET removed_at=now(), removed_by=$2, removed_reason=$3 WHERE id=$1', [l.id, this.user.id, reason]);
+        await db.query('INSERT INTO presupuesto_comentarios (presupuesto_id, version_id, author_id, kind, body) VALUES ($1,$2,$3,$4,$5)',
+          [p.id, last.id, this.user.id, 'comentario', `Se ha retirado del presupuesto la partida ${label}; deja de contar en el total de la obra.`]);
+        mode = 'retirada';
+      } else fail(409, 'Este presupuesto está cerrado: no se pueden eliminar partidas');
+      const executed = (await db.query('SELECT executed::text FROM presupuesto_produccion WHERE partida_id=$1 ORDER BY id DESC LIMIT 1', [l.id])).rows[0]?.executed;
+      await audit({ actor: this.actor(), action: 'Partida eliminada del presupuesto', target: { id: p.client_id, label: p.ref },
+        detail: `${p.ref} v${l.number} · ${label} · ${l.chapter_name} · ${l.quantity} ${l.unit} × ${l.unit_price} €${executed && Number(executed) > 0 ? ` · tenía avance declarado (${executed} ${l.unit})` : ''}`
+          + `${mode === 'nueva_version' ? ` · preparada la versión ${l.number + 1} sin ella` : ''}${reason ? ` · ${reason}` : ''}` }, db);
+    });
+    return { ...(await this.get(id)), removal: mode };
   }
 
   async send(id) {

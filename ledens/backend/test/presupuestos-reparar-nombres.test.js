@@ -25,7 +25,7 @@ before(async () => {
     CREATE TABLE ledens.projects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), source_id text UNIQUE, raw_id uuid UNIQUE,
       project_id text, name text, customer_name_source text, salesman text, address text, start_date date, municipio text,
       provincia text, customer_id uuid, status_id uuid REFERENCES ledens.project_statuses (id), end_date date);`);
-  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '022_obra_archivos.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '041_mantenimientos.sql']) await db.exec(await migration(m));
+  for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '022_obra_archivos.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql', '033_presupuestos_proyecto.sql', '041_mantenimientos.sql', '048_partidas_eliminadas.sql']) await db.exec(await migration(m));
   [admin, cliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES ('admin@r.test','Admin','admin'),('cliente@r.test','Cliente','client') RETURNING id,email,name,role`)).rows;
   // As the old reader saved it: first lines of the name and of the chapter lost.
   const d = await new PresupuestosService(pool, admin).create({ title: 'Local', vatRate: '21', clientId: cliente.id, jefeId: admin.id,
