@@ -136,6 +136,8 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   router.put('/:id', handle((req) => svc(req).saveDraft(req.params.id, req.body || {})));
   // «Analizar existentes»: a PDF draft against the obra's approved lines (saves nothing).
   router.post('/:id/comparar', handle((req) => svc(req).compareWithObra(req.params.id, req.body || {})));
+  // Remove a line of the latest version (draft: deleted; sent: new draft version without it; approved: marked removed).
+  router.post('/:id/partidas/:partidaId/eliminar', handle((req) => svc(req).removeLine(req.params.id, req.params.partidaId, req.body || {})));
   router.post('/:id/enviar', handle((req) => svc(req).send(req.params.id)));
   router.post('/:id/aprobar', handle((req) => svc(req).approve(req.params.id, req.body || {})));
   router.post('/:id/aprobar-en-nombre', handle((req) => svc(req).approveOnBehalf(req.params.id, req.body || {})));

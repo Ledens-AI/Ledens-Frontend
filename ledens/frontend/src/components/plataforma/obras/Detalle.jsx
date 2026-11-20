@@ -41,6 +41,7 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState('');
+  const [removing, setRemoving] = useState(null); // the line being removed
 
   // Reloaded when the language changes: the budget texts come translated (X-Ledens-Lang).
   const load = useCallback((v) => api.get(id, v).then((d) => { setDoc(d); setError(''); }, (e) => setError(e.message)), [id, lang]);
@@ -153,26 +154,32 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
               <div className="obr-chapter-head"><h2>{`${ci + 1}. ${tr(c, 'name')}`}</h2><span className="fin-strong">{eur(c.base)}</span></div>
               <div className="fin-table-wrap">
                 <table className="fin-table">
-                  <thead><tr><th>{t.hCode}</th><th>{t.hItem}</th><th>{t.hUnit}</th><th className="fin-num">{t.hQty}</th><th className="fin-num">{t.hPrice}</th><th className="fin-num">{t.hAmount}</th></tr></thead>
+                  <thead><tr><th>{t.hCode}</th><th>{t.hItem}</th><th>{t.hUnit}</th><th className="fin-num">{t.hQty}</th><th className="fin-num">{t.hPrice}</th><th className="fin-num">{t.hAmount}</th>{can.removeLine ? <th aria-label="Eliminar"></th> : null}</tr></thead>
                   <tbody>
                     {c.items.map((i) => {
                       const optional = i.kind === 'decision' || i.kind === 'opcion';
                       return (
-                        <tr key={i.id} className={!i.counted && !(can.decide && selected.includes(i.id)) ? 'obr-optional' : ''}>
+                        <tr key={i.id} className={(i.removed ? 'obr-removed ' : '') + (!i.counted && !(can.decide && selected.includes(i.id)) ? 'obr-optional' : '')}>
                           <td className="fin-nowrap">{i.code || '—'}</td>
                           <td>
                             <div className="obr-line-name">
                               {can.decide && optional ? <input type="checkbox" aria-label={t.include(tr(i, 'name'))} checked={selected.includes(i.id)} onChange={(e) => setSelected((s) => (e.target.checked ? [...s, i.id] : s.filter((x) => x !== i.id)))} /> : null}
                               <strong>{tr(i, 'name')}</strong>
+                              {i.removed ? <Badge bg="#F8E1E1" fg="#9E2F2F" icon="ri-delete-bin-line">{t.removedLine}</Badge> : null}
                               {i.kind !== 'confirmada' ? <Badge bg={KIND[i.kind].bg} fg={KIND[i.kind].fg}>{i.selected ? `${KIND[i.kind].label} · ${t.chosen}` : KIND[i.kind].label}</Badge> : null}
                             </div>
                             {i.description ? <div className="fin-muted obr-desc">{tr(i, 'description')}</div> : null}
+                            {i.removed?.reason ? <div className="fin-small obr-removed-why">{`Eliminada por ${i.removed.by || '—'} el ${fecha(i.removed.at)}: ${i.removed.reason}`}</div> : null}
                             <BaseMatch item={i} />
                           </td>
                           <td>{i.unit}</td>
                           <td className="fin-num">{num(i.quantity)}</td>
                           <td className="fin-num fin-nowrap">{eur(i.unitPrice)}</td>
                           <td className="fin-num fin-nowrap">{eur(i.amount)}</td>
+                          {can.removeLine ? (
+                            <td>{i.removed ? null : <button type="button" className="fin-btn is-ghost is-small" aria-label={`Eliminar ${i.name}`} title="Eliminar partida" disabled={busy}
+                              onClick={() => { setDialogError(''); setText(''); setRemoving(i); }}><i className="ri-delete-bin-line"></i></button>}</td>
+                          ) : null}
                         </tr>
                       );
                     })}
@@ -230,6 +237,11 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
         </div>
       ) : null}
 
+      {removing ? (
+        <RemoveLineDialog line={removing} version={v} obra={doc.obra} busy={busy} error={dialogError} text={text} setText={setText} onClose={() => setRemoving(null)}
+          onConfirm={() => act(async () => { const d = await api.removeLine(doc.id, removing.id, { reason: text.trim() || undefined }); setRemoving(null); return d; },
+            v.status === 'draft' ? 'Partida eliminada del borrador' : v.status === 'approved' ? 'Partida eliminada: deja de contar en la obra' : `Preparada la versión ${v.number + 1} sin la partida: revísala y envíasela al cliente`)} />
+      ) : null}
       {dialog === 'behalf' ? (
         <BehalfDialog doc={doc} version={v} options={options} busy={busy} error={dialogError} onClose={() => setDialog(null)}
           onConfirm={(body) => act(() => api.approveOnBehalf(doc.id, body), 'Presupuesto aprobado en nombre del cliente')} />
@@ -593,5 +605,30 @@ function BudgetDocs({ id }) {
         {docs.map((f) => <li key={f.id}><a className="fin-link" href={f.downloadUrl}><i className="ri-file-pdf-2-line"></i> {f.title || f.name}</a></li>)}
       </ul>
     </div>
+  );
+}
+
+// Removing a line of the latest version (team): what happens depends on where the presupuesto is.
+function RemoveLineDialog({ line, version, obra, busy, error, text, setText, onClose, onConfirm }) {
+  const approved = version.status === 'approved', draft = version.status === 'draft';
+  const done = obra?.chapters?.flatMap((c) => c.items).find((x) => x.id === line.id);
+  const executed = done && Number(done.executed) > 0 ? done : null;
+  const reason = text.trim();
+  const ok = draft || (approved ? reason.length >= 5 : reason.length > 0);
+  return (
+    <Dialog title="Eliminar partida" onClose={onClose} actions={<>
+      <button type="button" className="fin-btn" onClick={onClose}>Cancelar</button>
+      <button type="button" className="fin-btn is-danger" disabled={busy || !ok} onClick={onConfirm}><i className="ri-delete-bin-line"></i>Eliminar</button></>}>
+      <p><strong>{line.name}</strong>{` · ${String(Number(line.quantity)).replace('.', ',')} ${line.unit} · ${line.amount.replace('.', ',')} € sin IVA`}</p>
+      <p>{draft ? 'Se quita del borrador. El cliente todavía no lo ha visto.'
+        : approved ? 'El presupuesto está aprobado: la partida queda tachada y deja de contar en el total, el avance y la planificación de la obra. El cliente verá que se ha retirado (sin el motivo) y se le avisa en la conversación.'
+        : `El cliente tiene la versión ${version.number}. Se prepara la versión ${version.number + 1} sin esta partida como borrador; el cliente la verá cuando se la envíes.`}</p>
+      {executed ? <p className="fin-warn"><i className="ri-error-warning-line"></i><span>{`Tiene avance declarado (${String(Number(executed.executed)).replace('.', ',')} ${line.unit}): dejará de contar en el avance de la obra.`}</span></p> : null}
+      {draft ? null : (
+        <label className="fin-field"><span>{approved ? 'Motivo (obligatorio, solo lo ve el equipo)' : 'Motivo (obligatorio)'}</span>
+          <textarea rows={3} maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} placeholder="Ej.: el cliente compra el material por su cuenta" /></label>
+      )}
+      {error ? <span className="fin-error-inline">{error}</span> : null}
+    </Dialog>
   );
 }

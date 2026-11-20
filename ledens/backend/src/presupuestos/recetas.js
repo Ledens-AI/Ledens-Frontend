@@ -12,7 +12,8 @@ import { seedRecetas, toolType, unitFamily, TOOLS } from './recetasIniciales.js'
 // keyed by its PA-### code, never by the uuid of ledens.work_items.
 const fail = (status, message) => { throw new PresupuestoError(status, message); };
 const CODE = /^PA-\d+$/;
-const COUNTED = "(l.kind IN ('confirmada','condicionada') OR l.selected)";
+// A line removed from an approved presupuesto (removed_at, migration 048) never counts.
+const COUNTED = "(l.removed_at IS NULL AND (l.kind IN ('confirmada','condicionada') OR l.selected))";
 const round = (n, d = 3) => Math.round(n * 10 ** d) / 10 ** d;
 const str = (v, field, max, required) => {
   if (v == null || (typeof v === 'string' && !v.trim())) { if (required) fail(400, `Falta ${field}`); return null; }
@@ -211,10 +212,10 @@ export class RecetasService {
         versionId ? [p.id, versionId] : [p.id])).rows[0];
       if (!v) fail(404, 'Versión no encontrada');
       version = { id: v.id, number: v.number, status: v.status };
-      const all = (await this.pool.query(`SELECT l.id, l.code, l.base_code, l.name, l.unit, l.quantity::text, ${COUNTED} counted FROM presupuesto_partidas l
+      const all = (await this.pool.query(`SELECT l.id, l.code, l.base_code, l.name, l.unit, l.quantity::text, ${COUNTED} counted, l.removed_at IS NOT NULL removed FROM presupuesto_partidas l
                                            JOIN presupuesto_capitulos ch ON ch.id=l.capitulo_id WHERE l.version_id=$1 ORDER BY ch.position, l.position`, [v.id])).rows;
       lines = all.filter((l) => l.counted);
-      optional = all.length - lines.length;
+      optional = all.filter((l) => !l.removed).length - lines.length;
     }
     const codeOf = (l) => l.base_code || (CODE.test(l.code || '') ? l.code : null);
     const codes = [...new Set(lines.map(codeOf).filter(Boolean))];

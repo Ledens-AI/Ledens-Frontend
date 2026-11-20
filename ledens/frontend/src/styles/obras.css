@@ -248,3 +248,6 @@
 .obr-receta-add .obr-grid { width: 100%; }
 .obr-necesidades summary { cursor: pointer; font-weight: 600; }
 .obr-necesidades-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 12px; }
+/* A line removed from an approved presupuesto (Detalle.jsx). */
+.fin-table tr.obr-removed td strong, .fin-table tr.obr-removed td.fin-num { text-decoration: line-through; }
+.obr-removed-why { color: #9E2F2F; margin-top: 4px; }
