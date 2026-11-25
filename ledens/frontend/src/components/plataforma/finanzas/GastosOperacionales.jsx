@@ -3,7 +3,7 @@ import { api } from './api.js';
 import { eur, num, fecha, TIPO } from './format.js';
 import { barPath, niceTicks, compactEur, periodLabel } from './PagosTrabajadoresChart.jsx';
 import RecordDrawer from './RecordDrawer.jsx';
-import { Kpi, Badge, Empty, ErrorBox, Pager } from './ui.jsx';
+import { Kpi, Badge, Dialog, Empty, ErrorBox, Pager } from './ui.jsx';
 
 // Kind of cost, in fixed order with its fixed colour (first slots of the
 // validated palette, as in Pagos a trabajadores): a filter never repaints them.
@@ -14,7 +14,12 @@ const CLASES = [
 ];
 const TIPOS = [['', 'Todos los gastos'], ...CLASES.map((c) => [c.key, c.label])];
 const CONTABLE = { approved: { label: 'Validado', bg: '#DEF3F0', fg: '#2F6B63' }, pending: { label: 'Sin validar', bg: '#FBF1DE', fg: '#7A4E0E' } };
-const EMPTY_FILTERS = { proyecto: '', tipo: '', desde: '', hasta: '', q: '' };
+const EMPTY_FILTERS = { proyecto: '', tipo: '', categoria: '', desde: '', hasta: '', q: '' };
+const SIN_CATEGORIA = 'sin';
+// «Gasto por categoría»: one hue for magnitude (not one of the kinds of cost
+// above, so it never reads as «Materiales»), grey for what has no category yet.
+const CAT_BAR = '#5567AE';
+const CAT_NONE = '#B9B9B4';
 const SIN_FECHA = 'sin-fecha';
 const MAX_MONTHS = 240;
 
@@ -37,7 +42,9 @@ function monthRange(first, last) {
  * outside the obras. Those costs are imputed to a project of its own named
  * «Gastos operacionales» / «Gastos operativos»; the chart shows them month by
  * month (by kind of cost) and the table the records behind them. Clicking a
- * month filters the table to it; clicking it again shows every month. */
+ * month filters the table to it; clicking it again shows every month. Each
+ * record gets a category of its own (Empleado, Gasolina, Oficina…), one by one
+ * in the table or several at once; «Gasto por categoría» sums them. */
 export default function GastosOperacionales({ version, toast, go }) {
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [draftQ, setDraftQ] = useState('');
@@ -49,9 +56,29 @@ export default function GastosOperacionales({ version, toast, go }) {
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
   const [open, setOpen] = useState(null);
+  const [picked, setPicked] = useState(() => new Map()); // record_id → row
+  const [bulkCat, setBulkCat] = useState('');
+  const [saving, setSaving] = useState(() => new Set()); // record ids being saved
+  const [managing, setManaging] = useState(false);
 
   const setF = (patch) => { setFilters((f) => ({ ...f, ...patch })); setPage(1); };
   const pickMonth = (m) => { setMes((cur) => (cur === m ? '' : m)); setPage(1); };
+  const pickCategory = (id) => setF({ categoria: filters.categoria === id ? '' : id });
+  // Give records a category (or none); the screen reloads with the new sums.
+  const assign = async (rows, categoryId) => {
+    const ids = [...new Set(rows.map((r) => r.record_id))];
+    setSaving((s) => new Set([...s, ...ids]));
+    try {
+      const res = await api.setOpexCategory(ids, categoryId || null);
+      const name = res.categoria?.name;
+      toast?.(res.updated
+        ? `${res.updated === 1 ? 'Movimiento' : `${res.updated} movimientos`} ${name ? `en «${name}»` : 'sin categoría'}.`
+        : 'Ya tenían esa categoría.');
+      setReload((n) => n + 1);
+      return true;
+    } catch (e) { toast?.(e.message); return false; }
+    finally { setSaving((s) => { const n = new Set(s); ids.forEach((id) => n.delete(id)); return n; }); }
+  };
   useEffect(() => { const t = setTimeout(() => { if (draftQ !== filters.q) setF({ q: draftQ }); }, 300); return () => clearTimeout(t); }, [draftQ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -69,6 +96,10 @@ export default function GastosOperacionales({ version, toast, go }) {
     if (data && mes && mes !== SIN_FECHA && !data.meses.some((m) => m.mes === mes)) setMes('');
     if (data && mes === SIN_FECHA && !data.sinFecha.movimientos) setMes('');
   }, [data, mes]);
+  // A removed category is no longer a filter.
+  useEffect(() => {
+    if (data && filters.categoria && filters.categoria !== SIN_CATEGORIA && !data.categorias.some((c) => c.id === filters.categoria)) setF({ categoria: '' });
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const months = useMemo(() => {
     const rows = data?.meses || [];
@@ -96,6 +127,14 @@ export default function GastosOperacionales({ version, toast, go }) {
   const selected = mes ? (mes === SIN_FECHA ? { mes, ...data.sinFecha } : months.find((m) => m.mes === mes)) : null;
   const last = months[months.length - 1];
   const several = data.proyectos.length > 1;
+  const cats = data.categorias || [];
+  const catName = (id) => (id === SIN_CATEGORIA ? 'Sin categoría' : cats.find((c) => c.id === id)?.name || '');
+  const sel = [...picked.values()];
+  const onPage = data.rows.filter((r) => picked.has(r.record_id)).length;
+  const allOnPage = data.rows.length > 0 && onPage === data.rows.length;
+  const toggle = (r) => setPicked((m) => { const n = new Map(m); if (n.has(r.record_id)) n.delete(r.record_id); else n.set(r.record_id, r); return n; });
+  const toggleAll = () => setPicked((m) => { const n = new Map(m); data.rows.forEach((r) => (allOnPage ? n.delete(r.record_id) : n.set(r.record_id, r))); return n; });
+  const assignPicked = async () => { if (await assign(sel, bulkCat === SIN_CATEGORIA ? null : bulkCat)) { setPicked(new Map()); setBulkCat(''); } };
   const hasFilters = Object.entries(filters).some(([k, v]) => v && v !== EMPTY_FILTERS[k]);
   const th = (label, by, cls) => (
     <th className={cls} aria-sort={sort.by === by ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}>
@@ -119,6 +158,14 @@ export default function GastosOperacionales({ version, toast, go }) {
             </select>
           </label>
         ) : null}
+        <label className="fin-field">
+          <span>Categoría</span>
+          <select value={filters.categoria} onChange={(e) => setF({ categoria: e.target.value })}>
+            <option value="">Todas las categorías</option>
+            <option value={SIN_CATEGORIA}>Sin categoría</option>
+            {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </label>
         <label className="fin-field">
           <span>Tipo de gasto</span>
           <select value={filters.tipo} onChange={(e) => setF({ tipo: e.target.value })}>
@@ -145,6 +192,10 @@ export default function GastosOperacionales({ version, toast, go }) {
           ? <Kpi label={`Gasto de ${monthLabel(selected.mes, true)}`} value={eur(selected.total)} icon="ri-focus-3-line" active onClick={() => pickMonth(selected.mes)} hint="Pulsa para ver todos los meses" />
           : <Kpi label={last ? `Último mes (${monthLabel(last.mes, true)})` : 'Último mes'} value={last ? eur(last.total) : '—'} icon="ri-calendar-event-line" />}
         <Kpi label="Movimientos" value={num(t.movimientos)} icon="ri-list-check-2" />
+        <Kpi label={mes ? `Sin categoría (${monthLabel(mes, true)})` : 'Sin categoría'} value={num(data.sinCategoria.movimientos)} icon="ri-price-tag-3-line"
+          tone={data.sinCategoria.movimientos ? 'warn' : undefined} active={filters.categoria === SIN_CATEGORIA}
+          onClick={() => pickCategory(SIN_CATEGORIA)}
+          hint={data.sinCategoria.movimientos ? `${eur(data.sinCategoria.total)} · pulsa para verlos` : 'Todo está categorizado'} />
       </div>
 
       <div className="fin-card">
@@ -158,16 +209,45 @@ export default function GastosOperacionales({ version, toast, go }) {
         ) : null}
       </div>
 
+      <div className="fin-card">
+        <div className="fin-card-head">
+          <h2>{mes ? `Gasto por categoría · ${monthLabel(mes, true)}` : 'Gasto por categoría'}</h2>
+          <button type="button" className="fin-btn" onClick={() => setManaging(true)}><i className="ri-price-tag-3-line" aria-hidden="true"></i>Gestionar categorías</button>
+        </div>
+        <CategoryBreakdown items={data.porCategoria} none={data.sinCategoria} names={catName} selected={filters.categoria} onSelect={pickCategory} />
+      </div>
+
+      {sel.length ? (
+        <div className="fin-bulkbar" role="region" aria-label="Acciones sobre la selección">
+          <strong>{sel.length} {sel.length === 1 ? 'movimiento seleccionado' : 'movimientos seleccionados'}</strong>
+          <span className="fin-muted">{eur(sel.reduce((a, r) => a + Number(r.gasto), 0))}</span>
+          <span className="fin-grow"></span>
+          <select className="fin-opex-bulk" value={bulkCat} onChange={(e) => setBulkCat(e.target.value)} aria-label="Categoría para la selección">
+            <option value="">Elige una categoría…</option>
+            {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            <option value={SIN_CATEGORIA}>Quitar la categoría</option>
+          </select>
+          <button type="button" className="fin-btn is-primary" disabled={!bulkCat || sel.some((r) => saving.has(r.record_id))} onClick={assignPicked}>
+            <i className="ri-price-tag-3-line" aria-hidden="true"></i>Asignar categoría
+          </button>
+          <button type="button" className="fin-btn is-ghost" onClick={() => setPicked(new Map())}>Quitar selección</button>
+        </div>
+      ) : null}
+
       <div className="fin-card is-flush">
         <div className="fin-card-head fin-pad">
-          <h2>{mes === SIN_FECHA ? 'Movimientos sin fecha' : mes ? `Movimientos de ${monthLabel(mes, true)}` : 'Todos los movimientos'}</h2>
+          <h2>{mes === SIN_FECHA ? 'Movimientos sin fecha' : mes ? `Movimientos de ${monthLabel(mes, true)}` : 'Todos los movimientos'}
+            {filters.categoria ? <span className="fin-muted">{` · ${catName(filters.categoria)}`}</span> : null}</h2>
           {mes ? <button type="button" className="fin-btn is-ghost" onClick={() => pickMonth(mes)}><i className="ri-close-line" aria-hidden="true"></i> Ver todos los meses</button> : null}
+          {filters.categoria ? <button type="button" className="fin-btn is-ghost" onClick={() => pickCategory(filters.categoria)}><i className="ri-close-line" aria-hidden="true"></i> Todas las categorías</button> : null}
         </div>
         <div className="fin-table-wrap" aria-busy={loading}>
           <table className="fin-table">
             <thead>
               <tr>
+                <th className="fin-col-check"><input type="checkbox" aria-label="Seleccionar todos los de esta página" checked={allOnPage} onChange={toggleAll} disabled={!data.rows.length} /></th>
                 {th('Fecha', 'fecha')}
+                <th>Categoría</th>
                 <th>Tipo</th>
                 <th>Nº de documento</th>
                 {th('Tercero', 'tercero')}
@@ -183,8 +263,16 @@ export default function GastosOperacionales({ version, toast, go }) {
                 const tipo = TIPO[r.type] || TIPO.concepto;
                 const clase = CLASES.find((c) => c.key === r.clase);
                 return (
-                  <tr key={`${r.type}:${r.id}:${r.project_id}`}>
+                  <tr key={`${r.type}:${r.id}:${r.project_id}`} className={picked.has(r.record_id) ? 'is-selected' : undefined}>
+                    <td className="fin-col-check"><input type="checkbox" aria-label="Seleccionar movimiento" checked={picked.has(r.record_id)} onChange={() => toggle(r)} /></td>
                     <td className="fin-nowrap">{fecha(r.fecha)}</td>
+                    <td>
+                      <select className={'fin-opex-cat' + (r.categoria_id ? '' : ' is-empty')} value={r.categoria_id || ''} disabled={saving.has(r.record_id)}
+                        aria-label={`Categoría de ${r.concepto || 'este movimiento'}`} onChange={(e) => assign([r], e.target.value)}>
+                        <option value="">Sin categoría</option>
+                        {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    </td>
                     <td className="fin-nowrap"><Badge bg={tipo.bg} fg={tipo.fg} icon={tipo.icon}>{tipo.label}</Badge>
                       {clase ? <div className="fin-muted fin-small fin-opex-kind"><i style={{ background: clase.color }} aria-hidden="true"></i>{clase.label}</div> : null}</td>
                     <td className="fin-nowrap">{r.numerodocumento || (r.document_id ? 'Sin número' : <span className="fin-muted">Sin documento</span>)}
@@ -213,6 +301,8 @@ export default function GastosOperacionales({ version, toast, go }) {
         {data.total > 0 ? <Pager page={page} pageSize={data.pageSize} total={data.total} onPage={setPage}
           extra={selected ? `Gasto de ${monthLabel(selected.mes, true)}: ${eur(selected.total)}` : `Total: ${eur(t.total)}`} /> : null}
       </div>
+
+      {managing ? <CategoriesDialog categorias={cats} toast={toast} onClose={() => setManaging(false)} onChanged={() => setReload((n) => n + 1)} /> : null}
 
       {open ? (
         <RecordDrawer type={open.type} id={open.id} onClose={() => setOpen(null)} toast={toast}
@@ -318,5 +408,84 @@ function MonthChart({ months, selected, onSelect }) {
         <div className="fin-legend">{present.map((c) => <span key={c.key}><i style={{ background: c.color }}></i>{c.label}</span>)}</div>
       ) : null}
     </div>
+  );
+}
+
+/* Gasto por categoría: one horizontal bar per category with spending (largest
+ * first) and «Sin categoría» last, in grey. Clicking one filters the chart, the
+ * totals and the table to it; clicking it again shows every category. */
+function CategoryBreakdown({ items, none, names, selected, onSelect }) {
+  const rows = [
+    ...items.map((c) => ({ id: c.id, label: names(c.id), total: Number(c.total), movimientos: c.movimientos, color: CAT_BAR })),
+    ...(none.movimientos ? [{ id: SIN_CATEGORIA, label: 'Sin categoría', total: Number(none.total), movimientos: none.movimientos, color: CAT_NONE }] : []),
+  ];
+  if (!rows.length) return <Empty icon="ri-price-tag-3-line" title="Sin gastos" text="Ningún gasto operacional coincide con estos filtros." />;
+  const max = Math.max(...rows.map((r) => Math.abs(r.total)), 1);
+  const sum = rows.reduce((a, r) => a + r.total, 0);
+  return (
+    <ul className="fin-opex-cats">
+      {rows.map((r) => {
+        const isSel = selected === r.id, dim = selected && !isSel;
+        return (
+          <li key={r.id}>
+            <button type="button" className={'fin-opex-catrow' + (isSel ? ' is-active' : '') + (dim ? ' is-dim' : '')} aria-pressed={isSel}
+              onClick={() => onSelect(r.id)} title={isSel ? 'Pulsa para ver todas las categorías' : `Ver solo ${r.label}`}>
+              <span className="fin-opex-catname">{r.id === SIN_CATEGORIA ? <i className="ri-error-warning-line" aria-hidden="true"></i> : null}{r.label}</span>
+              <span className="fin-opex-track" aria-hidden="true"><span style={{ width: `${(Math.max(0, r.total) / max) * 100}%`, background: r.color }}></span></span>
+              <span className="fin-opex-catval"><b>{eur(r.total)}</b>
+                <span className="fin-muted">{` · ${sum ? num(Math.round((r.total / sum) * 100)) : 0} % · ${num(r.movimientos)} ${r.movimientos === 1 ? 'movimiento' : 'movimientos'}`}</span></span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/* Gestionar categorías: rename, add and remove (only one no movement uses). */
+function CategoriesDialog({ categorias, toast, onClose, onChanged }) {
+  const [names, setNames] = useState(() => Object.fromEntries(categorias.map((c) => [c.id, c.name])));
+  const [nuevo, setNuevo] = useState('');
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  // After a reload, keep what is being typed and pick up new categories.
+  useEffect(() => { setNames((n) => Object.fromEntries(categorias.map((c) => [c.id, n[c.id] ?? c.name]))); }, [categorias]);
+  const run = async (key, fn, ok) => {
+    setBusy(key); setError('');
+    try { await fn(); toast?.(ok); onChanged(); return true; } catch (e) { setError(e.message); return false; } finally { setBusy(''); }
+  };
+  const add = async (e) => {
+    e.preventDefault();
+    const name = nuevo.trim();
+    if (name && await run('nuevo', () => api.createOpexCategory(name), `Categoría «${name}» añadida.`)) setNuevo('');
+  };
+  return (
+    <Dialog title="Categorías de gastos operacionales" onClose={() => !busy && onClose()}
+      actions={<button type="button" className="fin-btn" disabled={Boolean(busy)} onClick={onClose}>Cerrar</button>}>
+      <p className="fin-muted fin-small">Cambiar el nombre de una categoría lo cambia en todos sus movimientos. Solo se puede eliminar una categoría que no tenga movimientos.</p>
+      <ul className="fin-opex-manage">
+        {categorias.map((c) => {
+          const name = (names[c.id] ?? c.name).trim();
+          return (
+            <li key={c.id}>
+              <input value={names[c.id] ?? c.name} maxLength={60} aria-label={`Nombre de la categoría ${c.name}`} disabled={Boolean(busy)}
+                onChange={(e) => setNames((n) => ({ ...n, [c.id]: e.target.value }))} />
+              <span className="fin-muted fin-small fin-nowrap">{num(c.movimientos)} mov.</span>
+              <button type="button" className="fin-btn" disabled={Boolean(busy) || !name || name === c.name}
+                onClick={() => run(c.id, () => api.renameOpexCategory(c.id, name), `Categoría renombrada a «${name}».`)}>Guardar</button>
+              <button type="button" className="fin-iconbtn" disabled={Boolean(busy) || c.movimientos > 0}
+                aria-label={`Eliminar ${c.name}`} title={c.movimientos ? 'Tiene movimientos: cámbiales la categoría antes de eliminarla' : 'Eliminar'}
+                onClick={() => run(c.id, () => api.deleteOpexCategory(c.id), `Categoría «${c.name}» eliminada.`)}><i className="ri-delete-bin-line"></i></button>
+            </li>
+          );
+        })}
+      </ul>
+      <form className="fin-opex-add" onSubmit={add}>
+        <label className="fin-field fin-grow"><span>Nueva categoría</span>
+          <input value={nuevo} maxLength={60} onChange={(e) => setNuevo(e.target.value)} placeholder="Ej. Viajes" disabled={Boolean(busy)} /></label>
+        <button type="submit" className="fin-btn is-primary fin-self-end" disabled={Boolean(busy) || !nuevo.trim()}>Añadir</button>
+      </form>
+      {error ? <p className="fin-error-inline" role="alert">{error}</p> : null}
+    </Dialog>
   );
 }

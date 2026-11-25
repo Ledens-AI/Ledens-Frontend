@@ -135,9 +135,24 @@ export function createFinanzasRouter({ service, projects, workers, payables, run
     const q = req.query;
     res.json(await svc(req).operatingExpenses({
       project: q.proyecto || undefined, tipo: q.tipo || undefined, q: String(q.q || '').slice(0, 100),
-      from: q.desde || undefined, to: q.hasta || undefined, month: q.mes || undefined,
+      from: q.desde || undefined, to: q.hasta || undefined, month: q.mes || undefined, category: q.categoria || undefined,
       sort: q.orden, dir: q.dir, page: q.pagina, pageSize: q.tam,
     }));
+  }));
+  // Categorías de los gastos operacionales (admins): `{ recordIds, categoryId | null }`
+  // gives several records one category (or none) at once.
+  router.put('/gastos-operacionales/categoria', traced('gastos_operacionales', 'Categoría de gasto operacional', { summary: (b) => ({ message: `${b.updated} ${b.updated === 1 ? 'movimiento' : 'movimientos'} · ${b.categoria?.name || 'sin categoría'}` }) })(async (req, res) => {
+    const b = req.body || {};
+    res.json(await svc(req).setOpexCategory({ recordIds: b.recordIds, categoryId: b.categoryId ?? null }));
+  }));
+  router.post('/gastos-operacionales/categorias', traced('gastos_operacionales', 'Alta de categoría', { summary: (b) => ({ message: 'Creada: ' + (b.categoria?.name || '') }) })(async (req, res) => {
+    res.status(201).json(await svc(req).createOpexCategory({ name: req.body?.name }));
+  }));
+  router.put('/gastos-operacionales/categorias/:id', traced('gastos_operacionales', 'Cambio de nombre de categoría', { summary: (b) => ({ message: 'Ahora: ' + (b.categoria?.name || '') }) })(async (req, res) => {
+    res.json(await svc(req).renameOpexCategory(req.params.id, { name: req.body?.name }));
+  }));
+  router.delete('/gastos-operacionales/categorias/:id', traced('gastos_operacionales', 'Baja de categoría')(async (req, res) => {
+    res.json(await svc(req).deleteOpexCategory(req.params.id));
   }));
 
   router.get('/proyectos/:id/rentabilidad', handle(async (req, res) => {

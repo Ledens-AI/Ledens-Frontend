@@ -275,6 +275,30 @@
 /* Gastos operacionales: kind of cost under the type badge, with its chart colour. */
 .fin-opex-kind { margin-top: 4px; }
 .fin-opex-kind i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+.fin-opex-cat { font: inherit; font-size: 13px; color: #1D1D1B; background: #fff; border: 1px solid #D9D9D9; border-radius: 8px; padding: 5px 8px; min-height: 32px; max-width: 190px; cursor: pointer; }
+.fin-opex-cat.is-empty { color: #7A4E0E; background: #FBF1DE; border-color: #EBD6AA; }
+.fin-opex-cat:focus { outline: 2px solid #5567AE; outline-offset: -1px; }
+.fin-opex-bulk { font: inherit; font-size: 14px; color: #1D1D1B; background: #fff; border: 0; border-radius: 8px; padding: 8px 10px; min-height: 38px; }
+.fin-opex-cats { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.fin-opex-catrow { display: grid; grid-template-columns: minmax(130px, 200px) minmax(60px, 1fr) minmax(220px, auto); align-items: center; gap: 14px; width: 100%; border: 0; background: none; padding: 7px 10px; border-radius: 8px; font: inherit; font-size: 14px; text-align: left; color: #1F1F1D; cursor: pointer; }
+.fin-opex-catrow:hover { background: #F4F4F1; }
+.fin-opex-catrow:focus-visible { outline: 2px solid #5567AE; outline-offset: -2px; }
+.fin-opex-catrow.is-active { background: #EEF0F8; box-shadow: inset 0 0 0 1px #C9D0EA; }
+.fin-opex-catrow.is-dim { opacity: 0.45; }
+.fin-opex-catname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fin-opex-catname i { color: #7A4E0E; margin-right: 6px; }
+.fin-opex-track { height: 12px; background: #F2F2EF; border-radius: 4px; overflow: hidden; }
+.fin-opex-track span { display: block; height: 100%; min-width: 2px; border-radius: 0 4px 4px 0; }
+.fin-opex-catval { font-size: 13px; white-space: nowrap; text-align: right; }
+.fin-opex-manage { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 50vh; overflow-y: auto; }
+.fin-opex-manage li { display: flex; align-items: center; gap: 8px; }
+.fin-opex-manage input { flex: 1; min-width: 0; font: inherit; font-size: 14px; border: 1px solid #D9D9D9; border-radius: 8px; padding: 7px 10px; min-height: 36px; }
+.fin-opex-add { display: flex; gap: 10px; align-items: flex-end; }
+@media (max-width: 640px) {
+  .fin-opex-catrow { grid-template-columns: 1fr auto; gap: 6px 10px; }
+  .fin-opex-track { grid-column: 1 / -1; grid-row: 2; }
+  .fin-opex-catval { white-space: normal; }
+}
 
 /* Cuentas por pagar: workers × days (CuentasPorPagar.jsx) */
 .fin-cxp-title { min-width: 220px; text-align: center; text-transform: capitalize; }

@@ -205,7 +205,7 @@ const DETAIL_TYPES=[['application/pdf',b=>b.subarray(0,5).toString()==='%PDF-'],
  ['image/jpeg',b=>b[0]===255&&b[1]===216&&b[2]===255]];
 const hasTransfers=async c=>Boolean((await c.query("SELECT to_regclass('ledens.internal_transfers') name")).rows[0].name);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-const labels={work_period:'Periodo trabajado',reclassified:'Cambio de clasificación',replace_allocations:'Asignación a proyecto',recognition:'Validación contable',review_flag:'Revisión',source_changed:'Origen actualizado',document_changed:'Factura actualizada'};
+const labels={work_period:'Periodo trabajado',reclassified:'Cambio de clasificación',replace_allocations:'Asignación a proyecto',recognition:'Validación contable',review_flag:'Revisión',opex_category:'Categoría de gasto operacional',source_changed:'Origen actualizado',document_changed:'Factura actualizada'};
 const requestFor=(seed,key)=>{const h=createHash('sha256').update(seed+'|'+key).digest('hex').slice(0,32);return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;};
 // Pago a trabajadores: how a paid amount (absolute, in cents) is split.
 // Above 450 € → Oficial lines of 100 €; 450 € or less → Ayudante lines of 60 €.
@@ -497,9 +497,15 @@ export class FinanzasService {
  // (OPEX_PROJECT_SQL): this is the cost side of those projects exactly as
  // Rentabilidad por proyecto counts it (every assigned record, validated or
  // not, its assigned share; an income imputed there is left out), month by
- // month by the record's date, plus the records behind it. The chart (`meses`)
- // and the totals ignore `month`; the table honours it. `proyectos` ignores the
- // project filter. Admin: the figures are company-wide.
+ // month by the record's date, plus the records behind it. Each record may
+ // carry a category of its own (Empleado, Gasolina, Oficina…, migration 051).
+ // What each part honours:
+ //  - `proyectos`: every filter but the project and the month;
+ //  - `meses`, `totales`, `sinFecha`: every filter but the month;
+ //  - `porCategoria`, `sinCategoria`: every filter but the category (so the
+ //    breakdown keeps every category while one is chosen);
+ //  - `rows`/`total`: every filter.
+ // Admin: the figures are company-wide.
  async operatingExpenses(f={}){
   if(this.user.role!=='admin')throw new FinError(403,'Los gastos operacionales requieren administrador');
   const projects=(await this.query(`SELECT p.id,p.name label,p.project_id code FROM ledens.projects p WHERE ${OPEX_PROJECT_SQL('p')} ORDER BY p.name,p.id`)).rows;
@@ -510,10 +516,13 @@ export class FinanzasService {
   if(f.month&&f.month!=='sin-fecha'&&!/^\d{4}-(0[1-9]|1[0-2])$/.test(f.month))throw new FinError(400,'Mes no válido');
   const page=Math.max(1,Math.min(4000,Number(f.page)||1)),pageSize=Math.max(1,Math.min(100,Number(f.pageSize)||25));
   if(!Number.isInteger(page)||!Number.isInteger(pageSize))throw new FinError(400,'Paginación no válida');
+  const withCategories=await this.hasOpexCategories();
+  const categorias=withCategories?await this.opexCategories():[];
+  if(f.category!==undefined&&f.category!=='sin'&&!categorias.some(c=>c.id===f.category))throw new FinError(400,'Categoría no válida');
   const zero={total:'0',materiales:'0',trabajadores:'0',otros:'0',movimientos:0};
-  if(!ids.length)return {proyectos:[],meses:[],totales:{...zero},sinFecha:{total:'0',movimientos:0},rows:[],total:0,page,pageSize};
+  if(!ids.length)return {proyectos:[],categorias,meses:[],totales:{...zero},sinFecha:{total:'0',movimientos:0},porCategoria:[],sinCategoria:{total:'0',movimientos:0},rows:[],total:0,page,pageSize};
   // Each query binds its own parameters ($1/$2 are BASE's scope).
-  const scope=({project=false,month=false}={})=>{
+  const scope=({project=true,month=true,category=true}={})=>{
    const params=this.params(),where=['NOT r.ingreso'];const bind=v=>{params.push(v);return '$'+params.length;};
    where.push(`r.project_id=ANY(${bind(project&&f.project?[f.project]:ids)}::uuid[])`);
    if(f.tipo)where.push('r.clase='+bind(f.tipo));
@@ -522,28 +531,117 @@ export class FinanzasService {
    if(f.to)where.push(`r.fecha<=${bind(f.to)}::date`);
    if(month&&f.month==='sin-fecha')where.push('r.fecha IS NULL');
    else if(month&&f.month){const m=bind(f.month+'-01');where.push(`r.fecha>=${m}::date AND r.fecha<(${m}::date+interval '1 month')`);}
+   if(category&&f.category==='sin')where.push('r.categoria_id IS NULL');
+   else if(category&&f.category)where.push('r.categoria_id='+bind(f.category)+'::uuid');
    return {params,where:where.join(' AND ')};
   };
   const sql=`${BASE}, r AS (SELECT l.record_id,l.id,l.type,l.category,l.accounting_status,l.fecha,l.tercero,l.concepto,l.numerodocumento,l.line_number,l.document_id,
     l.importe,pa.allocated_amount gasto,pa.project_id,pr.name project_label,pr.project_id project_code,
     CASE WHEN l.category IN ('materials','overhead') THEN 'materiales' WHEN l.category='labor' THEN 'trabajadores' ELSE 'otros' END clase,
-    (l.category IN ('revenue','advance') OR l.type='cliente') ingreso
-   FROM listed l JOIN ledens.project_financial_allocations pa ON pa.record_id=l.record_id JOIN ledens.projects pr ON pr.id=pa.project_id)`;
+    (l.category IN ('revenue','advance') OR l.type='cliente') ingreso,
+    ${withCategories?'oc.category_id':'NULL::uuid'} categoria_id
+   FROM listed l JOIN ledens.project_financial_allocations pa ON pa.record_id=l.record_id JOIN ledens.projects pr ON pr.id=pa.project_id
+   ${withCategories?'LEFT JOIN ledens.opex_record_categories oc ON oc.record_id=l.record_id':''})`;
   const sums=`coalesce(sum(r.gasto),0)::text total,coalesce(sum(r.gasto) FILTER(WHERE r.clase='materiales'),0)::text materiales,
    coalesce(sum(r.gasto) FILTER(WHERE r.clase='trabajadores'),0)::text trabajadores,coalesce(sum(r.gasto) FILTER(WHERE r.clase='otros'),0)::text otros,count(*)::int movimientos`;
-  const all=scope(),filtered=scope({project:true}),listedScope=scope({project:true,month:true});
+  const all=scope({project:false,month:false}),filtered=scope({month:false}),byCategory=scope({category:false}),listedScope=scope();
   const perProject=new Map((await this.query(`${sql} SELECT r.project_id,coalesce(sum(r.gasto),0)::text total,count(*)::int movimientos FROM r WHERE ${all.where} GROUP BY 1`,all.params)).rows.map(x=>[x.project_id,x]));
   const meses=(await this.query(`${sql} SELECT to_char(r.fecha,'YYYY-MM') mes,${sums} FROM r WHERE ${filtered.where} AND r.fecha IS NOT NULL GROUP BY 1 ORDER BY 1`,filtered.params)).rows;
   const t=(await this.query(`${sql} SELECT ${sums},coalesce(sum(r.gasto) FILTER(WHERE r.fecha IS NULL),0)::text sin_fecha,count(*) FILTER(WHERE r.fecha IS NULL)::int sin_fecha_n FROM r WHERE ${filtered.where}`,filtered.params)).rows[0];
+  const cats=(await this.query(`${sql} SELECT r.categoria_id id,coalesce(sum(r.gasto),0)::text total,count(*)::int movimientos FROM r WHERE ${byCategory.where} GROUP BY 1`,byCategory.params)).rows;
   const n=(await this.query(`${sql} SELECT count(*)::int n FROM r WHERE ${listedScope.where}`,listedScope.params)).rows[0].n;
   const sorts={fecha:'r.fecha',importe:'r.gasto',tercero:'r.tercero',concepto:'r.concepto',proyecto:'r.project_label'};
-  const rows=(await this.query(`${sql} SELECT r.id,r.type,r.category,r.clase,r.accounting_status,r.fecha::text fecha,r.tercero,r.concepto,r.numerodocumento,r.line_number,r.document_id,
-    r.importe::text importe,r.gasto::text gasto,r.project_id,r.project_label,r.project_code
+  const rows=(await this.query(`${sql} SELECT r.record_id,r.id,r.type,r.category,r.clase,r.accounting_status,r.fecha::text fecha,r.tercero,r.concepto,r.numerodocumento,r.line_number,r.document_id,
+    r.importe::text importe,r.gasto::text gasto,r.project_id,r.project_label,r.project_code,r.categoria_id
     FROM r WHERE ${listedScope.where} ORDER BY ${sorts[f.sort]||'r.fecha'} ${f.dir==='asc'?'ASC':'DESC'} NULLS LAST,r.record_id,r.project_id
     LIMIT ${pageSize} OFFSET ${(page-1)*pageSize}`,listedScope.params)).rows;
-  return {proyectos:projects.map(p=>({...p,total:perProject.get(p.id)?.total||'0',movimientos:perProject.get(p.id)?.movimientos||0})),meses,
+  const sinCategoria=cats.find(c=>c.id===null);
+  return {proyectos:projects.map(p=>({...p,total:perProject.get(p.id)?.total||'0',movimientos:perProject.get(p.id)?.movimientos||0})),categorias,meses,
    totales:{total:t.total,materiales:t.materiales,trabajadores:t.trabajadores,otros:t.otros,movimientos:t.movimientos},
-   sinFecha:{total:t.sin_fecha,movimientos:t.sin_fecha_n},rows,total:n,page,pageSize};
+   sinFecha:{total:t.sin_fecha,movimientos:t.sin_fecha_n},
+   porCategoria:cats.filter(c=>c.id!==null).sort((a,b)=>Number(b.total)-Number(a.total)),sinCategoria:sinCategoria?{total:sinCategoria.total,movimientos:sinCategoria.movimientos}:{total:'0',movimientos:0},
+   rows,total:n,page,pageSize};
+ }
+ async hasOpexCategories(c=this.pool){
+  if(this._opexCategories===undefined)this._opexCategories=Boolean((await c.query("SELECT to_regclass('ledens.opex_record_categories') name")).rows[0].name);
+  return this._opexCategories;
+ }
+ // The categories in the screen's order; `movimientos` counts every record
+ // that has it (a category in use cannot be removed).
+ async opexCategories(c=this.pool){
+  return (await c.query(`SELECT k.id,k.name,k.position,(SELECT count(*)::int FROM ledens.opex_record_categories x WHERE x.category_id=k.id) movimientos
+   FROM ledens.opex_categories k ORDER BY k.position,lower(k.name)`)).rows;
+ }
+ opexAdmin(){if(this.user.role!=='admin')throw new FinError(403,'Los gastos operacionales requieren administrador');}
+ async opexReady(){if(!(await this.hasOpexCategories()))throw new FinError(503,'Las categorías de gastos operacionales aún no están disponibles');}
+ // Assign one category (or none: categoryId null) to records imputed to a
+ // «Gastos operacionales» project. All or nothing; each change is a
+ // finance_events row of its record.
+ async setOpexCategory({recordIds,categoryId}={}){
+  this.opexAdmin();await this.opexReady();
+  if(!Array.isArray(recordIds)||!recordIds.length||recordIds.length>200||recordIds.some(id=>!uuid(id)))throw new FinError(400,'Elige entre 1 y 200 movimientos');
+  if(categoryId!==null&&!uuid(categoryId))throw new FinError(400,'Categoría no válida');
+  return this.finance.transaction(async c=>{
+   const cat=categoryId===null?null:(await c.query('SELECT id,name FROM ledens.opex_categories WHERE id=$1',[categoryId])).rows[0];
+   if(categoryId!==null&&!cat)throw new FinError(404,'Categoría no encontrada');
+   let updated=0;
+   for(const id of [...new Set(recordIds)]){
+    const r=await this.finance.record(c,id,this.user,true);
+    const opex=(await c.query(`SELECT 1 FROM ledens.project_financial_allocations a JOIN ledens.projects p ON p.id=a.project_id WHERE a.record_id=$1 AND ${OPEX_PROJECT_SQL('p')}`,[id])).rows.length;
+    if(!opex)throw new FinError(409,'Solo se puede categorizar un movimiento imputado a un proyecto de gastos operacionales');
+    const before=(await c.query(`SELECT k.id,k.name FROM ledens.opex_record_categories x JOIN ledens.opex_categories k ON k.id=x.category_id WHERE x.record_id=$1 FOR UPDATE OF x`,[id])).rows[0]||null;
+    if((before?.id??null)===(cat?.id??null))continue;
+    if(cat)await c.query(`INSERT INTO ledens.opex_record_categories(record_id,category_id,updated_by) VALUES($1,$2,$3)
+     ON CONFLICT(record_id) DO UPDATE SET category_id=excluded.category_id,updated_by=excluded.updated_by,updated_at=now()`,[id,cat.id,this.user.id]);
+    else await c.query('DELETE FROM ledens.opex_record_categories WHERE record_id=$1',[id]);
+    await this.finance.audit(c,r,this.user,'opex_category',cat?'Categoría: '+cat.name:'Sin categoría',{categoria:cat,anterior:before});
+    updated++;
+   }
+   return {updated,categoria:cat};
+  });
+ }
+ async opexAudit(c,action,target,detail){
+  await c.query('INSERT INTO public.audit_log(actor_id,actor_label,action,target_label,detail) VALUES($1,$2,$3,$4,$5)',
+   [this.user.id||null,this.user.name||this.user.email||'Administrador',action,target,detail]);
+ }
+ static opexName(name){
+  const n=typeof name==='string'?name.replace(/\s+/g,' ').trim():'';
+  if(!n||n.length>60)throw new FinError(400,'Escribe un nombre de categoría (máximo 60 caracteres)');
+  return n;
+ }
+ async createOpexCategory({name}={}){
+  this.opexAdmin();await this.opexReady();const n=FinanzasService.opexName(name);
+  return this.finance.transaction(async c=>{
+   if((await c.query('SELECT 1 FROM ledens.opex_categories WHERE lower(name)=lower($1)',[n])).rows.length)throw new FinError(409,'Ya existe la categoría «'+n+'»');
+   const k=(await c.query(`INSERT INTO ledens.opex_categories(name,position,created_by) VALUES($1,(SELECT coalesce(max(position),0)+1 FROM ledens.opex_categories),$2)
+    RETURNING id,name,position`,[n,this.user.id])).rows[0];
+   await this.opexAudit(c,'Categoría de gasto operacional creada',n,'');
+   return {categoria:{...k,movimientos:0}};
+  });
+ }
+ async renameOpexCategory(id,{name}={}){
+  this.opexAdmin();await this.opexReady();if(!uuid(id))throw new FinError(404,'Categoría no encontrada');const n=FinanzasService.opexName(name);
+  return this.finance.transaction(async c=>{
+   const k=(await c.query('SELECT id,name FROM ledens.opex_categories WHERE id=$1 FOR UPDATE',[id])).rows[0];
+   if(!k)throw new FinError(404,'Categoría no encontrada');
+   if(k.name===n)return {categoria:k,changed:false};
+   if((await c.query('SELECT 1 FROM ledens.opex_categories WHERE lower(name)=lower($1) AND id<>$2',[n,id])).rows.length)throw new FinError(409,'Ya existe la categoría «'+n+'»');
+   await c.query('UPDATE ledens.opex_categories SET name=$2 WHERE id=$1',[id,n]);
+   await this.opexAudit(c,'Categoría de gasto operacional renombrada',n,`Antes: ${k.name}`);
+   return {categoria:{id,name:n},changed:true};
+  });
+ }
+ async deleteOpexCategory(id){
+  this.opexAdmin();await this.opexReady();if(!uuid(id))throw new FinError(404,'Categoría no encontrada');
+  return this.finance.transaction(async c=>{
+   const k=(await c.query('SELECT id,name FROM ledens.opex_categories WHERE id=$1 FOR UPDATE',[id])).rows[0];
+   if(!k)throw new FinError(404,'Categoría no encontrada');
+   const used=(await c.query('SELECT count(*)::int n FROM ledens.opex_record_categories WHERE category_id=$1',[id])).rows[0].n;
+   if(used)throw new FinError(409,`La categoría «${k.name}» tiene ${used} ${used===1?'movimiento':'movimientos'}: cámbiales la categoría antes de eliminarla`);
+   await c.query('DELETE FROM ledens.opex_categories WHERE id=$1',[id]);
+   await this.opexAudit(c,'Categoría de gasto operacional eliminada',k.name,'');
+   return {deleted:true};
+  });
  }
  // ------------------------------------------------------------- movimientos conciliados
  // One row per reconciled movement (bank or cash), never split into its concepts:
