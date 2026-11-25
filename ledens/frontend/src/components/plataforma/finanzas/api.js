@@ -87,6 +87,7 @@ export const api = {
   bulk: (body) => request('POST', '/api/finanzas/registros/lote', body),
   // Rentabilidad por proyecto: ingresos − costes per project and the movements assigned to them.
   projectResults: (f) => request('GET', '/api/finanzas/rentabilidad' + qs(f)),
+  operatingExpenses: (f) => request('GET', '/api/finanzas/gastos-operacionales' + qs(f)),
   profitability: (projectId) => request('GET', `/api/finanzas/proyectos/${projectId}/rentabilidad`),
   // What a project has really collected: { cobrado, sinCobrar (recorded income still unpaid), cobros }.
   projectCollections: (projectId) => request('GET', `/api/finanzas/proyectos/${projectId}/cobros`),
