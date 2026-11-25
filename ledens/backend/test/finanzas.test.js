@@ -56,6 +56,30 @@ test('bulk reports per-record conflicts without overwriting another writer',asyn
  const result=await svc.bulk({action:'assign',projectId:p1,reason:'Asignación conjunta',requestId:randomUUID(),items:[{type:a.type,id:a.id,version:a.version},{type:b.type,id:b.id,version:b.version}]});
  assert.equal(result.ok,1);assert.equal(result.failed,1);assert.equal((await svc.getRecord(b.type,b.id)).project_id,p2);
 });
+test('Devolver a pendientes: a material assigned by mistake goes back to Materiales pendiente de asignación, with its reason',async()=>{
+ const pendingIds=async()=>(await svc.listRecords({type:'material',pending:true,pageSize:100})).rows.map(x=>x.id);
+ let r=await source();await assign(r,p1);r=await svc.getRecord(r.type,r.id);assert.ok(!(await pendingIds()).includes(r.id));
+ await assert.rejects(svc.unassign({type:r.type,id:r.id,version:r.version,requestId:randomUUID(),reason:'no'}),{status:400});
+ assert.deepEqual(await svc.unassign({type:r.type,id:r.id,version:r.version,requestId:randomUUID(),reason:'Obra equivocada'}),{changed:true});
+ r=await svc.getRecord(r.type,r.id);assert.equal(r.project_id,null);assert.equal(r.estado,'pendiente');assert.ok((await pendingIds()).includes(r.id));
+ assert.ok(r.historial.some(e=>e.reason==='Obra equivocada'&&e.old_label==='Marbella'&&e.new_allocations.length===0));
+ // Already without a project: nothing is written.
+ assert.deepEqual(await svc.unassign({type:r.type,id:r.id,version:r.version,requestId:randomUUID(),reason:'Obra equivocada'}),{changed:false});
+ assert.equal((await svc.getRecord(r.type,r.id)).version,r.version);
+ // A distribution goes back whole; a stale version is refused.
+ await svc.distribute({type:r.type,id:r.id,version:r.version,requestId:randomUUID(),parts:[{projectId:p1,amount:'700'},{projectId:p2,amount:'500'}]});
+ await assert.rejects(svc.unassign({type:r.type,id:r.id,version:r.version,requestId:randomUUID(),reason:'Reparto equivocado'}),{status:409});
+ r=await svc.getRecord(r.type,r.id);await svc.assign({type:r.type,id:r.id,projectId:null,version:r.version,requestId:randomUUID(),reason:'Reparto equivocado'});
+ r=await svc.getRecord(r.type,r.id);assert.equal(r.distribucion.length,0);assert.equal(r.estado,'pendiente');
+ // In bulk: reason required before anything is written; each record answers on its own.
+ const a=await source(),b=await source();await assign(a,p1);await assign(b,p2);
+ const items=await Promise.all([a,b].map(async x=>{const y=await svc.getRecord(x.type,x.id);return {type:y.type,id:y.id,version:y.version};}));
+ await assert.rejects(svc.bulk({action:'unassign',requestId:randomUUID(),items}),{status:400});
+ assert.equal((await svc.getRecord(a.type,a.id)).project_id,p1);
+ const res=await svc.bulk({action:'unassign',reason:'Asignados por error',requestId:randomUUID(),items:[...items,{type:r.type,id:r.id,version:r.version}]});
+ assert.equal(res.ok,3);assert.equal(res.failed,0);assert.deepEqual(res.results.map(x=>x.changed),[true,true,false]);
+ const now=await pendingIds();assert.ok(now.includes(a.id)&&now.includes(b.id));
+});
 test('profitability facade returns recognized economics and independent cash only',async()=>{
  const r=await source();await assign(r,p1);const s=await svc.profitability(p1);
  assert.equal(Number(s.kpis.costeTotal),0);assert.equal(Number(s.kpis.cobros),0);assert.ok(s.kpis.pendientesRevision>0);assert.equal(s.kpis.margenDirectoPct,null);

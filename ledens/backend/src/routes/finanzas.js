@@ -82,7 +82,8 @@ export function createFinanzasRouter({ service, projects, workers, payables, run
     res.json({ record: await svc(req).getRecord(typeParam(req), req.params.id) });
   }));
 
-  // { projectId: uuid | null, expectedProjectId?: uuid | null, reason? }
+  // { projectId: uuid | null, expectedProjectId?: uuid | null, reason? } — null removes the project
+  // («Devolver a pendientes»; reason required, see FinanzasService.unassign).
   router.put('/registros/:type/:id/proyecto', traced('imputacion', 'Asignación de proyecto', { entity: (req) => ({ type: req.params.type, id: req.params.id }), summary: (b) => ({ message: b.record?.project_label ? 'Asignado a ' + b.record.project_label : 'Proyecto quitado' }) })(async (req, res) => {
     const b = req.body || {};
     const s = svc(req);
@@ -109,7 +110,8 @@ export function createFinanzasRouter({ service, projects, workers, payables, run
     res.json({ ...result, record: await s.getRecord(req.params.type, req.params.id) });
   }));
 
-  // { action: 'assign' | 'review', items: [{ type, id }], projectId?, reason?, note? }
+  // { action: 'assign' | 'unassign' | 'review', items: [{ type, id, version }], projectId?, reason?, note? }
+  // 'unassign' = «Devolver a pendientes»: removes the project, reason required.
   router.post('/registros/lote', traced('imputacion', 'Operación masiva', { summary: b=>({status:b.ok===0&&b.failed?'rechazado':'ok',message:`${b.ok} correctos · ${b.failed} con error`,detail:{correctos:b.ok,errores:b.failed}}) })(async (req, res) => {
     const b = req.body || {};
     const items = Array.isArray(b.items) ? b.items.map((i) => ({ type: i?.type, id: i?.id,version:i?.version })) : b.items;

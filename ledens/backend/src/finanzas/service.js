@@ -374,8 +374,21 @@ export class FinanzasService {
  // when they replace it (029, carried_project_id). It is reported only by
  // «Segregar conceptos» (segregateMaterial).
  async assign({type,id,projectId,version,requestId,reason}){
+  if(projectId===null)return this.unassign({type,id,version,requestId,reason});
   const r=await this.source(type,id);if(!Number.isInteger(version)||!uuid(requestId))throw new FinError(400,'Recarga el registro antes de asignarlo');
   await this.finance.bulk(this.user,{request_id:requestId,reason:this.reason(r,reason,version),records:[{record_id:r.record_id,version,allocations:projectId===null?[]:[{project_id:projectId,amount:r.importe}]}]});return {changed:true};
+ }
+ // «Devolver a pendientes» (Materiales, and «Quitar proyecto» of the side
+ // panel): a record assigned by mistake loses its project — or every share of
+ // its distribution — and is listed again in «Materiales pendiente de
+ // asignación». Always with a reason (audited); one with no project is left as
+ // it is. Removing the last share needs the unassigned permission (admins;
+ // a jefe only with can_review_unassigned), checked by the canonical engine.
+ async unassign({type,id,version,requestId,reason}){
+  const r=await this.source(type,id);if(!Number.isInteger(version)||!uuid(requestId))throw new FinError(400,'Recarga el registro antes de devolverlo a pendientes');
+  if(!r.allocation_count)return {changed:false};
+  if(typeof reason!=='string'||reason.trim().length<5)throw new FinError(400,'Escribe el motivo para devolverlo a pendientes (al menos cinco caracteres)');
+  await this.finance.bulk(this.user,{request_id:requestId,reason:reason.trim(),records:[{record_id:r.record_id,version,allocations:[]}]});return {changed:true};
  }
  async distribute({type,id,parts,version,requestId,reason}){
   const r=await this.source(type,id);if(!Array.isArray(parts)||!parts.length||!Number.isInteger(version)||!uuid(requestId))throw new FinError(400,'Distribución no válida; recarga el registro');
@@ -391,8 +404,11 @@ export class FinanzasService {
    await this.finance.audit(c,before,this.user,'review_flag',note||'Cambio de marca de revisión',{needsReview,note});return {changed:true};});
  }
  async bulk({items,action,projectId,reason,note,requestId}){
-  if(!Array.isArray(items)||!items.length||items.length>100||!['assign','review'].includes(action)||!uuid(requestId))throw new FinError(400,'Lote no válido (máximo 100 registros)');
-  const results=[];for(const item of items){try{const value=action==='assign'?await this.assign({...item,projectId,reason,requestId:requestFor(requestId,item.type+'|'+item.id)}):await this.setReview({...item,needsReview:true,note});results.push({...item,ok:true,...value});}catch(e){if(!(e instanceof FinanceError))throw e;results.push({...item,ok:false,error:e.message});}}
+  if(!Array.isArray(items)||!items.length||items.length>100||!['assign','unassign','review'].includes(action)||!uuid(requestId))throw new FinError(400,'Lote no válido (máximo 100 registros)');
+  // 'unassign' («Devolver a pendientes»): the reason is required before anything is written.
+  if(action==='unassign'&&(typeof reason!=='string'||reason.trim().length<5))throw new FinError(400,'Escribe el motivo para devolverlos a pendientes (al menos cinco caracteres)');
+  const results=[];for(const item of items){try{const req=requestFor(requestId,item.type+'|'+item.id);
+   const value=action==='assign'?await this.assign({...item,projectId,reason,requestId:req}):action==='unassign'?await this.unassign({...item,reason,requestId:req}):await this.setReview({...item,needsReview:true,note});results.push({...item,ok:true,...value});}catch(e){if(!(e instanceof FinanceError))throw e;results.push({...item,ok:false,error:e.message});}}
   return {results,ok:results.filter(r=>r.ok).length,failed:results.filter(r=>!r.ok).length};
  }
  async automaticImputation(){return {applied:false,suggested:false,reason:'Project evidence is reviewed by the canonical engine'};}

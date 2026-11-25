@@ -49,7 +49,7 @@ export default function RecordDrawer({ type, id, onClose, onSaved, toast }) {
     } catch (e) { fail(e); }
   };
   const removeAssign = async () => {
-    if (!reason.trim()) return setFormError('Indica el motivo para quitar el proyecto.');
+    if (reason.trim().length < 5) return setFormError('Indica el motivo para quitar el proyecto (mínimo 5 caracteres).');
     setSaving(true); setFormError('');
     try { const r = await api.assign(type, id, { projectId: null, version:rec.version,expectedProjectId: rec.project_id || null, reason: reason.trim() }); done(r.record, 'Proyecto quitado. El registro vuelve a pendientes.'); }
     catch (e) { fail(e); }

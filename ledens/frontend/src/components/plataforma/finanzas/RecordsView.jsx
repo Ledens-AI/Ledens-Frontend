@@ -24,6 +24,9 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
   // week, month or year each payment is for; one row or a selection at once):
   // new payments are prepared and saved in «Pendiente de trabajador».
   const readOnly = mode === 'trabajador';
+  // «Devolver a pendientes» (Materiales): a material assigned to the wrong obra
+  // loses its project and is listed again in «Materiales pendiente de asignación».
+  const canReturn = mode === 'material';
   const [filters, setFilters] = useState({ ...EMPTY_FILTERS, proyecto: initialProject || null });
   const [draftQ, setDraftQ] = useState('');
   const [sort, setSort] = useState({ by: 'fecha', dir: 'desc' });
@@ -191,16 +194,40 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
   const sel = [...selected.values()];
   const withProject = sel.filter((r) => r.project_id || r.parts > 0).length;
 
-  const runBulk = async (body) => {
+  const runBulk = async (body, list = sel) => {
     setDialog((d) => ({ ...d, saving: true, error: '' }));
     try {
-      const res = await api.bulk({ ...body, items: sel.map((r) => ({ type: r.type, id: r.id,version:r.version })) });
-      const byKey = new Map(sel.map((r) => [key(r), r]));
+      const res = await api.bulk({ ...body, items: list.map((r) => ({ type: r.type, id: r.id,version:r.version })) });
+      const byKey = new Map(list.map((r) => [key(r), r]));
       setDialog({ kind: 'result', res, rows: res.results.map((x) => ({ ...x, row: byKey.get(x.type + ':' + x.id) })) });
       setSelected(new Map(res.results.filter((x) => !x.ok).map((x) => [x.type + ':' + x.id, byKey.get(x.type + ':' + x.id)])));
       refresh();
     } catch (e) {
       setDialog((d) => ({ ...d, saving: false, error: e.message }));
+    }
+  };
+
+  // «Devolver a pendientes»: one row or the selected rows that have a project.
+  // The reason is required (audited). Each row is sent with the version now on
+  // screen, so after a 409 (the page is fetched again) pressing again works.
+  const hasProject = (r) => Boolean(r.project_id || r.parts > 0);
+  const openReturn = (list) => setDialog({ kind: 'unassign', rows: list.filter(hasProject), reason: '', saving: false, error: '' });
+  const current = (r) => rows.find((x) => key(x) === key(r)) || r;
+  const saveReturn = async () => {
+    const d = dialog, reason = d.reason.trim();
+    if (d.rows.length > 1) { await runBulk({ action: 'unassign', reason }, d.rows.map(current)); return; }
+    const row = current(d.rows[0]);
+    setDialog({ ...d, saving: true, error: '' });
+    try {
+      const { record } = await api.assign(row.type, row.id, { projectId: null, version: row.version, expectedProjectId: row.project_id || null, reason });
+      unstage([key(row)]); replaceRow({ ...record, suggestion: undefined });
+      setSelected((s) => { if (!s.has(key(row))) return s; const n = new Map(s); n.delete(key(row)); return n; });
+      setDialog(null);
+      onChanged?.();
+      toast('Devuelto a «Materiales pendiente de asignación».');
+    } catch (e) {
+      setDialog({ ...d, saving: false, error: e.message });
+      if (e.status === 409) setReload((n) => n + 1);
     }
   };
 
@@ -348,6 +375,9 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
           <button type="button" className="fin-btn is-primary" onClick={() => setDialog({ kind: 'bulk-assign', project: null, reason: '' })}>
             <i className="ri-folder-transfer-line"></i>{withProject ? 'Cambiar proyecto' : 'Asignar proyecto'}
           </button>
+          {canReturn && withProject ? (
+            <button type="button" className="fin-btn" onClick={() => openReturn(sel)}><i className="ri-arrow-go-back-line"></i>Devolver a pendientes{withProject < sel.length ? ` (${withProject})` : ''}</button>
+          ) : null}
           <button type="button" className="fin-btn" onClick={() => setDialog({ kind: 'bulk-review', note: '' })}><i className="ri-flag-line"></i>Marcar para revisión</button>
           <button type="button" className="fin-btn is-ghost" onClick={() => setSelected(new Map())}>Quitar selección</button>
         </div>
@@ -426,6 +456,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
                       <td>{busy[k] ? <span className="fin-muted">Guardando…</span> : st ? <Badge bg="#FBF1DE" fg="#7A4E0E">Sin guardar</Badge> : <Badge {...ESTADO[r.estado]}>{ESTADO[r.estado].label}</Badge>}</td>
                       {readOnly ? null : <td className="fin-nowrap">
                         {r.segregable || r.provisional ? <button type="button" className="fin-btn is-ghost is-small" title="Segregar en las líneas de la factura" onClick={() => setDialog({ kind: 'segregar', row: r })}><i className="ri-scissors-cut-line"></i>Segregar</button> : null}
+                        {canReturn && hasProject(r) ? <button type="button" className="fin-iconbtn" aria-label="Devolver a Materiales pendiente de asignación" title="Devolver a Materiales pendiente de asignación" disabled={!!busy[k] || st?.saving} onClick={() => openReturn([r])}><i className="ri-arrow-go-back-line"></i></button> : null}
                         <button type="button" className="fin-iconbtn" aria-label="Ver detalle y editar" title="Ver detalle y editar" onClick={() => setOpen(r)}><i className="ri-side-bar-line"></i></button></td>}
                     </tr>
                   );
@@ -481,6 +512,26 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
                 <textarea rows={2} maxLength={500} value={dialog.reason} onChange={(e) => setDialog({ ...dialog, reason: e.target.value })} /></label>
             </>
           ) : null}
+          {dialog.error ? <div className="fin-error-inline">{dialog.error}</div> : null}
+        </Dialog>
+      ) : null}
+
+      {dialog?.kind === 'unassign' ? (
+        <Dialog title="Devolver a pendientes de asignación" onClose={() => !dialog.saving && setDialog(null)}
+          actions={<>
+            <button type="button" className="fin-btn is-ghost" disabled={dialog.saving} onClick={() => setDialog(null)}>Cancelar</button>
+            <button type="button" className="fin-btn is-primary" disabled={dialog.saving || dialog.reason.trim().length < 5} onClick={saveReturn}>
+              {dialog.saving ? 'Guardando…' : dialog.rows.length === 1 ? 'Devolver a pendientes' : `Devolver ${dialog.rows.length} materiales`}
+            </button>
+          </>}>
+          {dialog.rows.length === 1 ? (
+            <p>{dialog.rows[0].parts > 0 ? `Este material está distribuido en ${dialog.rows[0].parts} proyectos.` : <>Este material está asignado a <strong>{dialog.rows[0].project_label}</strong>.</>}{' '}
+              Se quedará sin proyecto ({eur(dialog.rows[0].importe)}) y volverá a <strong>Materiales pendiente de asignación</strong>, donde podrás elegir la obra correcta.</p>
+          ) : (
+            <p>Los <strong>{dialog.rows.length} materiales</strong> seleccionados que tienen proyecto ({eur(dialog.rows.reduce((a, r) => a + Number(r.importe), 0))}) se quedarán sin proyecto y volverán a <strong>Materiales pendiente de asignación</strong>.</p>
+          )}
+          <label className="fin-field"><span>Motivo (obligatorio, mínimo 5 caracteres; queda en la auditoría)</span>
+            <textarea rows={3} autoFocus maxLength={500} value={dialog.reason} disabled={dialog.saving} onChange={(e) => setDialog({ ...dialog, reason: e.target.value })} /></label>
           {dialog.error ? <div className="fin-error-inline">{dialog.error}</div> : null}
         </Dialog>
       ) : null}
