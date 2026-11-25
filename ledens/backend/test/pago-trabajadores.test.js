@@ -211,3 +211,29 @@ test('periodo trabajado: saved with the line, editable afterwards, and the chart
  const outsider=(await db.query("INSERT INTO users(email,role,name) VALUES('jefe2@pt.test','jefe','Jefe 2') RETURNING id,role")).rows[0];
  await assert.rejects(new FinanzasService(pool,outsider).setWorkPeriods({ids:[w1],period:'mes',startsOn:'2026-10-01'}),{status:403});
 });
+
+test('Pagos a trabajadores: a saved payment moves to another project, with a reason, audited, and the chart follows the project filter',async()=>{
+ const m=await movement('-60.00',{date:'2026-11-10',source:'4T2026-960'});
+ await asAdmin().classifyWorkerPayments({movementIds:[m]});
+ const [line]=(await asAdmin().workerQueue()).rows.find(r=>r.bank_movement_id===m).lines;
+ const {results:[{workerPaymentId:id}]}=await asAdmin().saveWorkerSplits({items:[{splitId:line.id,employeeId:emp1,projectId:p1}]});
+ const row=async()=>(await asAdmin().listRecords({type:'trabajador',from:'2026-11-10',to:'2026-11-10'})).rows.find(r=>r.id===id);
+ const before=await row();assert.equal(before.project_id,p1);
+ const series=async(project)=>(await asAdmin().workerPaymentSeries({from:'2026-11-10',to:'2026-11-10',project,periodo:'semana'})).series.reduce((s,x)=>s+x.pagos,0);
+ assert.deepEqual([await series(p1),await series(p2)],[1,0]);
+ // Changing a project that is already set needs a reason (the screen asks for it).
+ const requestId=()=>crypto.randomUUID();
+ await assert.rejects(asAdmin().assign({type:'trabajador',id,projectId:p2,version:before.version,requestId:requestId()}),{status:400});
+ // A jefe without write permission on the projects cannot move it.
+ const outsider=(await db.query("INSERT INTO users(email,role,name) VALUES('jefe3@pt.test','jefe','Jefe 3') RETURNING id,role")).rows[0];
+ await assert.rejects(new FinanzasService(pool,outsider).assign({type:'trabajador',id,projectId:p2,version:before.version,requestId:requestId(),reason:'Era de otra obra'}),e=>[403,404].includes(e.status));
+ await asAdmin().assign({type:'trabajador',id,projectId:p2,version:before.version,requestId:requestId(),reason:'Era de la obra de Vélez'});
+ const after=await row();
+ assert.equal(after.project_id,p2);assert.equal(after.estado,'asignado');assert.equal(after.tercero,'Trabajador Uno','worker and amount are unchanged');assert.equal(Number(after.importe),60);
+ assert.deepEqual([await series(p1),await series(p2)],[0,1]);
+ assert.equal((await db.query('SELECT project_id FROM ledens.worker_payments WHERE id=$1',[id])).rows[0].project_id,p2,'the legacy project_id follows');
+ const ev=(await db.query("SELECT e.reason FROM ledens.finance_events e JOIN ledens.financial_records f ON f.id=e.record_id WHERE f.worker_payment_id=$1 ORDER BY e.id DESC LIMIT 1",[id])).rows[0];
+ assert.equal(ev.reason,'Era de la obra de Vélez');
+ // A stale version (the screen had not reloaded) is refused instead of overwriting.
+ await assert.rejects(asAdmin().assign({type:'trabajador',id,projectId:p1,version:before.version,requestId:requestId(),reason:'Otra vez a Marbella'}),{status:409});
+});
