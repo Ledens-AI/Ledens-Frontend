@@ -3,11 +3,15 @@
 // sees the list without the daily pay. Deactivating never deletes: worker_payments
 // keep pointing at the employee, who just stops being offered for new payments.
 // Rows created here have no source_id/raw_id; every change goes to audit_log.
+//
+// The code is never typed: a new worker takes the next EMP-<NNN> (one more than
+// the highest code of that form, imported ones included, any case, with or
+// without the dash) and keeps it; a code sent in a form is ignored.
 import {uuid} from '../finance/service.js';
 import {FinError} from './service.js';
 import {startAccruingToday} from './payables.js';
 
-const FIELDS=['code','name','positionId','tipo','dailyPay','hours'];
+const FIELDS=['name','positionId','tipo','dailyPay','hours'];
 const COLUMN={code:'empleadoid',name:'name',positionId:'primary_position_id',tipo:'tipo',dailyPay:'daily_pay',hours:'horasjornada'};
 const LABEL={code:'Código',name:'Nombre',positionId:'Puesto',tipo:'Tipo',dailyPay:'Pago diario',hours:'Horas por jornada'};
 const NUMERIC=['dailyPay','hours'];
@@ -46,23 +50,29 @@ export class WorkersService {
  async options(){
   this.access();
   const positions=(await this.pool.query('SELECT id,name FROM ledens.positions WHERE coalesce(activo,true) ORDER BY name,id')).rows;
-  return {positions,canEdit:this.canEdit()};
+  return {positions,canEdit:this.canEdit(),...(this.canEdit()?{nextCode:await this.peekCode(this.pool)}:{})};
  }
- async clean(c,body,id=null){
+ async clean(c,body){
   const v={};
   for(const f of FIELDS){const x=body?.[f];v[f]=typeof x==='string'?(x.trim()||null):(x??null);}
   if(!v.name)throw new FinError(400,'El nombre es obligatorio');
-  for(const f of ['code','name','tipo'])if(v[f]!==null&&(typeof v[f]!=='string'||v[f].length>(f==='code'?50:200)))throw new FinError(400,`${LABEL[f]} no válido (máximo ${f==='code'?50:200} caracteres)`);
+  for(const f of ['name','tipo'])if(v[f]!==null&&(typeof v[f]!=='string'||v[f].length>200))throw new FinError(400,`${LABEL[f]} no válido (máximo 200 caracteres)`);
   if(v.dailyPay!==null){v.dailyPay=String(v.dailyPay).replace(',','.');if(!/^\d{1,7}(\.\d{1,2})?$/.test(v.dailyPay))throw new FinError(400,'Pago diario no válido (euros con hasta 2 decimales)');}
   if(v.hours!==null){v.hours=String(v.hours).replace(',','.');if(!/^\d{1,2}(\.\d{1,2})?$/.test(v.hours)||Number(v.hours)<=0||Number(v.hours)>24)throw new FinError(400,'Horas por jornada no válidas (entre 0 y 24)');}
   if(v.positionId!==null&&(!uuid(v.positionId)||!(await c.query('SELECT 1 FROM ledens.positions WHERE id=$1',[v.positionId])).rows.length))throw new FinError(400,'Puesto no válido');
-  // The employee code identifies the worker in the accounting import: never two alike.
-  if(v.code){
-   await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,7))',['employee-code|'+v.code.toLowerCase()]);
-   const dup=(await c.query('SELECT name FROM ledens.employees WHERE lower(btrim(empleadoid))=lower($1) AND ($2::uuid IS NULL OR id<>$2) LIMIT 1',[v.code,id])).rows[0];
-   if(dup)throw new FinError(409,`El código ${v.code} ya lo usa ${dup.name}`);
-  }
   return v;
+ }
+ // Next code, without reserving it (the form shows it as a preview).
+ async peekCode(c){
+  const n=(await c.query(`SELECT coalesce(max(substring(upper(btrim(empleadoid)) from $1)::numeric),0)+1 n FROM ledens.employees WHERE upper(btrim(empleadoid)) ~ $1`,
+   ['^EMP-?([0-9]+)$'])).rows[0].n;
+  return `EMP-${String(n).padStart(3,'0')}`;
+ }
+ // The employee code identifies the worker in the accounting import: never two
+ // alike. One lock for the sequence, so two altas at once never take the same number.
+ async nextCode(c){
+  await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,7))',['employee-code-seq']);
+  return this.peekCode(c);
  }
  async transaction(fn){const c=await this.pool.connect();try{await c.query('BEGIN');const r=await fn(c);await c.query('COMMIT');return r;}catch(e){await c.query('ROLLBACK').catch(()=>{});throw e;}finally{c.release();}}
  async audit(c,action,w,detail){
@@ -81,8 +91,9 @@ export class WorkersService {
   if(!this.canEdit())throw new FinError(403,'Solo un administrador puede dar de alta trabajadores');
   return this.transaction(async c=>{
    const v=await this.clean(c,body);
-   const cols=FIELDS.map(f=>COLUMN[f]);
-   const id=(await c.query(`INSERT INTO ledens.employees(${cols.join(',')},activo) VALUES(${cols.map((_,i)=>'$'+(i+1)).join(',')},true) RETURNING id`,FIELDS.map(f=>v[f]))).rows[0].id;
+   v.code=await this.nextCode(c);
+   const fields=['code',...FIELDS],cols=fields.map(f=>COLUMN[f]);
+   const id=(await c.query(`INSERT INTO ledens.employees(${cols.join(',')},activo) VALUES(${cols.map((_,i)=>'$'+(i+1)).join(',')},true) RETURNING id`,fields.map(f=>v[f]))).rows[0].id;
    // Cuentas por pagar: a new worker accrues jornales from today, never before.
    await startAccruingToday(c,id);
    const w=await this.get(c,id);
@@ -94,8 +105,8 @@ export class WorkersService {
   if(!this.canEdit())throw new FinError(403,'Solo un administrador puede editar trabajadores');
   return this.transaction(async c=>{
    const before=await this.locked(c,id,body?.version);
-   const v=await this.clean(c,body,id);
-   const old={code:before.code,name:before.name,positionId:before.position_id,tipo:before.tipo,dailyPay:before.daily_pay,hours:before.hours};
+   const v=await this.clean(c,body);
+   const old={name:before.name,positionId:before.position_id,tipo:before.tipo,dailyPay:before.daily_pay,hours:before.hours};
    const changed=FIELDS.filter(f=>!same(f,old[f],v[f]));
    if(!changed.length)return {...before,changed:false};
    if(changed.includes('dailyPay')&&!(Number(old.dailyPay)>0)&&Number(v.dailyPay)>0)await startAccruingToday(c,id);

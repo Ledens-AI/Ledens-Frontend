@@ -3,19 +3,21 @@ import { api } from './api.js';
 import { eur, num } from './format.js';
 import { Badge, Dialog, Empty, ErrorBox, Pager } from './ui.jsx';
 
-const EMPTY = { code: '', name: '', positionId: '', tipo: '', dailyPay: '', hours: '' };
-const toForm = (w) => ({ code: w.code || '', name: w.name || '', positionId: w.position_id || '', tipo: w.tipo || '',
+const EMPTY = { name: '', positionId: '', tipo: '', dailyPay: '', hours: '' };
+const toForm = (w) => ({ name: w.name || '', positionId: w.position_id || '', tipo: w.tipo || '',
   dailyPay: w.daily_pay != null ? String(w.daily_pay).replace('.', ',') : '', hours: w.hours != null ? String(w.hours).replace('.', ',') : '' });
 
 /* Trabajadores: ledens.employees with alta, edición, baja and reactivación
  * (admins). Others see the list without the daily pay. A baja never deletes:
- * the worker keeps its payments and stops being offered for new ones. */
+ * the worker keeps its payments and stops being offered for new ones.
+ * The code is never typed: the backend gives a new worker the next EMP-<NNN>
+ * (the form shows it as a preview) and it does not change afterwards. */
 export default function Trabajadores({ toast }) {
   const [q, setQ] = useState(''), [query, setQuery] = useState('');
   const [estado, setEstado] = useState('activos'), [puesto, setPuesto] = useState('');
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null), [error, setError] = useState(''), [reload, setReload] = useState(0);
-  const [positions, setPositions] = useState([]);
+  const [positions, setPositions] = useState([]), [nextCode, setNextCode] = useState('');
   const [edit, setEdit] = useState(null); // { worker?, form, saving, error }
   const [toggle, setToggle] = useState(null); // { worker, reason, saving, error }
 
@@ -26,7 +28,8 @@ export default function Trabajadores({ toast }) {
     api.workerList({ q: query, estado, puesto, pagina: page, tam: 25 }).then((d) => { if (!cancelled) setData(d); }, (e) => { if (!cancelled) setError(e.message); });
     return () => { cancelled = true; };
   }, [query, estado, puesto, page, reload]);
-  useEffect(() => { api.workerOptions().then((o) => setPositions(o.positions), () => {}); }, []);
+  const loadOptions = () => api.workerOptions().then((o) => { setPositions(o.positions); setNextCode(o.nextCode || ''); }, () => {});
+  useEffect(() => { loadOptions(); }, []);
 
   const canEdit = !!data?.canEdit;
   const set = (k) => (e) => setEdit((x) => ({ ...x, form: { ...x.form, [k]: e.target.value }, error: '' }));
@@ -56,7 +59,8 @@ export default function Trabajadores({ toast }) {
       } else {
         const { worker } = await api.createWorker(body);
         if (fits(worker)) setData((d) => d && ({ ...d, total: d.total + 1, rows: [worker, ...d.rows] }));
-        toast?.(`${worker.name} dado de alta. Ya se puede elegir en «Pendiente de trabajador».`);
+        toast?.(`${worker.name} dado de alta con el código ${worker.code}. Ya se puede elegir en «Pendiente de trabajador».`);
+        loadOptions(); // the preview of the next code moves on
       }
       setEdit(null);
     } catch (e) {
@@ -146,7 +150,9 @@ export default function Trabajadores({ toast }) {
           {edit.worker?.importado ? <div className="fin-warn"><i className="ri-information-line"></i>Trabajador importado de la contabilidad: una importación posterior podría volver a cambiar estos datos.</div> : null}
           <div className="fin-grid-form">
             <label className="fin-field"><span>Nombre *</span><input type="text" maxLength={200} value={f.name} onChange={set('name')} autoFocus /></label>
-            <label className="fin-field"><span>Código</span><input type="text" maxLength={50} value={f.code} onChange={set('code')} placeholder="p. ej. EMP-014" /></label>
+            <label className="fin-field" title={edit.worker ? 'El código de un trabajador no cambia.' : 'Se asigna al dar de alta: el siguiente número.'}>
+              <span>{edit.worker ? 'Código' : 'Código (automático)'}</span>
+              <input type="text" readOnly disabled value={edit.worker ? edit.worker.code || '—' : nextCode} placeholder="Se asigna al dar de alta" /></label>
             <label className="fin-field"><span>Puesto</span>
               <select value={f.positionId} onChange={set('positionId')}><option value="">Sin puesto</option>{positions.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
             <label className="fin-field"><span>Tipo</span><input type="text" maxLength={200} value={f.tipo} onChange={set('tipo')} placeholder="p. ej. Fijo, Eventual, Autónomo" /></label>
