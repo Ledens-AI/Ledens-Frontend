@@ -2,17 +2,19 @@ import fs from 'node:fs';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { NOTA_LEGAL } from './emisor.js';
 
-// The PDF of one invoice (A4, one page), laid out like the example invoice
-// 4T2026-347: issuer top right, client block, one concept line, totals and
-// payment details. Built from the invoice row only (facturas, a snapshot), so
-// the same invoice always gives the same document.
+// The PDF of one invoice (A4), laid out like the example invoice 4T2026-347:
+// issuer top right, client block, one concept line, totals and payment
+// details. Built from the invoice row only (facturas, a snapshot), so the same
+// invoice always gives the same document. Long client data or concept move
+// the next block to a new page (never cut it): the payment details and the
+// legal note are always printed whole.
 const LOGO = fs.readFileSync(new URL('./logo.png', import.meta.url));
 const hex = (h) => rgb(parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255);
 const C = {
   ink: hex('#1F1F1F'), muted: hex('#6B6B68'), brand: hex('#5567AE'), band: hex('#8B96C8'), bandSoft: hex('#DDE3F3'),
   teal: hex('#C5E8E3'), line: hex('#3A3A38'), light: hex('#BDBDBD'), white: rgb(1, 1, 1),
 };
-const W = 595.28, H = 841.89, L = 40, R = W - 40;
+const W = 595.28, H = 841.89, L = 40, R = W - 40, BOTTOM = 50;
 
 // 1234.5 → "1.234,50 €" (Spanish format, grouping from the thousands).
 export function euros(v) {
@@ -30,7 +32,7 @@ export async function facturaPdf(f) {
   doc.setCreator('Ledens');
   doc.setProducer('Ledens');
   doc.setCreationDate(new Date(f.created_at || Date.now()));
-  const page = doc.addPage([W, H]);
+  let page = doc.addPage([W, H]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const italic = await doc.embedFont(StandardFonts.HelveticaOblique);
@@ -87,25 +89,34 @@ export async function facturaPdf(f) {
 
   // The invoice and its client.
   let y = top - 100;
+  // A block of height h that does not fit above the bottom margin starts a new page.
+  const ensure = (h) => {
+    if (y - h >= BOTTOM) return;
+    page = doc.addPage([W, H]);
+    text(`Factura ${f.numero} (continuación)`, L, H - 40, { f: bold, size: 9, color: C.muted });
+    y = H - 64;
+  };
   const labelX = L, valueX = L + 70, valueW = R - valueX;
   const rows = [['Nº Factura:', f.numero], ['Fecha:', dmy(f.fecha)], ['Cliente:', f.cliente_nombre], ['CIF/NIF:', f.cliente_nif],
     ['Dirección:', f.cliente_direccion], ['Teléfono:', f.cliente_telefono || ''], ['Email:', f.cliente_email || '']];
   for (const [label, value] of rows) {
-    text(label, labelX, y);
     const lines = wrap(value, bold, 9.5, valueW);
+    ensure(13 * lines.length + 2);
+    text(label, labelX, y);
     lines.forEach((l, i) => text(l, valueX, y - i * 13, { f: bold }));
     y -= 13 * Math.max(1, lines.length) + 2;
   }
 
-  // One line: the concept with its net price, VAT and total.
-  y -= 18;
+  // One line: the concept with its net price, VAT and total (header and line together).
   const cols = [L, L + 40, L + 300, L + 375, L + 445, R];
+  const concept = wrap(f.concepto, font, 9.5, cols[2] - cols[1] - 12);
+  const rowH = Math.max(40, concept.length * 12.5 + 18);
+  y -= 18;
+  ensure(26 + 8 + rowH);
   const head = ['Nº', 'Concepto', 'Precio (€)', `IVA (${pctText(f.iva_pct)})`, 'Total (€)'];
   rect(L, y - 26, R - L, 26, { fill: C.band });
   head.forEach((h, i) => text(h, (cols[i] + cols[i + 1]) / 2, y - 16.5, { size: 9, align: 'center' }));
   y -= 26 + 8;
-  const concept = wrap(f.concepto, font, 9.5, cols[2] - cols[1] - 12);
-  const rowH = Math.max(40, concept.length * 12.5 + 18);
   rect(L, y - rowH, R - L, rowH, { border: C.line });
   for (const x of cols.slice(1, -1)) vline(x, y, y - rowH);
   const mid = y - rowH / 2 - 3.5;
@@ -118,6 +129,7 @@ export async function facturaPdf(f) {
 
   // Totals.
   const split = cols[4] - 10, rowT = 22;
+  ensure(20 + rowT * 3);
   rect(L, y - 20, R - L, 20, { fill: C.teal });
   text('Resumen', split - 8, y - 13.5, { align: 'right' });
   text('Importe', R - 6, y - 13.5, { align: 'right' });
@@ -137,17 +149,25 @@ export async function facturaPdf(f) {
   text(euros(f.total), R - 6, y - 14.5, { f: bold, color: C.white, align: 'right' });
   y -= rowT + 26;
 
-  // Payment details and the legal note.
+  // Payment details and the legal note, kept together.
+  const note = wrap(NOTA_LEGAL, italic, 7.5, R - L - 40);
+  const noteH = note.length * 10 + 26;
+  ensure(28 + 36 + noteH);
   rect(L, y - 28, R - L, 28, { fill: C.band });
   text('Forma de pago', L + 10, y - 18, { f: bold, color: C.white });
   y -= 28;
   rect(L, y - 36, R - L, 36, { fill: C.bandSoft });
   text(`Transferencia bancaria  ·  IBAN: ${e.iban || '—'}`, L + 10, y - 22);
   y -= 36;
-  const note = wrap(NOTA_LEGAL, italic, 7.5, R - L - 40);
-  const noteH = note.length * 10 + 26;
   rect(L, y - noteH, R - L, noteH, { border: C.light, borderWidth: 0.6 });
   note.forEach((l, i) => text(l, L + 20, y - 17 - i * 10, { f: italic, size: 7.5 }));
 
+  const pages = doc.getPages();
+  if (pages.length > 1) {
+    pages.forEach((p, i) => {
+      page = p;
+      text(`Página ${i + 1} de ${pages.length}`, R, 26, { size: 7.5, color: C.muted, align: 'right' });
+    });
+  }
   return doc.save();
 }

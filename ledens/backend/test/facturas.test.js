@@ -4,7 +4,9 @@ import fs from 'node:fs/promises';
 import express from 'express';
 import { FacturasService } from '../src/facturas/service.js';
 import { nifProblem } from '../src/facturas/nif.js';
-import { euros } from '../src/facturas/pdf.js';
+import { euros, facturaPdf } from '../src/facturas/pdf.js';
+import { EMISOR } from '../src/facturas/emisor.js';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createPresupuestosRouter } from '../src/routes/presupuestos.js';
 // Facturas a clientes of a project (migration 049) on PGlite: users/audit_log,
 // the presupuestos migrations and the ledens.* tables the invoices read
@@ -171,6 +173,33 @@ test('an issued invoice never changes; its PDF is the one of its own project', a
   assert.equal(Buffer.from(bytes).subarray(0, 5).toString(), '%PDF-');
   await assert.rejects(as(admin).pdf(marbella, f.id), { status: 404 });
   await assert.rejects(as(jefe).pdf(velez, f.id), { status: 403 });
+});
+
+test('the longest client data and concept never push the payment details off the page', async () => {
+  // Every text item of the PDF, with its page and height on it.
+  const read = async (bytes) => {
+    const pdf = await getDocument({ data: new Uint8Array(bytes), isEvalSupported: false, useSystemFonts: true, disableFontFace: true }).promise;
+    const items = [];
+    for (let n = 1; n <= pdf.numPages; n++) {
+      for (const it of (await (await pdf.getPage(n)).getTextContent()).items) if (it.str.trim()) items.push({ page: n, y: it.transform[5], str: it.str });
+    }
+    return { pages: pdf.numPages, items };
+  };
+  // Wide letters at the limits the service accepts (200 / 300 / 500 characters).
+  const wide = (n) => Array.from({ length: n }, () => 'WMWMW').join(' ').slice(0, n);
+  const base = { numero: '4T2026-348', fecha: '2026-11-25', emisor: EMISOR, cliente_nif: '25333033M', cliente_telefono: '670397233', cliente_email: '',
+    base: '991.74', iva_pct: '21', iva: '208.26', total: '1200.00', created_at: new Date('2026-11-25T10:00:00Z') };
+  const long = await read(await facturaPdf({ ...base, cliente_nombre: wide(200), cliente_direccion: wide(300), cliente_email: `${'W'.repeat(190)}@b.es`, concepto: wide(500) }));
+  assert.equal(long.pages, 2, 'what does not fit goes to a second page');
+  assert.ok(long.items.every((i) => i.y >= 20 && i.y <= 842), 'nothing is drawn outside a page');
+  assert.ok(long.items.some((i) => /IBAN: ES43 1583 0001 1893 7510 2265/.test(i.str)), 'the payment details are printed');
+  assert.ok(long.items.some((i) => /Ley 37\/1992/.test(i.str)), 'the legal note is printed');
+  assert.ok(long.items.some((i) => i.page === 2 && /Página 2 de 2/.test(i.str)));
+  // The usual invoice stays on one page, without page numbers.
+  const usual = await read(await facturaPdf({ ...base, cliente_nombre: 'Ana María Pérez Rosa', cliente_direccion: 'Urbanización parque sol bloque 4 primero A, Antequera 29200',
+    concepto: 'Reforma en Urbanización parque sol bloque 4 primero A, Antequera 29200' }));
+  assert.equal(usual.pages, 1);
+  assert.ok(!usual.items.some((i) => /Página/.test(i.str)));
 });
 
 test('routes: JSON to prepare and issue, the PDF as a download', async () => {
