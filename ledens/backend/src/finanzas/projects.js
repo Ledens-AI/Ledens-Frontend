@@ -76,18 +76,19 @@ export class ProjectsService {
  }
  year(){return new Intl.DateTimeFormat('en',{timeZone:'Europe/Madrid',year:'numeric'}).format(this.now());}
  // Next code of the year, without reserving it (the form shows it as a preview).
- async peekCode(c){
-  const year=this.year();
+ async peekCode(c,year=this.year()){
   const n=(await c.query(`SELECT coalesce(max(substring(upper(btrim(project_id)) from $1)::numeric),0)+1 n FROM ledens.projects WHERE upper(btrim(project_id)) ~ $1`,
    [`^P${year}-([0-9]+)$`])).rows[0].n;
   return `P${year}-${String(n).padStart(3,'0')}`;
  }
  // Project codes identify works in invoices and suggestions: never two alike.
  // One lock per year, so two projects created at once never take the same number.
+ // The code is read for the year that was locked: the clock is not read again,
+ // so a creation that waits on the lock across New Year never reads another year.
  async nextCode(c){
   const year=this.year();
   await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,7))',['project-code-seq|'+year]);
-  return this.peekCode(c);
+  return this.peekCode(c,year);
  }
  async transaction(fn){const c=await this.pool.connect();try{await c.query('BEGIN');const r=await fn(c);await c.query('COMMIT');return r;}catch(e){await c.query('ROLLBACK').catch(()=>{});throw e;}finally{c.release();}}
  async audit(c,action,project,detail){

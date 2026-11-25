@@ -61,6 +61,14 @@ test('codes go up by one per year, after the highest one of that form (imported,
  assert.equal((await as(jefe).options()).nextCode,undefined,'only who can create sees it');
 });
 
+test('the code is read for the year that was locked, even if the clock moves on while waiting',async()=>{
+ // Madrid: 23:59:59 on 31 Dec 2026 at the first read of the clock, already 2027 at any later one.
+ let reads=0;
+ const now=()=>new Date(reads++?'2026-12-31T23:00:01Z':'2026-12-31T22:59:59Z');
+ const p=await as(admin,now).create({name:'Justo antes de Año Nuevo'});
+ assert.match(p.code,/^P2026-\d{3}$/,'the year of the lock, not the one after it');
+});
+
 test('editing needs the version that was shown and audits exactly what changed',async()=>{
  const p=await as(admin).one(first);
  const u=await as(admin).update(p.id,{...form(p),name:'Reforma ático y terraza',statusId:st2,version:p.version});
