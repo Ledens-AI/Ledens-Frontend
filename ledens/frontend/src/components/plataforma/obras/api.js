@@ -110,6 +110,32 @@ export const api = {
   joinObra: (id, body) => request('PUT', `${base}/${id}/obra`, body),
   projects: () => request('GET', `${base}/proyectos`),
   project: (projectId) => request('GET', `${base}/proyectos/${projectId}`),
+  // Facturas a clientes of a project (admins; backend: facturas/service.js): what
+  // «Generar factura» starts from (client data, next number, VAT, invoices issued),
+  // issuing one { cliente, concepto, total, ivaPct, numero, porcentaje }, and its PDF.
+  facturacion: (projectId) => request('GET', `${base}/proyectos/${projectId}/facturacion`),
+  emitirFactura: (projectId, body) => request('POST', `${base}/proyectos/${projectId}/facturas`, body),
+  descargarFactura: async (projectId, facturaId) => {
+    let r;
+    try {
+      r = await fetch(`${base}/proyectos/${projectId}/facturas/${facturaId}/pdf`, { headers: viewAsHeaders() });
+    } catch {
+      throw new ApiError(0, MSG[lang()].net);
+    }
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      throw new ApiError(r.status, data.error || 'No se pudo descargar la factura.', data);
+    }
+    const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || 'factura.pdf';
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  },
   // Planificación (Gantt) of a project with an approved presupuesto (backend: presupuestos/gantt.js).
   gantt: (projectId) => request('GET', `${base}/proyectos/${projectId}/gantt`),
   saveGantt: (projectId, partidaId, body) => request('PUT', `${base}/proyectos/${projectId}/gantt/${partidaId}`, body),

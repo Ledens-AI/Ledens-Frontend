@@ -130,6 +130,10 @@ export function createFinanzasRouter({ service, projects, workers, payables, run
   router.get('/proyectos/:id/rentabilidad', handle(async (req, res) => {
     res.json(await svc(req).profitability(req.params.id));
   }));
+  // What the project has really collected (client payments + sales invoices paid in the Bridge).
+  router.get('/proyectos/:id/cobros', handle(async (req, res) => {
+    res.json(await svc(req).projectCollections(req.params.id));
+  }));
 
   // Movimientos conciliados: one row per reconciled movement, its documents, class
   // and project assignment. The per-record change of class below stays for the API.

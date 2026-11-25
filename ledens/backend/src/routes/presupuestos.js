@@ -18,6 +18,7 @@ import { ganttAgenteDraft } from '../presupuestos/ganttAgente.js';
 import { agenteDraft, agenteFromEnv } from '../presupuestos/agente.js';
 import { agenteChat } from '../presupuestos/agenteChat.js';
 import { getStorage } from '../obras/storage.js';
+import { FacturasService } from '../facturas/service.js';
 
 // Presupuestos para clientes y obras en curso (/api/presupuestos). Every role
 // reaches it; what each one sees and may do is decided per row in
@@ -104,8 +105,28 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   // A project of Gestión financiera with the presupuestos linked to it (team only).
   router.get('/proyectos', handle(async (req) => ({ proyectos: await svc(req).projectsList() })));
   router.get('/proyectos/:projectId', handle((req) => svc(req).projectView(req.params.projectId)));
+  // Facturas a clientes of a project (admins; src/facturas/service.js): what the
+  // dialog starts from (client data, next number, VAT), issuing one, its PDF.
+  const facturas = (req) => new FacturasService(pool || getPool(), req.user);
+  router.get('/proyectos/:projectId/facturacion', handle((req) => facturas(req).prepare(req.params.projectId)));
+  router.post('/proyectos/:projectId/facturas', rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false }),
+    handle(async (req) => ({ factura: await facturas(req).issue(req.params.projectId, req.body || {}) })));
+  router.get('/proyectos/:projectId/facturas/:facturaId/pdf', async (req, res, next) => {
+    try {
+      const { filename, bytes } = await facturas(req).pdf(req.params.projectId, req.params.facturaId);
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        'Cache-Control': 'private, no-store',
+      });
+      res.send(Buffer.from(bytes));
+    } catch (e) {
+      if (e instanceof PresupuestoError) return res.status(e.status).json({ error: e.message });
+      next(e);
+    }
+  });
   // Planificación (Gantt) of a project with an approved presupuesto.
-  const gantt = (req) => new GanttService(pool || getPool(), req.user);
+  const gantt =(req) => new GanttService(pool || getPool(), req.user);
   router.get('/proyectos/:projectId/gantt', handle((req) => gantt(req).get(req.params.projectId)));
   // Calendario laboral of the Gantt: festivos of the company (admin) or of a project
   // (admin or the jefe of one of its obras); src/presupuestos/festivos.js.
