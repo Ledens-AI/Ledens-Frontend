@@ -20,6 +20,7 @@ before(async()=>{
   ALTER TABLE ledens.projects ADD COLUMN source_id text UNIQUE,ADD COLUMN raw_id uuid UNIQUE,ADD COLUMN customer_name_source text,ADD COLUMN salesman text,
    ADD COLUMN start_date date,ADD COLUMN municipio text,ADD COLUMN provincia text,ADD COLUMN customer_id uuid REFERENCES ledens.customers(id),
    ADD COLUMN status_id uuid REFERENCES ledens.project_statuses(id),ADD COLUMN end_date date,ADD CHECK ((source_id IS NULL)=(raw_id IS NULL));`);
+ await db.exec(await fs.readFile(new URL('../src/db/migrations/049_cif_cliente_proyecto.sql',import.meta.url),'utf8'));
  [admin,jefe]=(await db.query("INSERT INTO users(email,role,name) VALUES('admin@pr.test','admin','Admin Test'),('jefe@pr.test','jefe','Jefe Test') RETURNING id,role,name")).rows;
  client={id:jefe.id,role:'client'};
  [st1,st2]=(await db.query("INSERT INTO ledens.project_statuses(id,code,name) VALUES(gen_random_uuid(),'EN_CURSO','En curso'),(gen_random_uuid(),'CERRADO','Cerrado') RETURNING id")).rows.map(r=>r.id);
@@ -140,6 +141,29 @@ test('a registered client replaces typed text; an unchanged client keeps its sto
  assert.equal(changed.customer_name_source,'Otro Cliente','new client: its own name');
 });
 
+test('the CIF del cliente: normalized, checked, searchable, audited and part of the version',async()=>{
+ const p=await as(admin).create({name:'Con CIF',customerName:'Vaguada Rent SL',cif:' b-19753805 '});
+ assert.equal(p.cif,'B19753805','upper case, no dash or spaces');
+ assert.match((await db.query("SELECT detail FROM audit_log WHERE action='Proyecto creado' ORDER BY id DESC LIMIT 1")).rows[0].detail,/CIF del cliente B19753805/);
+ assert.deepEqual((await as(admin).list({q:'b19753805'})).rows.map(r=>r.id),[p.id],'searchable by CIF');
+ // A Spanish one with a wrong control character is refused; a foreign NIF-IVA keeps its prefix; «ES» is dropped.
+ await assert.rejects(as(admin).update(p.id,{...form(p),cif:'B19753806',version:p.version}),{status:400,message:/B19753806/});
+ await assert.rejects(as(admin).update(p.id,{...form(p),cif:'B1975380',version:p.version}),{status:400,message:/CIF/});
+ const nie=await as(admin).update(p.id,{...form(p),cif:'x1234567l',version:p.version});
+ assert.equal(nie.cif,'X1234567L');assert.equal(nie.changed,true);assert.notEqual(nie.version,p.version,'a CIF change moves the version');
+ assert.equal((await db.query("SELECT detail FROM audit_log WHERE action='Proyecto editado' ORDER BY id DESC LIMIT 1")).rows[0].detail,'CIF del cliente: B19753805 → X1234567L');
+ await assert.rejects(as(admin).update(p.id,{...form(p),name:'Pisado',version:p.version}),{status:409},'the version before the CIF change is stale');
+ const fr=await as(admin).update(p.id,{...form(nie),cif:'FR40303265045',version:nie.version});assert.equal(fr.cif,'FR40303265045');
+ assert.equal((await as(admin).update(p.id,{...form(fr),cif:'ESB19753805',version:fr.version})).cif,'B19753805');
+ // Clearing it removes the row; a project without CIF keeps the same version as before 049.
+ const q=await as(admin).one(p.id);const none=await as(admin).update(p.id,{...form(q),cif:'',version:q.version});
+ assert.equal(none.cif,null);assert.equal((await db.query('SELECT count(*)::int n FROM ledens.project_customer_tax_ids WHERE project_id=$1',[p.id])).rows[0].n,0);
+ assert.equal(none.version,(await db.query('SELECT md5(to_jsonb(p)::text) v FROM ledens.projects p WHERE id=$1',[p.id])).rows[0].v);
+ // Imported projects take a CIF too, without touching their provenance.
+ const i=await as(admin).one(imported);
+ assert.equal((await as(admin).update(imported,{...form(i),cif:'12345678Z',version:i.version})).cif,'12345678Z');
+});
+
 // The edit form sends every field back, as the page does.
-function form(p){return {code:p.code,name:p.name,customerId:p.customer_id,customerName:p.customer_name_source,salesman:p.salesman,address:p.address,
+function form(p){return {cif:p.cif,code:p.code,name:p.name,customerId:p.customer_id,customerName:p.customer_name_source,salesman:p.salesman,address:p.address,
  municipio:p.municipio,provincia:p.provincia,statusId:p.status_id,startDate:p.start_date,endDate:p.end_date};}

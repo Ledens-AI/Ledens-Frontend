@@ -3,8 +3,8 @@ import { api } from './api.js';
 import { fecha } from './format.js';
 import { Badge, Dialog, Empty, ErrorBox, Pager } from './ui.jsx';
 
-const EMPTY = { name: '', customerId: '', customerName: '', salesman: '', address: '', municipio: '', provincia: '', statusId: '', startDate: '', endDate: '' };
-const toForm = (p) => ({ name: p.name || '', customerId: p.customer_id || '', customerName: p.customer_id ? '' : p.customer_name_source || '',
+const EMPTY = { name: '', customerId: '', customerName: '', cif: '', salesman: '', address: '', municipio: '', provincia: '', statusId: '', startDate: '', endDate: '' };
+const toForm = (p) => ({ name: p.name || '', customerId: p.customer_id || '', customerName: p.customer_id ? '' : p.customer_name_source || '', cif: p.cif || '',
   salesman: p.salesman || '', address: p.address || '', municipio: p.municipio || '', provincia: p.provincia || '', statusId: p.status_id || '',
   startDate: p.start_date || '', endDate: p.end_date || '' });
 
@@ -74,7 +74,7 @@ export default function Proyectos({ toast }) {
     <div className="fin-stack">
       <div className="fin-card fin-filters">
         <label className="fin-field fin-grow"><span>Buscar</span>
-          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Código, nombre, cliente, dirección o municipio" /></label>
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Código, nombre, cliente, CIF, dirección o municipio" /></label>
         <label className="fin-field"><span>Estado</span>
           <select value={estado} onChange={(e) => { setEstado(e.target.value); setPage(1); }}>
             <option value="">Todos</option>
@@ -99,7 +99,7 @@ export default function Proyectos({ toast }) {
                   <tr key={p.id}>
                     <td className="fin-nowrap">{p.code || <span className="fin-muted">—</span>}</td>
                     <td className="fin-ellipsis is-wide" title={p.address || ''}><strong>{p.name}</strong>{p.address ? <div className="fin-muted fin-small">{p.address}</div> : null}</td>
-                    <td className="fin-ellipsis">{p.cliente || <span className="fin-muted">—</span>}</td>
+                    <td className="fin-ellipsis">{p.cliente || <span className="fin-muted">—</span>}{p.cif ? <div className="fin-muted fin-small">{p.cif}</div> : null}</td>
                     <td>{[p.municipio, p.provincia].filter(Boolean).join(', ') || <span className="fin-muted">—</span>}</td>
                     <td>{p.estado || <span className="fin-muted">—</span>}</td>
                     <td className="fin-nowrap">{fecha(p.start_date)}</td>
@@ -132,6 +132,7 @@ export default function Proyectos({ toast }) {
             <label className="fin-field"><span>Cliente registrado</span>
               <select value={f.customerId} onChange={set('customerId')}><option value="">Ninguno</option>{options.customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
             {!f.customerId ? <label className="fin-field"><span>Nombre del cliente</span><input type="text" maxLength={200} value={f.customerName} onChange={set('customerName')} placeholder="Si no está registrado" /></label> : null}
+            <label className="fin-field"><span>CIF del cliente</span><input type="text" maxLength={30} value={f.cif} onChange={set('cif')} placeholder="CIF, NIF o NIE" autoCapitalize="characters" spellCheck={false} /></label>
             <label className="fin-field"><span>Comercial</span><input type="text" maxLength={200} value={f.salesman} onChange={set('salesman')} /></label>
             <label className="fin-field"><span>Dirección</span><input type="text" maxLength={200} value={f.address} onChange={set('address')} /></label>
             <label className="fin-field"><span>Municipio</span><input type="text" maxLength={200} value={f.municipio} onChange={set('municipio')} /></label>
