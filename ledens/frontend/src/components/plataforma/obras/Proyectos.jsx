@@ -216,7 +216,7 @@ const pctOf = (part, whole) => (whole > 0 ? Math.round(part / whole * 1000) / 10
 export function Proyecto({ projectId, readOnly, canInvoice, toast, onNew, onImport, onAgente, onBack, onOpen }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
-  const [fin, setFin] = useState(null); // { totales, rows, materiales, trabajadores } | { error }
+  const [fin, setFin] = useState(null); // { totales, rows, materiales, trabajadores, cobros } | { error }
   const [gantt, setGantt] = useState(false); // Planificación (Gantt) open
   const [facturas, setFacturas] = useState(null); // invoices issued for the project (admins)
   const [invoicing, setInvoicing] = useState(false); // «Generar factura» open
@@ -234,7 +234,8 @@ export function Proyecto({ projectId, readOnly, canInvoice, toast, onNew, onImpo
       finApi.projectResults({ proyecto: projectId, tam: 8, orden: 'fecha', dir: 'desc' }),
       finApi.projectResults({ proyecto: projectId, tipo: 'materiales', tam: 1 }),
       finApi.projectResults({ proyecto: projectId, tipo: 'trabajadores', tam: 1 }),
-    ]).then(([all, mat, lab]) => { if (!cancelled) setFin({ totales: all.totales, rows: all.rows, materiales: mat.totales.costes, trabajadores: lab.totales.costes }); },
+      finApi.projectCollections(projectId),
+    ]).then(([all, mat, lab, cobros]) => { if (!cancelled) setFin({ totales: all.totales, rows: all.rows, materiales: mat.totales.costes, trabajadores: lab.totales.costes, cobros }); },
       (e) => { if (!cancelled) setFin({ error: e.status === 403 ? 'No tienes acceso a la gestión financiera de este proyecto.' : e.message }); });
     return () => { cancelled = true; };
   }, [projectId]);
@@ -248,7 +249,9 @@ export function Proyecto({ projectId, readOnly, canInvoice, toast, onNew, onImpo
   const obras = rows.filter((r) => r.phase === 'en_curso');
   const approvedTotal = Number(k.aprobado.total), approvedBase = Number(k.aprobado.base);
   const t = fin?.totales;
-  const cobrado = t ? Number(t.ingresos) : null, costes = t ? Number(t.costes) : null;
+  // Cobrado is money really received (client payments, sales invoices the Bridge has paid),
+  // not Rentabilidad's ingresos, which also has invoices still unpaid.
+  const cobrado = t ? Number(fin.cobros.cobrado) : null, sinCobrar = t ? Number(fin.cobros.sinCobrar) : 0, costes = t ? Number(t.costes) : null;
   const pendienteCobro = t ? approvedTotal - cobrado : null;
   const costePct = t ? pctOf(costes, approvedBase) : null;
   const dates = [pr.startDate ? `Inicio ${fecha(pr.startDate)}` : null, pr.endDate ? `Fin ${fecha(pr.endDate)}` : null].filter(Boolean).join(' · ');
@@ -291,7 +294,8 @@ export function Proyecto({ projectId, readOnly, canInvoice, toast, onNew, onImpo
           <>
             <div className="fin-kpis">
               <Kpi label="Cobrado" value={eur(cobrado)} icon="ri-hand-coin-line"
-                hint={approvedTotal > 0 ? `${pctS(pctOf(cobrado, approvedTotal))} de lo aprobado con IVA` : 'Cobros de clientes asignados al proyecto'} />
+                hint={[approvedTotal > 0 ? `${pctS(pctOf(cobrado, approvedTotal))} de lo aprobado con IVA` : 'Cobros recibidos de los clientes',
+                  sinCobrar > 0 ? `${eur(sinCobrar)} facturado aún sin cobrar` : null].filter(Boolean).join(' · ')} />
               <Kpi label="Pendiente de cobro" value={eur(Math.max(0, pendienteCobro))} icon="ri-time-line" tone={pendienteCobro > 0 ? 'warn' : undefined}
                 hint={pendienteCobro < 0 ? `Cobrado ${eur(-pendienteCobro)} por encima de lo aprobado` : 'Aprobado con IVA − cobrado'} />
               <Kpi label="Costes" value={eur(costes)} icon="ri-shopping-cart-2-line"
@@ -299,7 +303,7 @@ export function Proyecto({ projectId, readOnly, canInvoice, toast, onNew, onImpo
               <Kpi label="Resultado" value={eur(t.resultado)} icon="ri-line-chart-line" tone={Number(t.resultado) < 0 ? 'bad' : Number(t.resultado) > 0 ? 'good' : undefined}
                 hint={costePct !== null ? `Costes: ${pctS(costePct)} del presupuesto aprobado sin IVA` : 'Ingresos − costes'} />
             </div>
-            <p className="fin-muted fin-small obr-hint-tight">{`Desde Rentabilidad por proyecto: los ${t.movimientos} movimientos asignados al proyecto, validados o no.`}</p>
+            <p className="fin-muted fin-small obr-hint-tight">{`Costes y resultado desde Rentabilidad por proyecto: los ${t.movimientos} movimientos asignados al proyecto, validados o no. Cobrado: solo el dinero recibido (cobros de clientes y facturas pagadas en el banco).`}</p>
           </>
         )}
 
