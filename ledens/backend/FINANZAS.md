@@ -113,6 +113,10 @@ Pantalla solo para administrador. **Una fila por movimiento conciliado**, nunca 
 - Las pestañas Materiales y Pagos a trabajadores siguen la categoría, así que un registro reclasificado cambia de pestaña.
 - La validación contable acepta la categoría reclasificada de un origen importado.
 
+## Proyecto de un pago a trabajador
+
+En la pestaña Pagos a trabajadores, selector de proyecto en la columna Proyecto de cada fila, o «Cambiar proyecto» con varias filas seleccionadas. Es la misma imputación que en Materiales (`PUT /registros/trabajador/:id/proyecto` o `POST /registros/lote` `assign`, `FinanzasService.assign`): si ya tenía proyecto pide el motivo (auditado en `finance_events`), exige la versión vigente (409 si cambió) y `worker_payments.project_id` sigue a la imputación. El trabajador, el importe, la fecha y el periodo trabajado no cambian. Un pago distribuido entre varios proyectos se cambia desde su panel lateral.
+
 ## Periodo trabajado de los pagos a trabajadores (migración 031)
 
 Un pago a trabajador puede pagar una semana, un mes o un año distinto de su fecha (la semana se paga el viernes o el sábado y se registra el lunes). `ledens.worker_payment_periods` guarda, por cada `worker_payments.id`, `period` (`semana` / `mes` / `anio`) y `starts_on` (lunes, día 1 o 1 de enero; cualquier día se normaliza con `workPeriod`). Cuelga de `worker_payments` sin tocarla (es de la importación). La fecha del pago no cambia.

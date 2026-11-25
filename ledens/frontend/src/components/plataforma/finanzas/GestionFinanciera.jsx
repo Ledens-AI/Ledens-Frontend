@@ -20,7 +20,7 @@ const INTRO = {
   resumen: 'Estado de la imputación de materiales, pagos a trabajadores y cobros a proyectos.',
   pendientes: 'Materiales sin proyecto: compras importadas y facturas clasificadas como materiales. Los pagos a trabajadores y los cobros de clientes no aparecen aquí. Elige el proyecto en cada fila o selecciona varios para asignarlos juntos.',
   material: 'Cada concepto de factura se imputa por separado: una misma factura puede repartirse entre obras. Si un material se asignó a la obra equivocada, pulsa «Devolver a pendientes» (flecha de su fila, o selecciona varios) y volverá a «Materiales pendiente de asignación».',
-  trabajador: 'Vista de consulta de los pagos a trabajadores, con su rol y proyecto. Los pagos nuevos se preparan en «Pendiente de trabajador».',
+  trabajador: 'Pagos a trabajadores con su rol y proyecto. Puedes cambiar el proyecto de un pago (o de varios seleccionados) indicando el motivo, que queda en la auditoría. Los pagos nuevos se preparan en «Pendiente de trabajador».',
   cliente: 'Cobros recibidos de clientes. Son cobros, no ingresos reconocidos: un anticipo no es facturación.',
   'documentos-sin-asignar': 'Documentos procesados (facturas recibidas y emitidas) que todavía no tienen ningún movimiento asignado en el Bridge. Las entregas de Obramat ya pagadas con su anticipo no aparecen.',
   concepto: 'Todos los movimientos, bancarios y en efectivo, clasificados como pago de materiales, pago a trabajadores o cobro de clientes. La clasificación sale de los documentos conciliados en el Bridge; si no se puede deducir, el movimiento queda «Pendiente de clasificación». La rentabilidad por proyecto solo es completa cuando no queda ninguno pendiente.',
