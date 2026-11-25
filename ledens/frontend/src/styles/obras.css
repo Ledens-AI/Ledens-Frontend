@@ -251,6 +251,30 @@
 /* A line removed from an approved presupuesto (Detalle.jsx). */
 .fin-table tr.obr-removed td strong, .fin-table tr.obr-removed td.fin-num { text-decoration: line-through; }
 .obr-removed-why { color: #9E2F2F; margin-top: 4px; }
+/* Cuentas por pagar of a project page (CuentasPorPagarProyecto.jsx). */
+.obr-cxp { display: flex; flex-direction: column; gap: 14px; }
+.obr-cxp-pagos { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; padding: 18px 18px 0; }
+.obr-cxp-pago { display: flex; flex-direction: column; gap: 4px; border: 1px solid #EDEDEA; border-radius: 10px; padding: 14px 16px; background: #FAFAF8; min-width: 0; }
+.obr-cxp-pago.is-ready { border-color: #E9D3A8; background: #FFFBF3; }
+.obr-cxp-pago.is-paid { border-color: #A9D8D0; background: #F3FAF8; }
+.obr-cxp-when { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #3A3A38; }
+.obr-cxp-pago.is-ready .obr-cxp-when { color: #7A4E0E; }
+.obr-cxp-pago.is-paid .obr-cxp-when { color: #2F6B63; }
+.obr-cxp-amount { font-size: 26px; font-weight: 700; color: #0C062B; line-height: 1.2; }
+.obr-cxp-pago .fin-btn { align-self: flex-start; margin-top: 6px; }
+.obr-cxp-warn { margin: 0 18px; align-items: center; flex-wrap: wrap; }
+.obr-cxp-warn > span { flex: 1 1 220px; }
+.obr-cxp-note { padding: 0 18px 16px; margin: 0; }
+.obr-cxp-empty { margin: 0; display: flex; gap: 8px; align-items: flex-start; }
+.obr-cxp-table .fin-cxp-cell button { min-width: 64px; }
+.obr-cxp-lines { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.obr-cxp-lines li { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid #EDEDEA; padding-bottom: 6px; }
+@media (max-width: 640px) {
+  .obr-cxp-pagos { padding: 14px 14px 0; }
+  .obr-cxp-warn { margin: 0 14px; }
+  .obr-cxp-note { padding: 0 14px 14px; }
+}
+
 /* «Generar factura» of a project (Facturas.jsx). */
 .obr-fact-client .obr-fact-wide { grid-column: 1 / -1; }
 .obr-fact-client input.obr-fact-missing { border-color: #E0A43A; background: #FFFBF2; }

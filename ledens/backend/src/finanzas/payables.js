@@ -22,6 +22,9 @@ export const addDays=(s,n)=>{const d=new Date(s+'T00:00:00Z');d.setUTCDate(d.get
 export const isoDow=(s)=>{const g=new Date(s+'T00:00:00Z').getUTCDay();return g===0?7:g;};
 export const mondayOf=(s)=>addDays(s,1-isoDow(s));
 export const monthEnd=(s)=>{const [y,m]=s.split('-').map(Number);return new Date(Date.UTC(y,m,0)).toISOString().slice(0,10);};
+// Payday of a weekly worker for the week of `s`: Saturday when that Saturday is
+// worked (works(saturday) → true), Friday otherwise.
+export const weeklyPayday=(s,works)=>{const sat=addDays(mondayOf(s),5);return works(sat)?sat:addDays(sat,-1);};
 const validDate=(s)=>typeof s==='string'&&DATE.test(s)&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
 const fmt=(s)=>s?`${s.slice(8,10)}/${s.slice(5,7)}/${s.slice(0,4)}`:'—';
 const cents=(v)=>{const t=String(v??'').trim().replace(/\s|€/g,'');const n=t.includes(',')?t.replace(/\./g,'').replace(',','.'):t;return /^\d{1,9}(\.\d{1,2})?$/.test(n)&&Number(n)>0?n:null;};
@@ -32,8 +35,15 @@ const text=(v,max,label,required=false)=>{
  return s||null;
 };
 
-// Due date of a jornal: Saturday of its week (semanal) or last day of its month (mensual).
-const DUE=(d,f)=>`CASE WHEN ${f}='mensual' THEN (date_trunc('month',${d})+interval '1 month'-interval '1 day')::date ELSE (date_trunc('week',${d})+interval '5 days')::date END`;
+// Due date of a jornal: last day of its month (mensual), else the payday of its
+// week (semanal): Saturday when the worker works that Saturday, Friday otherwise.
+// `e` is the jornal's employee column; always pass qualified columns (the
+// subquery has its own employee_id and work_date).
+const FRI=(d)=>`(date_trunc('week',${d})+interval '4 days')::date`;
+const SAT=(d)=>`(date_trunc('week',${d})+interval '5 days')::date`;
+const DUE=(d,f,e)=>`CASE WHEN ${f}='mensual' THEN (date_trunc('month',${d})+interval '1 month'-interval '1 day')::date
+ WHEN EXISTS(SELECT 1 FROM ledens.worker_attendance wa WHERE wa.employee_id=${e} AND wa.work_date=${SAT(d)} AND wa.works) THEN ${SAT(d)}
+ ELSE ${FRI(d)} END`;
 // Every day in [from, to] that accrues a jornal for a worker, from the calendar and
 // the worker's settings (never from existing payables).
 const ACCRUAL=(from,to)=>`SELECT e.id employee_id,d::date work_date,round(e.daily_pay,2) amount,coalesce(s.frequency,'semanal') frequency,e.name
@@ -63,13 +73,23 @@ export class PayablesService {
  // (a day is owed once it has passed). Safe to run any number of times at once.
  // Attendance and settings changes take the same lock, so a jornal is never
  // generated from attendance another transaction is about to change.
- async generate(db=this.pool){
-  if(db===this.pool)return this.transaction((c)=>this.generate(c));
+ // `to` / `employees` only from payProject(): a payday's own jornal is generated
+ // when it is paid that same day, before the day has passed.
+ async generate(db=this.pool,{to,employees}={}){
+  if(db===this.pool)return this.transaction((c)=>this.generate(c,{to,employees}));
   await db.query("SELECT pg_advisory_xact_lock(hashtextextended('ledens-payables-jornales',0))");
+  const params=[to||addDays(this.today(),-1)];if(employees)params.push(employees);
   const r=await db.query(`INSERT INTO ledens.payables(origin,employee_id,work_date,concept,counterparty,amount,due_on)
-   SELECT 'jornal',x.employee_id,x.work_date,'Jornal '||to_char(x.work_date,'DD/MM/YYYY'),x.name,x.amount,${DUE('x.work_date','x.frequency')}
-   FROM (${ACCRUAL("'2000-01-01'",'$1')}) x
-   ON CONFLICT (employee_id,work_date) WHERE origin='jornal' DO NOTHING`,[addDays(this.today(),-1)]);
+   SELECT 'jornal',x.employee_id,x.work_date,'Jornal '||to_char(x.work_date,'DD/MM/YYYY'),x.name,x.amount,${DUE('x.work_date','x.frequency','x.employee_id')}
+   FROM (${ACCRUAL("'2000-01-01'",'$1')}) x${employees?' WHERE x.employee_id=ANY($2::uuid[])':''}
+   ON CONFLICT (employee_id,work_date) WHERE origin='jornal' DO NOTHING`,params);
+  // A Saturday marked (or unmarked) after its week's jornales were generated moves
+  // their payday: pending weekly jornales due on their week's Friday or Saturday
+  // follow the rule; any other date was set by hand and stays.
+  await db.query(`UPDATE ledens.payables p SET due_on=${DUE('p.work_date',"'semanal'",'p.employee_id')},updated_at=now()
+   WHERE p.origin='jornal' AND p.status='pendiente' AND p.due_on IN (${FRI('p.work_date')},${SAT('p.work_date')})
+    AND NOT EXISTS(SELECT 1 FROM ledens.worker_pay_settings s WHERE s.employee_id=p.employee_id AND s.frequency='mensual')
+    AND p.due_on<>${DUE('p.work_date',"'semanal'",'p.employee_id')}`);
   return r.rowCount??r.affectedRows??0;
  }
 
@@ -193,10 +213,144 @@ export class PayablesService {
    await c.query(`INSERT INTO ledens.worker_pay_settings(employee_id,frequency,accrues,starts_on,updated_by) VALUES($1,$2,$3,$4,$5)
     ON CONFLICT (employee_id) DO UPDATE SET frequency=EXCLUDED.frequency,accrues=EXCLUDED.accrues,
      starts_on=coalesce(EXCLUDED.starts_on,ledens.worker_pay_settings.starts_on),updated_by=EXCLUDED.updated_by,updated_at=now()`,[employeeId,f,a,restart,this.user.id||null]);
-   if(f!==w.frequency)await c.query(`UPDATE ledens.payables SET due_on=${DUE('work_date','$2')},updated_at=now() WHERE origin='jornal' AND employee_id=$1 AND status='pendiente'`,[employeeId,f]);
+   if(f!==w.frequency)await c.query(`UPDATE ledens.payables p SET due_on=${DUE('p.work_date','$2::text','p.employee_id')},updated_at=now() WHERE p.origin='jornal' AND p.employee_id=$1 AND p.status='pendiente'`,[employeeId,f]);
    const changes=[f!==w.frequency?`Pago: ${w.frequency} → ${f}`:null,a!==w.accrues?(a?'Vuelve a generar jornales':'Deja de generar jornales'):null].filter(Boolean);
    await this.audit(c,'Ajustes de pago de trabajador',`Trabajador ${w.name}`,changes.join(' · '));
    return {employeeId,frequency:f,accrues:a,changed:true};
+  });
+ }
+
+ // ── One project: the workers of its cuadrillas ──────────────────────────────
+ // Who works in a project: the oficial and peón of each cuadrilla chosen in the
+ // Planificación of its obras (gantt_cuadrilla_miembros of its root presupuestos;
+ // members beyond the obra's current number of cuadrillas do not count).
+ async projectWorkers(db,projectId){
+  return (await db.query(`SELECT m.employee_id,m.rol,m.cuadrilla,p.id obra_id,p.ref,p.title FROM gantt_cuadrilla_miembros m
+   JOIN presupuestos p ON p.id=m.obra_id LEFT JOIN gantt_obras g ON g.obra_id=m.obra_id
+   WHERE p.project_id=$1 AND p.parent_id IS NULL AND m.cuadrilla<=coalesce(g.cuadrillas,1) ORDER BY p.ref,m.cuadrilla,m.rol`,[projectId])).rows;
+ }
+
+ // The «Cuentas por pagar» card of a project page. For each worker of its
+ // cuadrillas, the current pay period — weekly: Monday–Saturday of this week,
+ // paid on Friday, or on Saturday when that Saturday is worked; monthly: this
+ // month, paid on its last day —: jornales accrued and still pending, paid, the
+ // forecast from today to the end of the period, and what is still pending from
+ // before. The jornales are the worker's own (Cuentas por pagar), whatever
+ // project they are imputed to: `otrosProyectos` says when a worker is also in
+ // another project's cuadrillas, so the amount is not this project's alone.
+ async project(projectId){
+  this.access();
+  if(!uuid(projectId))throw new FinError(404,'Proyecto no encontrado');
+  const pr=(await this.pool.query('SELECT id,project_id code,name FROM ledens.projects WHERE id=$1',[projectId])).rows[0];
+  if(!pr)throw new FinError(404,'Proyecto no encontrado');
+  await this.generate();
+  const today=this.today(),monday=mondayOf(today),saturday=addDays(monday,5),monthStart=today.slice(0,8)+'01',mEnd=monthEnd(today);
+  const days=[];for(let d=monday;d<=saturday;d=addDays(d,1))days.push({date:d,dow:isoDow(d),past:d<today,today:d===today});
+  const r2=(n)=>Math.round(n*100)/100;
+  const res={project:pr,today,week:{from:monday,to:saturday},days,workers:[],pagos:[],totales:{pendiente:0,previsto:0,aPagar:0,pagado:0,atrasado:0}};
+  const members=await this.projectWorkers(this.pool,projectId);
+  const ids=[...new Set(members.map((m)=>m.employee_id))];
+  if(!ids.length)return res;
+  const from=monday<monthStart?monday:monthStart,to=saturday>mEnd?saturday:mEnd;
+  const workers=(await this.pool.query(`SELECT e.id,e.name,e.daily_pay::text daily_pay,coalesce(e.activo,true) activo,coalesce(s.frequency,'semanal') frequency,
+    coalesce(s.accrues,true) accrues,coalesce(s.starts_on,c.jornales_desde)::text starts_on
+    FROM ledens.employees e LEFT JOIN ledens.worker_pay_settings s ON s.employee_id=e.id CROSS JOIN ledens.payables_config c
+    WHERE e.id=ANY($1::uuid[]) ORDER BY e.name,e.id`,[ids])).rows;
+  const key=(e,d)=>e+'|'+d;
+  const marks=new Map((await this.pool.query('SELECT employee_id,work_date::text d,works FROM ledens.worker_attendance WHERE employee_id=ANY($1::uuid[]) AND work_date BETWEEN $2 AND $3',
+   [ids,from,to])).rows.map((m)=>[key(m.employee_id,m.d),m.works]));
+  // Every jornal of the period, and those still pending from before it.
+  const jornales=(await this.pool.query(`SELECT id,employee_id,work_date::text d,amount::text amount,status FROM ledens.payables
+    WHERE origin='jornal' AND employee_id=ANY($1::uuid[]) AND (work_date BETWEEN $2 AND $3 OR (status='pendiente' AND work_date<$2))`,[ids,from,to])).rows;
+  const byDay=new Map(jornales.map((j)=>[key(j.employee_id,j.d),j]));
+  const elsewhere=new Map();
+  for(const r of (await this.pool.query(`SELECT DISTINCT m.employee_id,x.project_id code,x.name FROM gantt_cuadrilla_miembros m JOIN presupuestos p ON p.id=m.obra_id
+    LEFT JOIN gantt_obras g ON g.obra_id=m.obra_id JOIN ledens.projects x ON x.id=p.project_id
+    WHERE m.employee_id=ANY($1::uuid[]) AND p.parent_id IS NULL AND p.project_id<>$2 AND m.cuadrilla<=coalesce(g.cuadrillas,1) ORDER BY 2,3`,[ids,projectId])).rows){
+   if(!elsewhere.has(r.employee_id))elsewhere.set(r.employee_id,[]);
+   elsewhere.get(r.employee_id).push({code:r.code,name:r.name});
+  }
+  const groups=new Map();
+  for(const w of workers){
+   const works=(d)=>(marks.has(key(w.id,d))?marks.get(key(w.id,d)):isoDow(d)<=5);
+   const pays=Number(w.daily_pay)>0,accrues=w.activo&&pays&&w.accrues,daily=r2(Number(w.daily_pay)||0);
+   const mensual=w.frequency==='mensual',start=mensual?monthStart:monday,end=mensual?mEnd:saturday;
+   const payday=mensual?mEnd:weeklyPayday(today,works);
+   let pendiente=0,pagado=0,previsto=0;const atrasado={importe:0,n:0,desde:null,hasta:addDays(start,-1)};
+   for(const j of jornales){
+    if(j.employee_id!==w.id)continue;
+    const a=Number(j.amount);
+    if(j.d>=start&&j.d<=end){if(j.status==='pendiente')pendiente+=a;else if(j.status==='pagada')pagado+=a;}
+    else if(j.d<start&&j.status==='pendiente'){atrasado.importe+=a;atrasado.n++;if(!atrasado.desde||j.d<atrasado.desde)atrasado.desde=j.d;}
+   }
+   // Today and the days left in the period, as the calendar says (not owed yet).
+   if(accrues)for(let d=[today,w.starts_on,start].sort().pop();d<=end;d=addDays(d,1))if(works(d)&&!byDay.has(key(w.id,d)))previsto+=daily;
+   const cells=days.map((d)=>{
+    const j=byDay.get(key(w.id,d.date))||null,wk=works(d.date);
+    return {date:d.date,works:wk,explicit:marks.has(key(w.id,d.date)),payable:j?{id:j.id,amount:j.amount,status:j.status}:null,
+     forecast:!j&&wk&&accrues&&d.date>=w.starts_on&&d.date>=today?daily:null};
+   });
+   const ms=members.filter((m)=>m.employee_id===w.id);
+   const row={id:w.id,name:w.name,roles:[...new Set(ms.map((m)=>m.rol))],obras:[...new Map(ms.map((m)=>[m.obra_id,{id:m.obra_id,ref:m.ref,title:m.title}])).values()],
+    otrosProyectos:elsewhere.get(w.id)||[],daily_pay:w.daily_pay,frequency:w.frequency,activo:w.activo,
+    warning:!w.activo?'De baja':!pays?'Sin pago diario':!w.accrues?'No genera jornales':null,
+    period:{from:start,to:end},payday,cells,pendiente:r2(pendiente),previsto:r2(previsto),aPagar:r2(pendiente+previsto),pagado:r2(pagado),
+    atrasado:{...atrasado,importe:r2(atrasado.importe)}};
+   res.workers.push(row);
+   for(const k of ['pendiente','previsto','aPagar','pagado'])res.totales[k]+=row[k];
+   res.totales.atrasado+=row.atrasado.importe;
+   if(!(row.aPagar>0||row.pagado>0||accrues))continue;
+   const gk=w.frequency+'|'+payday;
+   const g=groups.get(gk)||{date:payday,frequency:w.frequency,ready:today>=payday,workers:[],pendiente:0,previsto:0,aPagar:0,pagado:0};
+   g.workers.push({id:w.id,name:w.name});
+   for(const k of ['pendiente','previsto','aPagar','pagado'])g[k]+=row[k];
+   groups.set(gk,g);
+  }
+  for(const k of Object.keys(res.totales))res.totales[k]=r2(res.totales[k]);
+  res.pagos=[...groups.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.frequency.localeCompare(b.frequency))
+   .map((g)=>({...g,pendiente:r2(g.pendiente),previsto:r2(g.previsto),aPagar:r2(g.aPagar),pagado:r2(g.pagado)}));
+  return res;
+ }
+
+ // { items: [{ employeeId, hasta }], paidOn? } — every pending jornal of each
+ // worker (of this project's cuadrillas) up to `hasta` (today at the latest) is
+ // marked paid on `paidOn` (default today). A payday paid that same day first
+ // generates its own jornal, which is otherwise only owed once the day is over.
+ // As in the list, marking paid only closes the debt: the payment itself is
+ // recorded from the bank or the cash. All or nothing.
+ async payProject(projectId,{items,paidOn}={}){
+  this.access();
+  if(!uuid(projectId))throw new FinError(404,'Proyecto no encontrado');
+  const today=this.today();
+  if(!Array.isArray(items)||!items.length||items.length>100)throw new FinError(400,'Indica a quién se paga');
+  const clean=items.map((i)=>{
+   if(!uuid(i?.employeeId))throw new FinError(400,'Trabajador no válido');
+   if(!validDate(i?.hasta))throw new FinError(400,'Fecha no válida');
+   if(i.hasta>today)throw new FinError(400,'Solo se pueden pagar los días hasta hoy');
+   return {employeeId:i.employeeId,hasta:i.hasta};
+  });
+  if(new Set(clean.map((i)=>i.employeeId)).size!==clean.length)throw new FinError(400,'Cada trabajador solo una vez');
+  const day=paidOn||today;
+  if(!validDate(day)||day>today)throw new FinError(400,'Fecha de pago no válida');
+  return this.transaction(async(c)=>{
+   const pr=(await c.query('SELECT id,project_id code,name FROM ledens.projects WHERE id=$1',[projectId])).rows[0];
+   if(!pr)throw new FinError(404,'Proyecto no encontrado');
+   const assigned=new Set((await this.projectWorkers(c,projectId)).map((m)=>m.employee_id));
+   if(clean.some((i)=>!assigned.has(i.employeeId)))throw new FinError(400,'Ese trabajador no está en las cuadrillas de este proyecto');
+   await this.generate(c);
+   const payday=clean.filter((i)=>i.hasta===today).map((i)=>i.employeeId);
+   if(payday.length)await this.generate(c,{to:today,employees:payday});
+   const rows=[];
+   for(const i of clean)rows.push(...(await c.query(`${SELECT} WHERE p.origin='jornal' AND p.status='pendiente' AND p.employee_id=$1 AND p.work_date<=$2
+    ORDER BY p.work_date FOR UPDATE OF p`,[i.employeeId,i.hasta])).rows);
+   if(!rows.length)throw new FinError(409,'No hay jornales pendientes hasta esa fecha. Recarga la página.');
+   await c.query("UPDATE ledens.payables SET status='pagada',paid_on=$2,updated_by=$3,updated_at=now() WHERE id=ANY($1::uuid[])",[rows.map((r)=>r.id),day,this.user.id||null]);
+   const total=rows.reduce((s,r)=>s+Math.round(Number(r.amount)*100),0)/100;
+   const per=new Map();
+   for(const r of rows){const x=per.get(r.employee_id)||{name:r.employee,n:0,c:0,hasta:r.work_date};x.n++;x.c+=Math.round(Number(r.amount)*100);if(r.work_date>x.hasta)x.hasta=r.work_date;per.set(r.employee_id,x);}
+   await this.audit(c,'Cuentas por pagar pagadas',`Proyecto ${[pr.code,pr.name].filter(Boolean).join(' · ')} · ${rows.length} ${rows.length===1?'jornal':'jornales'}`,
+    `${total.toFixed(2)} € · pagado el ${fmt(day)} · ${[...per.values()].map((x)=>`${x.name}: ${x.n} ${x.n===1?'jornal':'jornales'} hasta el ${fmt(x.hasta)} (${(x.c/100).toFixed(2)} €)`).join(' · ')}`);
+   return {updated:rows.length,importe:total.toFixed(2),paidOn:day};
   });
  }
 
