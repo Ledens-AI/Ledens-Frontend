@@ -3,14 +3,16 @@ import { api } from './api.js';
 import { fecha } from './format.js';
 import { Badge, Dialog, Empty, ErrorBox, Pager } from './ui.jsx';
 
-const EMPTY = { code: '', name: '', customerId: '', customerName: '', salesman: '', address: '', municipio: '', provincia: '', statusId: '', startDate: '', endDate: '' };
-const toForm = (p) => ({ code: p.code || '', name: p.name || '', customerId: p.customer_id || '', customerName: p.customer_id ? '' : p.customer_name_source || '',
+const EMPTY = { name: '', customerId: '', customerName: '', salesman: '', address: '', municipio: '', provincia: '', statusId: '', startDate: '', endDate: '' };
+const toForm = (p) => ({ name: p.name || '', customerId: p.customer_id || '', customerName: p.customer_id ? '' : p.customer_name_source || '',
   salesman: p.salesman || '', address: p.address || '', municipio: p.municipio || '', provincia: p.provincia || '', statusId: p.status_id || '',
   startDate: p.start_date || '', endDate: p.end_date || '' });
 
 /* Proyectos: the list of ledens.projects with create/edit (admins). Jefes de
  * obra see their granted projects read-only. Saving sends the version of the
- * row that was shown, so a change made meanwhile is reported, not overwritten. */
+ * row that was shown, so a change made meanwhile is reported, not overwritten.
+ * The code is never typed: the backend gives a new project the next P<año>-<NNN>
+ * (the form shows it as a preview) and it does not change afterwards. */
 export default function Proyectos({ toast }) {
   const [q, setQ] = useState(''), [query, setQuery] = useState(''), [estado, setEstado] = useState('');
   const [page, setPage] = useState(1);
@@ -25,7 +27,8 @@ export default function Proyectos({ toast }) {
     api.projectList({ q: query, estado, pagina: page, tam: 25 }).then((d) => { if (!cancelled) setData(d); }, (e) => { if (!cancelled) setError(e.message); });
     return () => { cancelled = true; };
   }, [query, estado, page, reload]);
-  useEffect(() => { api.projectOptions().then(setOptions, () => {}); }, []);
+  const loadOptions = () => api.projectOptions().then(setOptions, () => {});
+  useEffect(() => { loadOptions(); }, []);
 
   const canEdit = !!data?.canEdit;
   // Picking a registered client drops any free text typed before (the field is hidden then).
@@ -48,7 +51,8 @@ export default function Proyectos({ toast }) {
       } else {
         const { project } = await api.createProject(body);
         setData((d) => d && ({ ...d, total: d.total + 1, rows: [project, ...d.rows] }));
-        toast?.(`Proyecto «${project.name}» creado. Ya se puede asignar en Gestión financiera.`);
+        toast?.(`Proyecto «${project.name}» creado con el código ${project.code}. Ya se puede asignar en Gestión financiera.`);
+        loadOptions(); // the preview of the next code moves on
       }
       setEdit(null);
     } catch (e) {
@@ -120,7 +124,9 @@ export default function Proyectos({ toast }) {
           {edit.project?.importado ? <div className="fin-warn"><i className="ri-information-line"></i>Proyecto importado de la contabilidad: una importación posterior podría volver a cambiar estos datos.</div> : null}
           <div className="fin-grid-form">
             <label className="fin-field"><span>Nombre *</span><input type="text" maxLength={200} value={f.name} onChange={set('name')} autoFocus /></label>
-            <label className="fin-field"><span>Código</span><input type="text" maxLength={50} value={f.code} onChange={set('code')} placeholder="p. ej. OBRA-2026-014" /></label>
+            <label className="fin-field" title={edit.project ? 'El código de un proyecto no cambia.' : 'Se asigna al crear: el siguiente número del año.'}>
+              <span>{edit.project ? 'Código' : 'Código (automático)'}</span>
+              <input type="text" readOnly disabled value={edit.project ? edit.project.code || '—' : options.nextCode || ''} placeholder="Se asigna al crear" /></label>
             <label className="fin-field"><span>Estado</span>
               <select value={f.statusId} onChange={set('statusId')}><option value="">Sin estado</option>{options.statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
             <label className="fin-field"><span>Cliente registrado</span>

@@ -3,10 +3,14 @@
 // they were granted. Rows created here have no source_id/raw_id (the table's own
 // check keeps imported provenance and new rows apart). Every change is written to
 // audit_log with the fields that changed.
+//
+// The code is never typed: a new project takes the next P<año>-<NNN> of the
+// current year in Madrid (one more than the highest code of that form, imported
+// ones included, any case) and keeps it; a code sent in a form is ignored.
 import {uuid} from '../finance/service.js';
 import {FinError} from './service.js';
 
-const FIELDS=['code','name','customerId','customerName','salesman','address','municipio','provincia','statusId','startDate','endDate'];
+const FIELDS=['name','customerId','customerName','salesman','address','municipio','provincia','statusId','startDate','endDate'];
 const COLUMN={code:'project_id',name:'name',customerId:'customer_id',customerName:'customer_name_source',salesman:'salesman',address:'address',
  municipio:'municipio',provincia:'provincia',statusId:'status_id',startDate:'start_date',endDate:'end_date'};
 const LABEL={code:'Código',name:'Nombre',customerId:'Cliente',customerName:'Cliente (texto)',salesman:'Comercial',address:'Dirección',
@@ -17,7 +21,7 @@ const SELECT=`SELECT p.id,p.project_id code,p.name,p.customer_id,coalesce(c.disp
  FROM ledens.projects p LEFT JOIN ledens.customers c ON c.id=p.customer_id LEFT JOIN ledens.project_statuses ps ON ps.id=p.status_id`;
 
 export class ProjectsService {
- constructor(pool,user={role:'client',id:null}){this.pool=pool;this.user=user;}
+ constructor(pool,user={role:'client',id:null},{now=()=>new Date()}={}){this.pool=pool;this.user=user;this.now=now;}
  canEdit(){return this.user.role==='admin';}
  access(){if(this.user.role==='client')throw new FinError(403,'No tienes acceso a las finanzas');}
  async list({q='',estado='',page=1,pageSize=25}={}){
@@ -48,16 +52,16 @@ export class ProjectsService {
    this.pool.query('SELECT id,code,name FROM ledens.project_statuses ORDER BY name,id'),
    this.pool.query('SELECT id,display_name name FROM ledens.customers ORDER BY display_name,id'),
   ]);
-  return {statuses:statuses.rows,customers:customers.rows,canEdit:this.canEdit()};
+  return {statuses:statuses.rows,customers:customers.rows,canEdit:this.canEdit(),...(this.canEdit()?{nextCode:await this.peekCode(this.pool)}:{})};
  }
  // Validates and normalizes the form. Empty strings become NULL; name is required.
  // `before` is the stored row when editing.
- async clean(c,body,id=null,before=null){
+ async clean(c,body,before=null){
   const v={};
   for(const f of FIELDS){const x=body?.[f];v[f]=typeof x==='string'?(x.trim()||null):(x??null);}
   if(!v.name)throw new FinError(400,'El nombre es obligatorio');
-  for(const f of ['code','name','customerName','salesman','address','municipio','provincia'])
-   if(v[f]!==null&&(typeof v[f]!=='string'||v[f].length>(f==='code'?50:200)))throw new FinError(400,`${LABEL[f]} no válido (máximo ${f==='code'?50:200} caracteres)`);
+  for(const f of ['name','customerName','salesman','address','municipio','provincia'])
+   if(v[f]!==null&&(typeof v[f]!=='string'||v[f].length>200))throw new FinError(400,`${LABEL[f]} no válido (máximo 200 caracteres)`);
   for(const f of ['startDate','endDate'])if(v[f]!==null&&(!/^\d{4}-\d{2}-\d{2}$/.test(v[f])||!Number.isFinite(Date.parse(v[f]))))throw new FinError(400,`Fecha de ${LABEL[f].toLowerCase()} no válida`);
   if(v.startDate&&v.endDate&&v.endDate<v.startDate)throw new FinError(400,'La fecha de fin no puede ser anterior a la de inicio');
   if(v.statusId!==null&&(!uuid(v.statusId)||!(await c.query('SELECT 1 FROM ledens.project_statuses WHERE id=$1',[v.statusId])).rows.length))throw new FinError(400,'Estado no válido');
@@ -68,13 +72,22 @@ export class ProjectsService {
    // unchanged client keeps its stored text (imported rows may differ).
    if(!before||before.customer_id!==v.customerId||!v.customerName)v.customerName=cu.display_name;
   }
-  // Project codes identify works in invoices and suggestions: never two alike.
-  if(v.code){
-   await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,7))',['project-code|'+v.code.toLowerCase()]);
-   const dup=(await c.query('SELECT name FROM ledens.projects WHERE lower(btrim(project_id))=lower($1) AND ($2::uuid IS NULL OR id<>$2) LIMIT 1',[v.code,id])).rows[0];
-   if(dup)throw new FinError(409,`El código ${v.code} ya lo usa el proyecto «${dup.name}»`);
-  }
   return v;
+ }
+ year(){return new Intl.DateTimeFormat('en',{timeZone:'Europe/Madrid',year:'numeric'}).format(this.now());}
+ // Next code of the year, without reserving it (the form shows it as a preview).
+ async peekCode(c){
+  const year=this.year();
+  const n=(await c.query(`SELECT coalesce(max(substring(upper(btrim(project_id)) from $1)::numeric),0)+1 n FROM ledens.projects WHERE upper(btrim(project_id)) ~ $1`,
+   [`^P${year}-([0-9]+)$`])).rows[0].n;
+  return `P${year}-${String(n).padStart(3,'0')}`;
+ }
+ // Project codes identify works in invoices and suggestions: never two alike.
+ // One lock per year, so two projects created at once never take the same number.
+ async nextCode(c){
+  const year=this.year();
+  await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,7))',['project-code-seq|'+year]);
+  return this.peekCode(c);
  }
  async transaction(fn){const c=await this.pool.connect();try{await c.query('BEGIN');const r=await fn(c);await c.query('COMMIT');return r;}catch(e){await c.query('ROLLBACK').catch(()=>{});throw e;}finally{c.release();}}
  async audit(c,action,project,detail){
@@ -86,8 +99,9 @@ export class ProjectsService {
   if(!this.canEdit())throw new FinError(403,'Solo un administrador puede crear proyectos');
   return this.transaction(async c=>{
    const v=await this.clean(c,body);
-   const cols=FIELDS.map(f=>COLUMN[f]);
-   const id=(await c.query(`INSERT INTO ledens.projects(${cols.join(',')}) VALUES(${cols.map((_,i)=>'$'+(i+1)).join(',')}) RETURNING id`,FIELDS.map(f=>v[f]))).rows[0].id;
+   v.code=await this.nextCode(c);
+   const fields=['code',...FIELDS],cols=fields.map(f=>COLUMN[f]);
+   const id=(await c.query(`INSERT INTO ledens.projects(${cols.join(',')}) VALUES(${cols.map((_,i)=>'$'+(i+1)).join(',')}) RETURNING id`,fields.map(f=>v[f]))).rows[0].id;
    const p=await this.get(c,id);
    await this.audit(c,'Proyecto creado',p,`${p.name}${p.code?` (${p.code})`:''}`);
    return p;
@@ -102,8 +116,8 @@ export class ProjectsService {
    const before=(await c.query(`${SELECT} WHERE p.id=$1 FOR UPDATE OF p`,[id])).rows[0];
    if(!before)throw new FinError(404,'Proyecto no encontrado');
    if(body?.version!==before.version)throw new FinError(409,'Otra persona ha cambiado este proyecto. Se han recargado los datos: revísalos y vuelve a guardar.');
-   const v=await this.clean(c,body,id,before);
-   const old={code:before.code,name:before.name,customerId:before.customer_id,customerName:before.customer_name_source,salesman:before.salesman,address:before.address,
+   const v=await this.clean(c,body,before);
+   const old={name:before.name,customerId:before.customer_id,customerName:before.customer_name_source,salesman:before.salesman,address:before.address,
     municipio:before.municipio,provincia:before.provincia,statusId:before.status_id,startDate:before.start_date,endDate:before.end_date};
    const changed=FIELDS.filter(f=>(old[f]??null)!==(v[f]??null));
    if(!changed.length)return {...before,changed:false};
