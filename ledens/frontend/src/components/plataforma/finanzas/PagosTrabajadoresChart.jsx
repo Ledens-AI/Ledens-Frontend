@@ -187,14 +187,14 @@ export default function PagosTrabajadoresChart({ data, layout }) {
 }
 
 // A bar with 4px rounded corners on its data end (only when `round`), square on the baseline.
-function barPath(x, yTop, w, h, round, down) {
+export function barPath(x, yTop, w, h, round, down) {
   const r = round ? Math.min(4, w / 2, h) : 0;
   if (!down) return `M${x},${yTop + h}V${yTop + r}Q${x},${yTop} ${x + r},${yTop}H${x + w - r}Q${x + w},${yTop} ${x + w},${yTop + r}V${yTop + h}Z`;
   const b = yTop + h;
   return `M${x},${yTop}V${b - r}Q${x},${b} ${x + r},${b}H${x + w - r}Q${x + w},${b} ${x + w},${b - r}V${yTop}Z`;
 }
 
-function niceTicks(lo, hi) {
+export function niceTicks(lo, hi) {
   const span = hi - lo || 1;
   const raw = span / 4, mag = 10 ** Math.floor(Math.log10(raw));
   const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) || raw;
@@ -205,4 +205,4 @@ function niceTicks(lo, hi) {
 }
 
 const CEUR = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', notation: 'compact', maximumFractionDigits: 1 });
-const compactEur = (v) => CEUR.format(v || 0);
+export const compactEur = (v) => CEUR.format(v || 0);

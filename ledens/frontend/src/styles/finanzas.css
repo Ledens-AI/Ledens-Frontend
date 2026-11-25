@@ -272,6 +272,9 @@
 /* Pagos a trabajadores chart: the hover lists each worker's amount. */
 .fin-wk-tip { display: flex; flex-wrap: wrap; gap: 4px 16px; }
 .fin-wk-tip i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+/* Gastos operacionales: kind of cost under the type badge, with its chart colour. */
+.fin-opex-kind { margin-top: 4px; }
+.fin-opex-kind i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
 
 /* Cuentas por pagar: workers × days (CuentasPorPagar.jsx) */
 .fin-cxp-title { min-width: 220px; text-align: center; text-transform: capitalize; }

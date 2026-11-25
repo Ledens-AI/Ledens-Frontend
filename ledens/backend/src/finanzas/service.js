@@ -118,6 +118,12 @@ const TYPE_FILTER={
 // of the three, so the movement stays pending).
 const CAT_CLASE=c=>`CASE WHEN ${c} IN ('materials','overhead') THEN 'materiales' WHEN ${c}='labor' THEN 'trabajadores' WHEN ${c} IN ('revenue','advance') THEN 'clientes' ELSE 'x' END`;
 export const MOVEMENT_CLASSES=['pendiente','materiales','trabajadores','clientes','reembolso_proveedor','transferencia','mixto'];
+// «Gastos operacionales»: the company's own running costs are imputed to a
+// project of its own; it is one by its name («Gastos operacionales», «Gastos
+// operativos», «Gastos de operación», any case). The kind of cost follows the
+// record's category, as in Rentabilidad por proyecto.
+export const OPEX_PROJECT_SQL=t=>`${t}.name ~* 'gastos?\\s+(de\\s+)?(operacional|operativ|operaci[oó]n)'`;
+export const OPEX_CLASSES=['materiales','trabajadores','otros'];
 // «Transferencia entre cuentas»: only with another account of the company itself.
 export const OWN_COMPANY_TEXT="'sociedad\\s+inversora\\s+navarro'";
 const OWN_COMPANY_RE=/sociedad\s+inversora\s+navarro/i;
@@ -468,6 +474,60 @@ export class FinanzasService {
     FROM r WHERE ${projectWhere} ORDER BY ${sorts[f.sort]||'r.fecha'} ${f.dir==='asc'?'ASC':'DESC'} NULLS LAST,r.record_id,r.project_id
     LIMIT ${pageSize} OFFSET ${(page-1)*pageSize}`,params)).rows;
   return {proyectos:projects,totales:{movimientos:t.n,ingresos:t.ingresos,costes:t.costes,resultado:t.resultado},rows,total:t.n,page,pageSize};
+ }
+ // «Gastos operacionales»: what the company spends on running itself, not on an
+ // obra. Those costs (materials, some workers…) are imputed to a project of the
+ // company's own, named «Gastos operacionales» / «Gastos operativos»
+ // (OPEX_PROJECT_SQL): this is the cost side of those projects exactly as
+ // Rentabilidad por proyecto counts it (every assigned record, validated or
+ // not, its assigned share; an income imputed there is left out), month by
+ // month by the record's date, plus the records behind it. The chart (`meses`)
+ // and the totals ignore `month`; the table honours it. `proyectos` ignores the
+ // project filter. Admin: the figures are company-wide.
+ async operatingExpenses(f={}){
+  if(this.user.role!=='admin')throw new FinError(403,'Los gastos operacionales requieren administrador');
+  const projects=(await this.query(`SELECT p.id,p.name label,p.project_id code FROM ledens.projects p WHERE ${OPEX_PROJECT_SQL('p')} ORDER BY p.name,p.id`)).rows;
+  const ids=projects.map(p=>p.id);
+  if(f.project!==undefined&&!ids.includes(f.project))throw new FinError(400,'El proyecto no es de gastos operacionales');
+  if(f.tipo&&!OPEX_CLASSES.includes(f.tipo))throw new FinError(400,'Tipo no válido');
+  for(const key of ['from','to'])if(f[key]&&!/^\d{4}-\d{2}-\d{2}$/.test(f[key]))throw new FinError(400,'Fecha no válida');
+  if(f.month&&f.month!=='sin-fecha'&&!/^\d{4}-(0[1-9]|1[0-2])$/.test(f.month))throw new FinError(400,'Mes no válido');
+  const page=Math.max(1,Math.min(4000,Number(f.page)||1)),pageSize=Math.max(1,Math.min(100,Number(f.pageSize)||25));
+  if(!Number.isInteger(page)||!Number.isInteger(pageSize))throw new FinError(400,'Paginación no válida');
+  const zero={total:'0',materiales:'0',trabajadores:'0',otros:'0',movimientos:0};
+  if(!ids.length)return {proyectos:[],meses:[],totales:{...zero},sinFecha:{total:'0',movimientos:0},rows:[],total:0,page,pageSize};
+  // Each query binds its own parameters ($1/$2 are BASE's scope).
+  const scope=({project=false,month=false}={})=>{
+   const params=this.params(),where=['NOT r.ingreso'];const bind=v=>{params.push(v);return '$'+params.length;};
+   where.push(`r.project_id=ANY(${bind(project&&f.project?[f.project]:ids)}::uuid[])`);
+   if(f.tipo)where.push('r.clase='+bind(f.tipo));
+   if(f.q)where.push(`concat_ws(' ',r.tercero,r.concepto,r.numerodocumento) ILIKE ${bind('%'+f.q+'%')}`);
+   if(f.from)where.push(`r.fecha>=${bind(f.from)}::date`);
+   if(f.to)where.push(`r.fecha<=${bind(f.to)}::date`);
+   if(month&&f.month==='sin-fecha')where.push('r.fecha IS NULL');
+   else if(month&&f.month){const m=bind(f.month+'-01');where.push(`r.fecha>=${m}::date AND r.fecha<(${m}::date+interval '1 month')`);}
+   return {params,where:where.join(' AND ')};
+  };
+  const sql=`${BASE}, r AS (SELECT l.record_id,l.id,l.type,l.category,l.accounting_status,l.fecha,l.tercero,l.concepto,l.numerodocumento,l.line_number,l.document_id,
+    l.importe,pa.allocated_amount gasto,pa.project_id,pr.name project_label,pr.project_id project_code,
+    CASE WHEN l.category IN ('materials','overhead') THEN 'materiales' WHEN l.category='labor' THEN 'trabajadores' ELSE 'otros' END clase,
+    (l.category IN ('revenue','advance') OR l.type='cliente') ingreso
+   FROM listed l JOIN ledens.project_financial_allocations pa ON pa.record_id=l.record_id JOIN ledens.projects pr ON pr.id=pa.project_id)`;
+  const sums=`coalesce(sum(r.gasto),0)::text total,coalesce(sum(r.gasto) FILTER(WHERE r.clase='materiales'),0)::text materiales,
+   coalesce(sum(r.gasto) FILTER(WHERE r.clase='trabajadores'),0)::text trabajadores,coalesce(sum(r.gasto) FILTER(WHERE r.clase='otros'),0)::text otros,count(*)::int movimientos`;
+  const all=scope(),filtered=scope({project:true}),listedScope=scope({project:true,month:true});
+  const perProject=new Map((await this.query(`${sql} SELECT r.project_id,coalesce(sum(r.gasto),0)::text total,count(*)::int movimientos FROM r WHERE ${all.where} GROUP BY 1`,all.params)).rows.map(x=>[x.project_id,x]));
+  const meses=(await this.query(`${sql} SELECT to_char(r.fecha,'YYYY-MM') mes,${sums} FROM r WHERE ${filtered.where} AND r.fecha IS NOT NULL GROUP BY 1 ORDER BY 1`,filtered.params)).rows;
+  const t=(await this.query(`${sql} SELECT ${sums},coalesce(sum(r.gasto) FILTER(WHERE r.fecha IS NULL),0)::text sin_fecha,count(*) FILTER(WHERE r.fecha IS NULL)::int sin_fecha_n FROM r WHERE ${filtered.where}`,filtered.params)).rows[0];
+  const n=(await this.query(`${sql} SELECT count(*)::int n FROM r WHERE ${listedScope.where}`,listedScope.params)).rows[0].n;
+  const sorts={fecha:'r.fecha',importe:'r.gasto',tercero:'r.tercero',concepto:'r.concepto',proyecto:'r.project_label'};
+  const rows=(await this.query(`${sql} SELECT r.id,r.type,r.category,r.clase,r.accounting_status,r.fecha::text fecha,r.tercero,r.concepto,r.numerodocumento,r.line_number,r.document_id,
+    r.importe::text importe,r.gasto::text gasto,r.project_id,r.project_label,r.project_code
+    FROM r WHERE ${listedScope.where} ORDER BY ${sorts[f.sort]||'r.fecha'} ${f.dir==='asc'?'ASC':'DESC'} NULLS LAST,r.record_id,r.project_id
+    LIMIT ${pageSize} OFFSET ${(page-1)*pageSize}`,listedScope.params)).rows;
+  return {proyectos:projects.map(p=>({...p,total:perProject.get(p.id)?.total||'0',movimientos:perProject.get(p.id)?.movimientos||0})),meses,
+   totales:{total:t.total,materiales:t.materiales,trabajadores:t.trabajadores,otros:t.otros,movimientos:t.movimientos},
+   sinFecha:{total:t.sin_fecha,movimientos:t.sin_fecha_n},rows,total:n,page,pageSize};
  }
  // ------------------------------------------------------------- movimientos conciliados
  // One row per reconciled movement (bank or cash), never split into its concepts:
