@@ -151,6 +151,9 @@ export const api = {
   updatePayable: (id, body) => request('PUT', `/api/finanzas/cuentas-por-pagar/${id}`, body),
   setPayableStatus: (body) => request('POST', '/api/finanzas/cuentas-por-pagar/estado', body),
   setPayableProject: (body) => request('POST', '/api/finanzas/cuentas-por-pagar/proyecto', body),
+  // The card of a project page (obras/CuentasPorPagarProyecto.jsx).
+  projectPayables: (projectId) => request('GET', `/api/finanzas/cuentas-por-pagar/proyectos/${projectId}`),
+  payProjectPayables: (projectId, body) => request('POST', `/api/finanzas/cuentas-por-pagar/proyectos/${projectId}/pago`, body),
   saveWorkerSplits: (items) => request('POST', '/api/finanzas/pendiente-trabajador/guardar', { items }),
   returnWorkerBatch: (batchId) => request('DELETE', `/api/finanzas/pendiente-trabajador/${batchId}`),
 };

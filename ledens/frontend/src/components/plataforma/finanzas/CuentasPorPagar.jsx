@@ -161,7 +161,7 @@ function Jornales({ toast, onNeed, onChanged }) {
       {data ? (
         <p className="fin-muted fin-small fin-pad">
           {`Se generan jornales desde el ${fecha(data.jornalesDesde)}. Cada día, al terminar, se genera el jornal de cada trabajador que lo ha trabajado; el día de hoy y los siguientes son una previsión. `}
-          De lunes a viernes cuentan como trabajados y los sábados no: pulsa una casilla para cambiarlo (un sábado trabajado, una ausencia) o usa los botones de la cabecera para todo el día (un festivo). Las casillas marcadas a mano llevan borde.
+          De lunes a viernes cuentan como trabajados y los sábados no: pulsa una casilla para cambiarlo (un sábado trabajado, una ausencia) o usa los botones de la cabecera para todo el día (un festivo). Las casillas marcadas a mano llevan borde. Los semanales vencen el viernes, o el sábado si ese sábado trabajan.
         </p>
       ) : null}
     </div>

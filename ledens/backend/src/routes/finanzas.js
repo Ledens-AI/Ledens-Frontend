@@ -343,6 +343,16 @@ export function createFinanzasRouter({ service, projects, workers, payables, run
     const b = req.body || {};
     res.json(await payablesSvc(req).setProject({ ids: b.ids, projectId: b.projectId ?? null }));
   }));
+  // The card of a project page: the workers of its cuadrillas, this week's
+  // jornales and payday (Friday, or Saturday when that Saturday is worked).
+  router.get('/cuentas-por-pagar/proyectos/:projectId', handle(async (req, res) => {
+    res.json(await payablesSvc(req).project(req.params.projectId));
+  }));
+  // { items: [{ employeeId, hasta }], paidOn? }
+  router.post('/cuentas-por-pagar/proyectos/:projectId/pago', cxp('Pago de jornales del proyecto', (b) => `${b.updated} jornales pagados · ${b.importe} €`)(async (req, res) => {
+    const b = req.body || {};
+    res.json(await payablesSvc(req).payProject(req.params.projectId, { items: b.items, paidOn: b.paidOn || undefined }));
+  }));
   router.post('/cuentas-por-pagar', cxp('Alta manual', (b) => 'Alta: ' + (b.payable?.concept || ''))(async (req, res) => {
     res.status(201).json({ payable: await payablesSvc(req).create(req.body || {}) });
   }));

@@ -6,6 +6,7 @@ import { Empty, ErrorBox, Kpi, Badge } from '../finanzas/ui.jsx';
 import { PhaseBadge, Progress } from './Detalle.jsx';
 import { useObrasI18n } from './i18n.js';
 import Gantt from './Gantt.jsx';
+import CuentasPorPagarProyecto from './CuentasPorPagarProyecto.jsx';
 
 /* «Presupuestos y obras» by project: every presupuesto belongs to a project of
  * Gestión financiera (ledens.projects) through its obra. The team (admin and
@@ -211,8 +212,9 @@ const pctOf = (part, whole) => (whole > 0 ? Math.round(part / whole * 1000) / 10
 
 /* One project: its data, what its presupuestos add up to, its obras, its
  * presupuestos and, for whoever may see Gestión financiera of this project,
- * ingresos, costes and the latest movements assigned to it. */
-export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBack, onOpen }) {
+ * ingresos, costes and the latest movements assigned to it; for admins, the
+ * cuentas por pagar of the workers of its cuadrillas. */
+export function Proyecto({ projectId, readOnly, toast, onNew, onImport, onAgente, onBack, onOpen }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [fin, setFin] = useState(null); // { totales, rows, materiales, trabajadores } | { error }
@@ -293,6 +295,8 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
             <p className="fin-muted fin-small obr-hint-tight">{`Desde Rentabilidad por proyecto: los ${t.movimientos} movimientos asignados al proyecto, validados o no.`}</p>
           </>
         )}
+
+      <CuentasPorPagarProyecto projectId={projectId} readOnly={readOnly} toast={toast} />
 
       {obras.length ? (
         <>
