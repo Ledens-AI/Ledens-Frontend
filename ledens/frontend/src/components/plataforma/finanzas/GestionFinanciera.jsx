@@ -13,6 +13,7 @@ import Rentabilidad from './Rentabilidad.jsx';
 import ConceptoMovimientos from './ConceptoMovimientos.jsx';
 import DocumentosSinAsignar from './DocumentosSinAsignar.jsx';
 import CuentasPorPagar from './CuentasPorPagar.jsx';
+import GastosOperacionales from './GastosOperacionales.jsx';
 import { FIN_TABS } from './tabs.js';
 import '../../../styles/finanzas.css';
 
@@ -29,6 +30,7 @@ const INTRO = {
   bridge:'Enlaces entre movimientos y documentos existentes, con importes, estado y motivo de conciliación.',
   'pendiente-trabajador': 'Pagos a trabajadores segregados de un movimiento bancario: más de 450 € en pagos de 100 € (Oficial), 450 € o menos en pagos de 60 € (Ayudante). Asigna trabajador y proyecto a cada uno y guárdalo.',
   rentabilidad: 'Resultado (ingresos − costes) de cada proyecto a partir de los movimientos asignados, validados o no. Pulsa una barra o elige un proyecto para ver solo sus movimientos.',
+  'gastos-operacionales': 'Lo que gasta la empresa en funcionar, fuera de las obras: los materiales, pagos a trabajadores y demás costes imputados al proyecto «Gastos operacionales» (o «Gastos operativos»), validados o no. Pulsa un mes del gráfico para ver sus movimientos en la tabla.',
   proyectos: 'Alta y edición de proyectos: código, cliente, dirección, estado y fechas. Los cambios quedan en la auditoría.',
   logs: 'Cada ejecución de los procesos de transacciones: cuándo empieza, si termina bien, si se rechaza o si falla, con su duración y el registro afectado.',
   'cuentas-por-pagar': 'Lo que hay que pagar y todavía no está pagado. Cada día que pasa se genera el jornal de cada trabajador con su pago diario; los añadidos a mano se imputan a un proyecto. Arriba, el dinero que necesitarás a fin de semana (trabajadores semanales) y a fin de mes (mensuales).',
@@ -89,6 +91,7 @@ export default function GestionFinanciera({ tab, go, toast, onPending, onBridgeP
       {tab === 'proyectos' ? <Proyectos toast={toast} /> : null}
       {tab === 'trabajadores' ? <Trabajadores toast={toast} /> : null}
       {tab === 'cuentas-por-pagar' ? <CuentasPorPagar toast={toast} /> : null}
+      {tab === 'gastos-operacionales' ? <GastosOperacionales version={version} toast={toast} go={(t) => { setDrill(null); go(t); }} /> : null}
       {tab === 'logs' ? <Logs /> : null}
       {tab === 'rentabilidad' ? (
         <Rentabilidad project={rentProject} onProject={setRentProject} version={version} toast={toast} />

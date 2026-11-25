@@ -129,6 +129,17 @@ export function createFinanzasRouter({ service, projects, workers, payables, run
     }));
   }));
 
+  // Gastos operacionales (admins): costs imputed to the company's own «Gastos
+  // operacionales» projects, month by month, and the records of a month (`mes`).
+  router.get('/gastos-operacionales', handle(async (req, res) => {
+    const q = req.query;
+    res.json(await svc(req).operatingExpenses({
+      project: q.proyecto || undefined, tipo: q.tipo || undefined, q: String(q.q || '').slice(0, 100),
+      from: q.desde || undefined, to: q.hasta || undefined, month: q.mes || undefined,
+      sort: q.orden, dir: q.dir, page: q.pagina, pageSize: q.tam,
+    }));
+  }));
+
   router.get('/proyectos/:id/rentabilidad', handle(async (req, res) => {
     res.json(await svc(req).profitability(req.params.id));
   }));

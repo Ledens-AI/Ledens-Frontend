@@ -12,6 +12,7 @@ export const FIN_TABS = [
   ['concepto', 'Concepto de movimientos', 'ri-file-list-line', true],
   ['proyectos', 'Proyectos', 'ri-building-2-line'],
   ['rentabilidad', 'Rentabilidad por proyecto', 'ri-line-chart-line'],
+  ['gastos-operacionales', 'Gastos operacionales', 'ri-briefcase-4-line', true],
   ['cliente', 'Pagos de clientes', 'ri-hand-coin-line'],
   ['trabajadores', 'Trabajadores', 'ri-team-line'],
   ['trabajador', 'Pagos a trabajadores', 'ri-user-settings-line'],
