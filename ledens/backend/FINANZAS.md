@@ -4,6 +4,8 @@ El PR 22 conserva la interfaz de Claude y se integra con el motor desplegado por
 
 Todas las asignaciones y repartos escriben mediante FinanceService en financial_records y project_financial_allocations. El historial se obtiene de finance_events. Se conserva la sincronización de project_id, los límites por importe, los UUID de idempotencia y el control de versiones. El cliente envía version y request_id; un cambio simultáneo devuelve 409. Los lotes de esta fachada admiten hasta 100 registros y reportan éxito o conflicto por elemento; la API canónica /api/finance mantiene su operación masiva atómica.
 
+**Devolver a pendientes** (pantalla Materiales, flecha de la fila o selección): un material asignado a la obra equivocada pierde su proyecto —o todos los repartos de su distribución— y vuelve a «Materiales pendiente de asignación». `PUT /api/finanzas/registros/:type/:id/proyecto` con `projectId: null` o `POST /registros/lote` con `action: 'unassign'` (`FinanzasService.unassign`), siempre con motivo de al menos cinco caracteres (en el lote se exige antes de escribir nada). Escribe por FinanceService con `allocations: []` (evento `replace_allocations` con la obra anterior en `before_value`), así que exige la versión actual (409 si cambió) y el permiso de registros sin asignar (administradores; un jefe solo con `can_review_unassigned`). Un registro que ya no tiene proyecto se deja como está (`changed: false`). «Quitar proyecto» del panel lateral usa la misma ruta.
+
 La migración 010 solo añade finance_review_flags, con FK real a financial_records, para la marca manual de revisión de la interfaz. No crea project_allocations, no duplica importes ni instala invariantes contradictorias con las migraciones 005/006. Desmarcar revisión no aprueba impuestos ni reconoce ingresos/costes.
 
 Materiales y pagos de trabajadores se muestran con el signo económico canónico; los abonos conservan su signo negativo. Las líneas y documentos de factura aún sin clasificar aparecen como Conceptos de facturas. Las métricas reutilizan el resumen y la evolución de FinanceService: resultado económico sin IVA deducible, cobros y pagos por separado. Los registros pendientes de reconocimiento no entran en el margen. El presupuesto requiere aprobación y verificación de su base sin IVA.
@@ -13,6 +15,15 @@ Se conservan las sesiones y roles existentes. Cliente recibe 403. Admin accede a
 Pruebas: test/finanzas.test.js verifica que interfaz y API usan una sola asignación, límites y reparto, concurrencia, permisos, filtros, marcas de revisión, lotes, historial, separación de tesorería y autenticación/CSRF. Se ejecuta además la batería canónica del PR 21. El frontend se valida con vite build.
 
 El despliegue normal aplica la migración 010 después de las 005/006 ya desplegadas. No se sustituye la ingesta de facturas, el Bridge, Revolut ni la autenticación. Las sugerencias no asignan automáticamente proyectos desde la interfaz.
+
+## Cobrado de un proyecto
+
+`GET /api/finanzas/proyectos/:id/cobros` (`FinanzasService.projectCollections`; admin, o jefe con `finance_project_permissions` del proyecto) da lo que el proyecto **ha cobrado de verdad**, sobre los mismos registros que Rentabilidad por proyecto (asignados, válidos, no excluidos; validados o no):
+
+- un **cobro de cliente** (`customer_payments`: importado, registrado desde un cobro bancario o en efectivo) cuenta entero;
+- una **factura de venta** (ingreso de un documento `Cobrar`) cuenta solo por la parte que el Bridge ha pagado con cobros bancarios confirmados, y nunca por un cobro que ya está registrado como cobro de cliente (contaría dos veces).
+
+Responde `{ cobrado, sinCobrar, cobros }`; `sinCobrar` es lo registrado como ingreso que aún no se ha cobrado. La página de un proyecto en «Presupuestos y obras» lo usa para «Cobrado» y «Pendiente de cobro» (aprobado con IVA − cobrado) y para las sugerencias del 20/50/100 % de «Generar factura». Los «ingresos» de Rentabilidad siguen siendo el resultado económico (incluyen facturas registradas sin cobrar).
 
 ## Pendiente de conciliación
 

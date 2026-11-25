@@ -65,7 +65,7 @@ export default function Obras({ panel, screen, readOnly, toast, firstName, onCou
     );
   }
   if (project) {
-    return <div className="fin obr"><Proyecto key={project} projectId={project} readOnly={readOnly} toast={toast} onNew={(pr) => setCreating(pr)} onImport={(pr) => setImporting(pr)} onAgente={(pr) => setAgentando(pr)} onBack={() => setProject(null)} onOpen={(p, tab) => setOpen({ id: p.id, tab })} /></div>;
+    return <div className="fin obr"><Proyecto key={project} projectId={project} readOnly={readOnly} canInvoice={panel === 'admin'} toast={toast} onNew={(pr) => setCreating(pr)} onImport={(pr) => setImporting(pr)} onAgente={(pr) => setAgentando(pr)} onBack={() => setProject(null)} onOpen={(p, tab) => setOpen({ id: p.id, tab })} /></div>;
   }
   if (error) return <div className="fin"><ErrorBox message={error} onRetry={load} retryLabel={t.retry} /></div>;
   if (!list) return <div className="fin fin-loading fin-muted">{t.loading}</div>;

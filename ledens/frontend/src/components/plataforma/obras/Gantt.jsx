@@ -459,66 +459,67 @@ function Tabla({ tasks, hitos, readOnly, saving, changed, onSave }) {
   );
 }
 
-// El agente (backend: presupuestos/ganttAgente.js) solo propone — no guarda
-// nada él mismo. Aquí se revisa la propuesta (se puede quitar una a una) y
-// lo que quede pasa al borrador del Gantt: se ve en el diagrama, se comprueban
-// las limitaciones y se guarda con «Guardar», como un cambio hecho a mano.
+// El agente (backend: presupuestos/ganttAgente.js) propone las predecesoras
+// teniendo en cuenta las cuadrillas guardadas de cada obra, y lo que siga
+// solapándose lo encadena el backend (nivelación por cuadrillas). Nada se
+// guarda solo: el resultado entra directamente en el borrador del Gantt (se ve
+// en el diagrama, se comprueban las limitaciones) y se guarda con «Guardar»,
+// como un cambio hecho a mano. Cada relación se puede quitar del borrador.
 function Sugerencias({ projectId, tasks, onStage }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [proposal, setProposal] = useState(null); // { tasks: [{id, predecessors}], considered, accepted, warnings }
-  const [removed, setRemoved] = useState(new Set()); // `${tareaId}:${predId}` quitadas a mano antes de pasarlas
-  const [done, setDone] = useState('');
+  const [proposal, setProposal] = useState(null); // { tasks: [{id, predecessors}], accepted, nivelacion, warnings }
 
-  const index = useMemo(() => new Map(tasks.map((t, i) => [t.id, i + 1])), [tasks]);
-  const label = (id) => { const t = tasks.find((x) => x.id === id); return t ? `${index.get(id)}. ${t.code ? `${t.code} · ` : ''}${t.name}` : '?'; };
+  const label = (id) => { const t = tasks.find((x) => x.id === id); return t ? `${t.code ? `${t.code} · ` : ''}${t.name}` : '?'; };
+  const strip = (list) => list.map((p) => ({ id: p.id, type: p.type, lag: p.lag }));
 
   const generate = async () => {
-    setLoading(true); setError(''); setProposal(null); setRemoved(new Set()); setDone('');
-    try { setProposal(await api.ganttAgente(projectId)); } catch (e) { setError(e.message); }
+    setLoading(true); setError(''); setProposal(null);
+    try {
+      const p = await api.ganttAgente(projectId);
+      setProposal(p);
+      if (p.tasks.length) onStage(p.tasks.map((t) => ({ id: t.id, predecessors: strip(t.predecessors) })));
+    } catch (e) { setError(e.message); }
     setLoading(false);
   };
 
-  const kept = (proposal?.tasks || [])
-    .map((t) => ({ ...t, predecessors: t.predecessors.filter((p) => !removed.has(`${t.id}:${p.id}`)) }))
-    .filter((t) => t.predecessors.length);
-  const total = kept.reduce((a, t) => a + t.predecessors.length, 0);
-
-  const pasar = () => {
-    onStage(kept.map((t) => ({ id: t.id, predecessors: t.predecessors.map((p) => ({ id: p.id, type: p.type, lag: p.lag })) })));
-    setDone(`${total} predecesora${total === 1 ? '' : 's'} en el borrador: revisa el Gantt y pulsa «Guardar».`);
-    setProposal(null);
+  // Quitar una relación del borrador: la tarea se queda con las demás, o con
+  // «Inicio de obra» por defecto si era la única.
+  const quitar = (taskId, predId) => {
+    const t = proposal.tasks.find((x) => x.id === taskId);
+    const rest = t.predecessors.filter((p) => p.id !== predId);
+    const obraId = tasks.find((x) => x.id === taskId)?.obraId;
+    onStage([{ id: taskId, predecessors: rest.length ? strip(rest) : [{ id: obraId, type: 'FS', lag: 0 }] }]);
+    setProposal({ ...proposal, tasks: proposal.tasks.map((x) => (x.id === taskId ? { ...x, predecessors: rest } : x)).filter((x) => x.predecessors.length) });
   };
+
+  const list = proposal?.tasks || [];
+  const total = list.reduce((a, t) => a + t.predecessors.length, 0);
+  const porRecurso = list.reduce((a, t) => a + t.predecessors.filter((p) => p.recurso).length, 0);
 
   return (
     <div className="fin-card obr-gantt-agente">
       <div className="obr-actions obr-start">
         <button type="button" className="fin-btn" onClick={generate} disabled={loading}><i className="ri-magic-line"></i>{loading ? 'Pensando…' : 'Generar predecesoras con el agente'}</button>
-        {proposal ? <span className="fin-muted fin-small">{`Propone ${proposal.accepted} relación${proposal.accepted === 1 ? '' : 'es'} de ${proposal.considered} que ha mirado.`}</span> : null}
-        {done ? <span className="fin-muted fin-small">{done}</span> : null}
+        {!proposal && !loading ? <span className="fin-muted fin-small">Usa las cuadrillas guardadas de cada obra: con 1 cuadrilla encadena todas las tareas.</span> : null}
+        {proposal && total ? <span className="fin-muted fin-small">{`${total} predecesora${total === 1 ? '' : 's'} en el borrador${porRecurso ? ` (${porRecurso} por falta de cuadrilla libre)` : ''}: revisa el Gantt y pulsa «Guardar».`}</span> : null}
       </div>
       {error ? <ErrorBox message={error} /> : null}
       {proposal?.warnings?.length ? <ul className="obr-gantt-agente-warn fin-muted fin-small">{proposal.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul> : null}
-      {kept.length ? (
-        <>
-          <p className="fin-muted fin-small">Todavía no se ha guardado nada. Quita lo que no te cuadre y pasa el resto al borrador: se verá en el Gantt y se guarda con «Guardar» si cumple las limitaciones.</p>
-          <ul className="obr-gantt-agente-list">
-            {kept.flatMap((t) => t.predecessors.map((p) => (
-              <li key={`${t.id}:${p.id}`}>
-                <span>
-                  <strong>{label(t.id)}</strong> espera a <strong>{label(p.id)}</strong>
-                  {` · ${REL.find((r) => r[0] === p.type)?.[1]}`}{p.lag ? ` · ${p.lag > 0 ? '+' : ''}${p.lag} d` : ''}
-                  {p.motivo ? <span className="fin-muted"> — {p.motivo}</span> : null}
-                </span>
-                <button type="button" className="fin-btn is-ghost is-small" onClick={() => setRemoved(new Set([...removed, `${t.id}:${p.id}`]))} aria-label="Quitar esta relación"><i className="ri-close-line"></i></button>
-              </li>
-            )))}
-          </ul>
-          <div className="obr-actions obr-start">
-            <button type="button" className="fin-btn is-primary" onClick={pasar}>{`Pasar estas ${total} predecesora${total === 1 ? '' : 's'} al borrador`}</button>
-            <button type="button" className="fin-btn is-ghost" onClick={() => setProposal(null)}>Descartar la propuesta</button>
-          </div>
-        </>
+      {list.length ? (
+        <ul className="obr-gantt-agente-list">
+          {list.flatMap((t) => t.predecessors.map((p) => (
+            <li key={`${t.id}:${p.id}`}>
+              <span>
+                {p.recurso ? <i className="ri-team-line" title="Por cuadrillas"></i> : <i className="ri-magic-line" title="Criterio constructivo"></i>}{' '}
+                <strong>{label(t.id)}</strong> espera a <strong>{label(p.id)}</strong>
+                {` · ${REL.find((r) => r[0] === p.type)?.[1]}`}{p.lag ? ` · ${p.lag > 0 ? '+' : ''}${p.lag} d` : ''}
+                {p.motivo ? <span className="fin-muted"> — {p.motivo}</span> : null}
+              </span>
+              <button type="button" className="fin-btn is-ghost is-small" onClick={() => quitar(t.id, p.id)} aria-label="Quitar esta relación del borrador"><i className="ri-close-line"></i></button>
+            </li>
+          )))}
+        </ul>
       ) : null}
     </div>
   );

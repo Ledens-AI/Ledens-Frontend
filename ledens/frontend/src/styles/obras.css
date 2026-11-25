@@ -274,3 +274,29 @@
   .obr-cxp-warn { margin: 0 14px; }
   .obr-cxp-note { padding: 0 14px 14px; }
 }
+
+/* «Generar factura» of a project (Facturas.jsx). */
+.obr-fact-client .obr-fact-wide { grid-column: 1 / -1; }
+.obr-fact-client input.obr-fact-missing { border-color: #E0A43A; background: #FFFBF2; }
+.obr-fact-hint { font-weight: 500; white-space: normal; margin: 0; }
+.obr-fact-summary { display: flex; gap: 12px; align-items: flex-start; background: #F6F6F3; border-radius: 10px; padding: 12px 14px; }
+.obr-fact-summary > i { font-size: 20px; color: #5567AE; margin-top: 1px; }
+.obr-fact-summary > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 14px; }
+.obr-fact-summary .fin-muted { overflow-wrap: anywhere; }
+.obr-fact-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.obr-fact-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px; border: 1.5px solid #DADAD6; border-radius: 10px;
+  background: #fff; font: inherit; text-align: left; cursor: pointer; color: #0C062B; }
+.obr-fact-opt:hover { border-color: #5567AE; }
+.obr-fact-opt:focus-visible { outline: 2px solid #5567AE; outline-offset: 2px; }
+.obr-fact-opt.is-on { border-color: #5567AE; background: #EEF0F8; box-shadow: inset 0 0 0 1px #5567AE; }
+.obr-fact-opt-pct { font-size: 13px; font-weight: 700; color: #3E4D85; }
+.obr-fact-opt-amount { font-size: 18px; font-weight: 700; }
+.obr-fact-opt-amount.fin-muted { font-size: 14px; font-weight: 500; }
+.obr-fact-static { margin: 0; padding: 9px 0; font-weight: 500; }
+.obr-fact-totals { margin: 0; border: 1px solid #EDEDEA; border-radius: 10px; overflow: hidden; font-size: 14px; }
+.obr-fact-totals > div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 14px; }
+.obr-fact-totals > div + div { border-top: 1px solid #EDEDEA; }
+.obr-fact-totals dt { color: #3A3A38; }
+.obr-fact-totals dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 600; }
+.obr-fact-totals .is-total { background: #8B96C8; color: #fff; }
+.obr-fact-totals .is-total dt, .obr-fact-totals .is-total dd { color: #fff; font-weight: 700; }

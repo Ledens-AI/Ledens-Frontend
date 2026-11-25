@@ -105,3 +105,25 @@ test('a model that calls no tool, or proposes nothing usable, fails loud instead
   const noTool = { messages: { create: async () => ({ content: [{ type: 'text', text: 'no sé' }] }) } };
   await assert.rejects(ganttAgenteDraft(jefe, proyecto, { db: pool, anthropic: noTool }), { status: 502 });
 });
+
+test('with one cuadrilla, tasks the model left in parallel are chained so the plan can be saved', async () => {
+  const [p2] = (await db.query(`INSERT INTO ledens.projects(project_id,name) VALUES ('P2026-031','Casa Nivelada') RETURNING id`)).rows.map((r) => r.id);
+  const d = await P(admin).create({ title: 'Reforma 2', vatRate: '21', clientId: cliente.id, jefeId: jefe.id, projectId: p2,
+    chapters: [{ name: 'Obra', items: [
+      { code: 'PA-001', name: 'Demolición', unit: 'm2', quantity: '20', unitPrice: '10' },
+      { code: 'PA-002', name: 'Tabique', unit: 'm2', quantity: '8', unitPrice: '30' },
+      { code: 'PA-003', name: 'Pintura', unit: 'm2', quantity: '10', unitPrice: '5' },
+    ] }] });
+  await P(admin).approveOnBehalf(d.id, { versionId: d.version.id, reason: 'Firmado' });
+  await P(jefe).schedule(d.id, { startDate: '2026-11-09' });
+  // The model only links pintura after tabique; demolición and tabique would still start together.
+  let prompt = '';
+  const anthropic = { messages: { create: async (req) => { prompt = req.messages[0].content[0].text; return { content: [{ type: 'tool_use', name: 'proponer_dependencias', input: { dependencias: [{ tarea: 3, predecesora: 2, tipo: 'FS', motivo: 'Se pinta tras el tabique' }] } }] }; } } };
+  const proposal = await ganttAgenteDraft(jefe, p2, { db: pool, anthropic });
+  assert.match(prompt, /1 cuadrilla/, 'the model is told the cuadrillas');
+  assert.ok(proposal.nivelacion >= 1);
+  assert.ok(proposal.tasks.flatMap((t) => t.predecessors).some((p) => p.recurso && /cuadrilla libre/.test(p.motivo)));
+  // Saved as is: no sobreasignación left, so updateMany does not refuse it (409).
+  const g = await G(jefe).updateMany(p2, proposal.tasks.map((t) => ({ id: t.id, predecessors: t.predecessors })));
+  assert.deepEqual(g.limitaciones, []);
+});
