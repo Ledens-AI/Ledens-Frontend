@@ -6,6 +6,7 @@ import { Empty, ErrorBox, Kpi, Badge } from '../finanzas/ui.jsx';
 import { PhaseBadge, Progress } from './Detalle.jsx';
 import { useObrasI18n } from './i18n.js';
 import Gantt from './Gantt.jsx';
+import { FacturaDialog, FacturasProyecto } from './Facturas.jsx';
 
 /* «Presupuestos y obras» by project: every presupuesto belongs to a project of
  * Gestión financiera (ledens.projects) through its obra. The team (admin and
@@ -212,14 +213,20 @@ const pctOf = (part, whole) => (whole > 0 ? Math.round(part / whole * 1000) / 10
 /* One project: its data, what its presupuestos add up to, its obras, its
  * presupuestos and, for whoever may see Gestión financiera of this project,
  * ingresos, costes and the latest movements assigned to it. */
-export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBack, onOpen }) {
+export function Proyecto({ projectId, readOnly, canInvoice, toast, onNew, onImport, onAgente, onBack, onOpen }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [fin, setFin] = useState(null); // { totales, rows, materiales, trabajadores } | { error }
   const [gantt, setGantt] = useState(false); // Planificación (Gantt) open
+  const [facturas, setFacturas] = useState(null); // invoices issued for the project (admins)
+  const [invoicing, setInvoicing] = useState(false); // «Generar factura» open
 
   const load = useCallback(() => api.project(projectId).then((d) => { setData(d); setError(''); }, (e) => setError(e.message)), [projectId]);
   useEffect(() => { load(); }, [load]);
+  const loadFacturas = useCallback(() => {
+    if (canInvoice) api.facturacion(projectId).then((d) => setFacturas(d.facturas), () => setFacturas(null));
+  }, [projectId, canInvoice]);
+  useEffect(() => { loadFacturas(); }, [loadFacturas]);
   useEffect(() => {
     let cancelled = false;
     setFin(null);
@@ -258,6 +265,8 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
         <div className="obr-actions">
           {pr.status ? <Badge bg="#E3E7F3" fg="#3E4D85" icon="ri-building-2-line">{pr.status}</Badge> : null}
           {k.aprobado.n ? <button type="button" className="fin-btn" onClick={() => setGantt(true)}><i className="ri-calendar-schedule-line"></i>Planificación (Gantt)</button> : null}
+          {canInvoice && !readOnly ? <button type="button" className="fin-btn" disabled={fin === null} title={fin === null ? 'Calculando el pendiente de cobro…' : undefined}
+            onClick={() => setInvoicing(true)}><i className="ri-bill-line"></i>Generar factura</button> : null}
           {!readOnly && onNew ? <button type="button" className="fin-btn" onClick={() => onNew(pr)}><i className="ri-add-line"></i>Nuevo presupuesto</button> : null}
           {!readOnly && onImport ? <button type="button" className="fin-btn is-primary" onClick={() => onImport(pr)}><i className="ri-file-upload-line"></i>Subir PDF de presupuesto</button> : null}
           {!readOnly && onAgente ? <button type="button" className="fin-btn" onClick={() => onAgente(pr)}><i className="ri-magic-line"></i>Generar con la documentación de la visita</button> : null}
@@ -294,6 +303,13 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
           </>
         )}
 
+      {canInvoice && facturas?.length ? (
+        <>
+          <h3 className="obr-h3">{`Facturas · ${facturas.length}`}</h3>
+          <FacturasProyecto projectId={projectId} facturas={facturas} toast={toast} />
+        </>
+      ) : null}
+
       {obras.length ? (
         <>
           <h3 className="obr-h3">{`Obras en curso · ${obras.length}`}</h3>
@@ -326,6 +342,15 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
             </div>
           </div>
         </>
+      ) : null}
+
+      {invoicing ? (
+        <FacturaDialog projectId={projectId} pendiente={fin && !fin.error ? pendienteCobro : null} onClose={() => setInvoicing(false)}
+          onDone={(f, downloaded) => {
+            setInvoicing(false);
+            loadFacturas();
+            toast?.(downloaded ? `Factura ${f.numero} generada` : `Factura ${f.numero} generada. Descárgala desde la lista de facturas del proyecto.`);
+          }} />
       ) : null}
     </div>
   );
