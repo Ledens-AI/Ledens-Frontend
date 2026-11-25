@@ -146,6 +146,10 @@
 .obr-proj-figs > span { display: flex; flex-direction: column; gap: 2px; }
 .obr-card-none { border-style: dashed; background: #FCFCFA; }
 .obr-hint-tight { margin: -8px 0 0; }
+/* Clickable KPI that opens a detail (Costes of a project): a chevron on the right of its label. */
+.obr-kpi-go { margin-left: auto; }
+/* «Costes del proyecto» scrolls its top into view when opened: clear the platform's sticky top bar. */
+.obr-costes { scroll-margin-top: 84px; }
 .obr-project-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 15px; }
 .obr-project-line > i { color: #5567AE; font-size: 18px; }
 .obr-grow { flex: 1 1 280px; }

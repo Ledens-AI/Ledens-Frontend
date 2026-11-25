@@ -118,6 +118,8 @@ test('rentabilidad por proyecto: ingresos − costes of every assigned record, a
  assert.equal(only.total,1);assert.equal(only.rows[0].project_id,p4);assert.equal(only.rows[0].asignado,'200');assert.equal(Number(only.rows[0].resultado),-200);
  assert.ok(only.proyectos.some(p=>p.id===p3),'the chart keeps every project');
  assert.equal((await svc.projectResults({project:p3,tipo:'ingresos'})).total,1);
+ const costes=await svc.projectResults({project:p3,tipo:'costes',sort:'coste',dir:'desc'});
+ assert.equal(costes.total,1);assert.equal(Number(costes.totales.costes),1000);assert.equal(Number(costes.totales.ingresos),0);assert.ok(costes.rows.every(r=>!r.ingreso));
  assert.equal((await svc.projectResults({project:p3,contable:'aprobado'})).total,0);
  await assert.rejects(svc.projectResults({tipo:'x'}),{status:400});
  const restricted=new FinanzasService(pool,jefe);assert.ok((await restricted.projectResults({})).proyectos.every(p=>p.id===p1));

@@ -6,6 +6,7 @@ import { Empty, ErrorBox, Kpi, Badge } from '../finanzas/ui.jsx';
 import { PhaseBadge, Progress } from './Detalle.jsx';
 import { useObrasI18n } from './i18n.js';
 import Gantt from './Gantt.jsx';
+import CostesProyecto from './CostesProyecto.jsx';
 
 /* «Presupuestos y obras» by project: every presupuesto belongs to a project of
  * Gestión financiera (ledens.projects) through its obra. The team (admin and
@@ -211,12 +212,15 @@ const pctOf = (part, whole) => (whole > 0 ? Math.round(part / whole * 1000) / 10
 
 /* One project: its data, what its presupuestos add up to, its obras, its
  * presupuestos and, for whoever may see Gestión financiera of this project,
- * ingresos, costes and the latest movements assigned to it. */
-export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBack, onOpen }) {
+ * ingresos, costes and the latest movements assigned to it; the Costes card
+ * opens every cost of the project (CostesProyecto). */
+export function Proyecto({ projectId, readOnly, toast, onNew, onImport, onAgente, onBack, onOpen }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [fin, setFin] = useState(null); // { totales, rows, materiales, trabajadores } | { error }
   const [gantt, setGantt] = useState(false); // Planificación (Gantt) open
+  const [costesOpen, setCostesOpen] = useState(false); // «Costes del proyecto» open
+  const [finVersion, setFinVersion] = useState(0);
 
   const load = useCallback(() => api.project(projectId).then((d) => { setData(d); setError(''); }, (e) => setError(e.message)), [projectId]);
   useEffect(() => { load(); }, [load]);
@@ -230,12 +234,14 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
     ]).then(([all, mat, lab]) => { if (!cancelled) setFin({ totales: all.totales, rows: all.rows, materiales: mat.totales.costes, trabajadores: lab.totales.costes }); },
       (e) => { if (!cancelled) setFin({ error: e.status === 403 ? 'No tienes acceso a la gestión financiera de este proyecto.' : e.message }); });
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, finVersion]);
 
   const back = <div><button type="button" className="fin-btn is-ghost is-small" onClick={onBack}><i className="ri-arrow-left-line"></i>Todos los proyectos</button></div>;
   if (error) return <div className="fin-stack">{back}<ErrorBox message={error} onRetry={load} /></div>;
   if (!data) return <div className="fin-loading fin-muted">Cargando el proyecto…</div>;
   if (gantt) return <Gantt projectId={projectId} readOnly={readOnly} onBack={() => { setGantt(false); load(); }} />;
+  // A record reassigned from its detail changes the figures: read them again on the way back.
+  if (costesOpen) return <CostesProyecto project={{ id: projectId, code: data.project.code, name: data.project.name }} toast={toast} onBack={() => { setCostesOpen(false); setFinVersion((n) => n + 1); }} />;
 
   const { project: pr, kpis: k, presupuestos: rows } = data;
   const obras = rows.filter((r) => r.phase === 'en_curso');
@@ -285,7 +291,7 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
                 hint={approvedTotal > 0 ? `${pctS(pctOf(cobrado, approvedTotal))} de lo aprobado con IVA` : 'Cobros de clientes asignados al proyecto'} />
               <Kpi label="Pendiente de cobro" value={eur(Math.max(0, pendienteCobro))} icon="ri-time-line" tone={pendienteCobro > 0 ? 'warn' : undefined}
                 hint={pendienteCobro < 0 ? `Cobrado ${eur(-pendienteCobro)} por encima de lo aprobado` : 'Aprobado con IVA − cobrado'} />
-              <Kpi label="Costes" value={eur(costes)} icon="ri-shopping-cart-2-line"
+              <Kpi label={<>Costes<i className="ri-arrow-right-s-line obr-kpi-go" aria-hidden="true"></i></>} value={eur(costes)} icon="ri-shopping-cart-2-line" onClick={() => setCostesOpen(true)}
                 hint={`Materiales ${eur(fin.materiales)} · Mano de obra ${eur(fin.trabajadores)}`} />
               <Kpi label="Resultado" value={eur(t.resultado)} icon="ri-line-chart-line" tone={Number(t.resultado) < 0 ? 'bad' : Number(t.resultado) > 0 ? 'good' : undefined}
                 hint={costePct !== null ? `Costes: ${pctS(costePct)} del presupuesto aprobado sin IVA` : 'Ingresos − costes'} />
