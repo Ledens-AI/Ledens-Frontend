@@ -6,8 +6,10 @@ import {ProjectsService} from '../src/finanzas/projects.js';
 import {createFinanzasRouter} from '../src/routes/finanzas.js';
 // Proyectos on PGlite: the shared finance fixture plus the production columns of
 // ledens.projects, ledens.customers and ledens.project_statuses. Synthetic rows only.
-let db,pool,admin,jefe,client,st1,st2,cust,imported;
-const as=(u)=>new ProjectsService(pool,u);
+let db,pool,admin,jefe,client,st1,st2,cust,imported,first;
+// A fixed clock: codes are P<año>-<NNN> of the year in Madrid.
+const NOW=()=>new Date('2026-11-25T12:00:00Z');
+const as=(u,now=NOW)=>new ProjectsService(pool,u,{now});
 before(async()=>{
  const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
  await db.exec(await fs.readFile(new URL('./finance-fixture.sql',import.meta.url),'utf8'));
@@ -28,33 +30,47 @@ after(()=>db?.close());
 
 test('an admin creates a project with its real fields and the change is audited',async()=>{
  const p=await as(admin).create({code:' OBRA-100 ',name:'Reforma ático',customerId:cust,salesman:'Comercial X',address:'C/ Prueba 1',municipio:'Marbella',provincia:'Málaga',statusId:st1,startDate:'2026-10-01',endDate:'2026-12-15'});
- assert.equal(p.code,'OBRA-100');assert.equal(p.name,'Reforma ático');assert.equal(p.cliente,'Cliente Prueba');assert.equal(p.customer_name_source,'Cliente Prueba','text name defaults to the customer');
+ first=p.id;
+ assert.equal(p.code,'P2026-001','the code is assigned, never the one sent');assert.equal(p.name,'Reforma ático');assert.equal(p.cliente,'Cliente Prueba');assert.equal(p.customer_name_source,'Cliente Prueba','text name defaults to the customer');
  assert.equal(p.estado,'En curso');assert.equal(p.start_date,'2026-10-01');assert.equal(p.end_date,'2026-12-15');assert.equal(p.importado,false);
  const row=(await db.query('SELECT source_id,raw_id,municipio FROM ledens.projects WHERE id=$1',[p.id])).rows[0];
  assert.deepEqual(row,{source_id:null,raw_id:null,municipio:'Marbella'});
  const a=(await db.query("SELECT actor_label,detail FROM audit_log WHERE action='Proyecto creado' ORDER BY id DESC LIMIT 1")).rows[0];
- assert.equal(a.actor_label,'Admin Test');assert.match(a.detail,/Reforma ático \(OBRA-100\)/);
+ assert.equal(a.actor_label,'Admin Test');assert.match(a.detail,/Reforma ático \(P2026-001\)/);
 });
 
-test('validation: name required, unique code (any case), coherent dates, real status and client',async()=>{
+test('validation: name required, coherent dates, real status and client',async()=>{
  await assert.rejects(as(admin).create({name:'  '}),{status:400,message:/nombre/});
- await assert.rejects(as(admin).create({name:'Otra',code:'obra-100'}),{status:409,message:/OBRA-100|obra-100/});
  await assert.rejects(as(admin).create({name:'Otra',startDate:'2026-10-10',endDate:'2026-10-01'}),{status:400,message:/fin/});
  await assert.rejects(as(admin).create({name:'Otra',startDate:'10/10/2026'}),{status:400});
  await assert.rejects(as(admin).create({name:'Otra',statusId:'00000000-0000-0000-0000-000000000000'}),{status:400,message:/Estado/});
  await assert.rejects(as(admin).create({name:'Otra',customerId:'no-uuid'}),{status:400,message:/Cliente/});
- const p=await as(admin).create({name:'Sin código'});assert.equal(p.code,null,'a project without code is allowed');
+ assert.equal((await db.query("SELECT count(*)::int n FROM ledens.projects WHERE upper(project_id) LIKE 'P2026-%'")).rows[0].n,1,'a refused project spends no number');
+});
+
+test('codes go up by one per year, after the highest one of that form (imported, any case)',async()=>{
+ await db.query(`INSERT INTO ledens.projects(project_id,name,source_id,raw_id) VALUES
+  ('P2026-014','Importado 14','legacy-14',gen_random_uuid()),(' p2026-020 ','Importado 20','legacy-20',gen_random_uuid()),
+  ('P2026-0999X','Otro formato','legacy-x',gen_random_uuid()),('P2025-099','Año anterior','legacy-25',gen_random_uuid())`);
+ assert.equal((await as(admin).options()).nextCode,'P2026-021','preview of the next code');
+ const a=await as(admin).create({name:'Siguiente'}),b=await as(admin).create({name:'Y otro'});
+ assert.deepEqual([a.code,b.code],['P2026-021','P2026-022']);
+ // Madrid already in 2027 while UTC is still in 2026: a new year starts at 001.
+ const c=await as(admin,()=>new Date('2026-12-31T23:30:00Z')).create({name:'Año nuevo'});
+ assert.equal(c.code,'P2027-001');
+ assert.equal((await as(jefe).options()).nextCode,undefined,'only who can create sees it');
 });
 
 test('editing needs the version that was shown and audits exactly what changed',async()=>{
- const p=(await as(admin).list({q:'OBRA-100'})).rows[0];
+ const p=await as(admin).one(first);
  const u=await as(admin).update(p.id,{...form(p),name:'Reforma ático y terraza',statusId:st2,version:p.version});
  assert.equal(u.changed,true);assert.equal(u.name,'Reforma ático y terraza');assert.equal(u.estado,'Cerrado');assert.notEqual(u.version,p.version);
  const a=(await db.query("SELECT detail FROM audit_log WHERE action='Proyecto editado' ORDER BY id DESC LIMIT 1")).rows[0].detail;
  assert.equal(a,'Nombre: Reforma ático → Reforma ático y terraza · Estado: En curso → Cerrado');
  await assert.rejects(as(admin).update(p.id,{...form(p),name:'Pisado',version:p.version}),{status:409},'stale version is refused');
  const same=await as(admin).update(u.id,{...form(u),version:u.version});assert.equal(same.changed,false);
- await assert.rejects(as(admin).update(u.id,{...form(u),code:'IMP-001',version:u.version}),{status:409},'cannot take another project code');
+ const kept=await as(admin).update(u.id,{...form(u),code:'IMP-001',version:u.version});
+ assert.equal(kept.changed,false,'a code sent in the form is ignored');assert.equal(kept.code,'P2026-001');
 });
 
 test('imported projects are flagged and stay editable',async()=>{
@@ -66,7 +82,7 @@ test('imported projects are flagged and stay editable',async()=>{
 });
 
 test('jefes only see granted projects and cannot create or edit; clients see nothing',async()=>{
- const p=(await as(admin).list({q:'OBRA-100'})).rows[0];
+ const p=await as(admin).one(first);
  assert.equal((await as(jefe).list()).total,0);
  await db.query('INSERT INTO ledens.finance_project_permissions(user_id,project_id,can_write) VALUES($1,$2,true)',[jefe.id,p.id]);
  const l=await as(jefe).list();assert.deepEqual(l.rows.map(r=>r.id),[p.id]);assert.equal(l.canEdit,false);
@@ -91,15 +107,15 @@ test('HTTP: writes need the allowed origin and a non-client role',async()=>{
   const post=(headers)=>fetch(base,{method:'POST',headers:{'content-type':'application/json',...headers},body:JSON.stringify({name:'Desde HTTP',code:'HTTP-1'})});
   assert.equal((await post({origin:'https://evil.test'})).status,403);
   assert.equal((await post({origin:'https://ledens.test','x-role':'client'})).status,403);
-  const ok=await post({origin:'https://ledens.test'});assert.equal(ok.status,201);assert.equal((await ok.json()).project.code,'HTTP-1');
+  const ok=await post({origin:'https://ledens.test'});assert.equal(ok.status,201);assert.match((await ok.json()).project.code,/^P2026-\d{3}$/);
   const list=await (await fetch(base+'?q=HTTP')).json();assert.equal(list.total,1);
  }finally{server.close();}
 });
 
-test('a project reloads by id even after its code changed, and only for those who may see it',async()=>{
- const p=await as(admin).create({name:'Recarga por id',code:'RID-1'});
- await as(admin).update(p.id,{...form(p),code:'RID-2',version:p.version});
- const one=await as(admin).one(p.id);assert.equal(one.code,'RID-2');assert.equal(one.name,'Recarga por id');
+test('a project reloads by id even after its name changed, and only for those who may see it',async()=>{
+ const p=await as(admin).create({name:'Recarga por id'});
+ await as(admin).update(p.id,{...form(p),name:'Recarga por id 2',version:p.version});
+ const one=await as(admin).one(p.id);assert.equal(one.code,p.code);assert.equal(one.name,'Recarga por id 2');
  await assert.rejects(as(jefe).one(p.id),{status:404},'not granted to the jefe');
  await assert.rejects(as(admin).one('no-uuid'),{status:404});
 });
