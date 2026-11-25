@@ -88,6 +88,8 @@ export const api = {
   // Rentabilidad por proyecto: ingresos − costes per project and the movements assigned to them.
   projectResults: (f) => request('GET', '/api/finanzas/rentabilidad' + qs(f)),
   profitability: (projectId) => request('GET', `/api/finanzas/proyectos/${projectId}/rentabilidad`),
+  // What a project has really collected: { cobrado, sinCobrar (recorded income still unpaid), cobros }.
+  projectCollections: (projectId) => request('GET', `/api/finanzas/proyectos/${projectId}/cobros`),
   // Documentos sin asignar (admins): processed documents with no confirmed movement.
   unassignedDocuments: (f) => request('GET', '/api/finanzas/documentos-sin-asignar' + qs(f)),
   // Concepto de movimientos (admins): every movement and its classification.

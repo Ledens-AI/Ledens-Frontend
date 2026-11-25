@@ -6,6 +6,7 @@ import { Empty, ErrorBox, Kpi, Badge } from '../finanzas/ui.jsx';
 import { PhaseBadge, Progress } from './Detalle.jsx';
 import { useObrasI18n } from './i18n.js';
 import Gantt from './Gantt.jsx';
+import { FacturaDialog, FacturasProyecto } from './Facturas.jsx';
 
 /* «Presupuestos y obras» by project: every presupuesto belongs to a project of
  * Gestión financiera (ledens.projects) through its obra. The team (admin and
@@ -212,14 +213,20 @@ const pctOf = (part, whole) => (whole > 0 ? Math.round(part / whole * 1000) / 10
 /* One project: its data, what its presupuestos add up to, its obras, its
  * presupuestos and, for whoever may see Gestión financiera of this project,
  * ingresos, costes and the latest movements assigned to it. */
-export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBack, onOpen }) {
+export function Proyecto({ projectId, readOnly, canInvoice, toast, onNew, onImport, onAgente, onBack, onOpen }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
-  const [fin, setFin] = useState(null); // { totales, rows, materiales, trabajadores } | { error }
+  const [fin, setFin] = useState(null); // { totales, rows, materiales, trabajadores, cobros } | { error }
   const [gantt, setGantt] = useState(false); // Planificación (Gantt) open
+  const [facturas, setFacturas] = useState(null); // invoices issued for the project (admins)
+  const [invoicing, setInvoicing] = useState(false); // «Generar factura» open
 
   const load = useCallback(() => api.project(projectId).then((d) => { setData(d); setError(''); }, (e) => setError(e.message)), [projectId]);
   useEffect(() => { load(); }, [load]);
+  const loadFacturas = useCallback(() => {
+    if (canInvoice) api.facturacion(projectId).then((d) => setFacturas(d.facturas), () => setFacturas(null));
+  }, [projectId, canInvoice]);
+  useEffect(() => { loadFacturas(); }, [loadFacturas]);
   useEffect(() => {
     let cancelled = false;
     setFin(null);
@@ -227,7 +234,8 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
       finApi.projectResults({ proyecto: projectId, tam: 8, orden: 'fecha', dir: 'desc' }),
       finApi.projectResults({ proyecto: projectId, tipo: 'materiales', tam: 1 }),
       finApi.projectResults({ proyecto: projectId, tipo: 'trabajadores', tam: 1 }),
-    ]).then(([all, mat, lab]) => { if (!cancelled) setFin({ totales: all.totales, rows: all.rows, materiales: mat.totales.costes, trabajadores: lab.totales.costes }); },
+      finApi.projectCollections(projectId),
+    ]).then(([all, mat, lab, cobros]) => { if (!cancelled) setFin({ totales: all.totales, rows: all.rows, materiales: mat.totales.costes, trabajadores: lab.totales.costes, cobros }); },
       (e) => { if (!cancelled) setFin({ error: e.status === 403 ? 'No tienes acceso a la gestión financiera de este proyecto.' : e.message }); });
     return () => { cancelled = true; };
   }, [projectId]);
@@ -241,7 +249,9 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
   const obras = rows.filter((r) => r.phase === 'en_curso');
   const approvedTotal = Number(k.aprobado.total), approvedBase = Number(k.aprobado.base);
   const t = fin?.totales;
-  const cobrado = t ? Number(t.ingresos) : null, costes = t ? Number(t.costes) : null;
+  // Cobrado is money really received (client payments, sales invoices the Bridge has paid),
+  // not Rentabilidad's ingresos, which also has invoices still unpaid.
+  const cobrado = t ? Number(fin.cobros.cobrado) : null, sinCobrar = t ? Number(fin.cobros.sinCobrar) : 0, costes = t ? Number(t.costes) : null;
   const pendienteCobro = t ? approvedTotal - cobrado : null;
   const costePct = t ? pctOf(costes, approvedBase) : null;
   const dates = [pr.startDate ? `Inicio ${fecha(pr.startDate)}` : null, pr.endDate ? `Fin ${fecha(pr.endDate)}` : null].filter(Boolean).join(' · ');
@@ -258,6 +268,8 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
         <div className="obr-actions">
           {pr.status ? <Badge bg="#E3E7F3" fg="#3E4D85" icon="ri-building-2-line">{pr.status}</Badge> : null}
           {k.aprobado.n ? <button type="button" className="fin-btn" onClick={() => setGantt(true)}><i className="ri-calendar-schedule-line"></i>Planificación (Gantt)</button> : null}
+          {canInvoice && !readOnly ? <button type="button" className="fin-btn" disabled={fin === null} title={fin === null ? 'Calculando el pendiente de cobro…' : undefined}
+            onClick={() => setInvoicing(true)}><i className="ri-bill-line"></i>Generar factura</button> : null}
           {!readOnly && onNew ? <button type="button" className="fin-btn" onClick={() => onNew(pr)}><i className="ri-add-line"></i>Nuevo presupuesto</button> : null}
           {!readOnly && onImport ? <button type="button" className="fin-btn is-primary" onClick={() => onImport(pr)}><i className="ri-file-upload-line"></i>Subir PDF de presupuesto</button> : null}
           {!readOnly && onAgente ? <button type="button" className="fin-btn" onClick={() => onAgente(pr)}><i className="ri-magic-line"></i>Generar con la documentación de la visita</button> : null}
@@ -282,7 +294,8 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
           <>
             <div className="fin-kpis">
               <Kpi label="Cobrado" value={eur(cobrado)} icon="ri-hand-coin-line"
-                hint={approvedTotal > 0 ? `${pctS(pctOf(cobrado, approvedTotal))} de lo aprobado con IVA` : 'Cobros de clientes asignados al proyecto'} />
+                hint={[approvedTotal > 0 ? `${pctS(pctOf(cobrado, approvedTotal))} de lo aprobado con IVA` : 'Cobros recibidos de los clientes',
+                  sinCobrar > 0 ? `${eur(sinCobrar)} facturado aún sin cobrar` : null].filter(Boolean).join(' · ')} />
               <Kpi label="Pendiente de cobro" value={eur(Math.max(0, pendienteCobro))} icon="ri-time-line" tone={pendienteCobro > 0 ? 'warn' : undefined}
                 hint={pendienteCobro < 0 ? `Cobrado ${eur(-pendienteCobro)} por encima de lo aprobado` : 'Aprobado con IVA − cobrado'} />
               <Kpi label="Costes" value={eur(costes)} icon="ri-shopping-cart-2-line"
@@ -290,9 +303,16 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
               <Kpi label="Resultado" value={eur(t.resultado)} icon="ri-line-chart-line" tone={Number(t.resultado) < 0 ? 'bad' : Number(t.resultado) > 0 ? 'good' : undefined}
                 hint={costePct !== null ? `Costes: ${pctS(costePct)} del presupuesto aprobado sin IVA` : 'Ingresos − costes'} />
             </div>
-            <p className="fin-muted fin-small obr-hint-tight">{`Desde Rentabilidad por proyecto: los ${t.movimientos} movimientos asignados al proyecto, validados o no.`}</p>
+            <p className="fin-muted fin-small obr-hint-tight">{`Costes y resultado desde Rentabilidad por proyecto: los ${t.movimientos} movimientos asignados al proyecto, validados o no. Cobrado: solo el dinero recibido (cobros de clientes y facturas pagadas en el banco).`}</p>
           </>
         )}
+
+      {canInvoice && facturas?.length ? (
+        <>
+          <h3 className="obr-h3">{`Facturas · ${facturas.length}`}</h3>
+          <FacturasProyecto projectId={projectId} facturas={facturas} toast={toast} />
+        </>
+      ) : null}
 
       {obras.length ? (
         <>
@@ -326,6 +346,15 @@ export function Proyecto({ projectId, readOnly, onNew, onImport, onAgente, onBac
             </div>
           </div>
         </>
+      ) : null}
+
+      {invoicing ? (
+        <FacturaDialog projectId={projectId} pendiente={fin && !fin.error ? pendienteCobro : null} onClose={() => setInvoicing(false)}
+          onDone={(f, downloaded) => {
+            setInvoicing(false);
+            loadFacturas();
+            toast?.(downloaded ? `Factura ${f.numero} generada` : `Factura ${f.numero} generada. Descárgala desde la lista de facturas del proyecto.`);
+          }} />
       ) : null}
     </div>
   );

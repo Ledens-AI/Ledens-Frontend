@@ -406,6 +406,33 @@ export class FinanzasService {
   return {results,ok:results.filter(r=>r.ok).length,failed:results.filter(r=>!r.ok).length};
  }
  async automaticImputation(){return {applied:false,suggested:false,reason:'Project evidence is reviewed by the canonical engine'};}
+ // What the project has really collected (Cobrado, «Pendiente de cobro» and the
+ // amounts «Generar factura» suggests), over the same records as Rentabilidad
+ // (assigned, valid, not excluded; validated or not), unlike its «ingresos»:
+ //  - a client payment (customer_payments: imported, from a bank receipt or in
+ //    cash) is money received, in full;
+ //  - a sales invoice (a Cobrar document's revenue) counts only the part the
+ //    Bridge has paid with confirmed bank receipts, and never a receipt already
+ //    registered as a client payment (it would count twice). Unpaid, it is
+ //    `sinCobrar`: recorded income still to be collected.
+ async projectCollections(projectId){
+  if(!uuid(projectId))throw new FinError(404,'Proyecto no encontrado');
+  await this.finance.permission(this.pool,this.user,projectId);
+  if(!(await this.query('SELECT 1 FROM ledens.projects WHERE id=$1',[projectId])).rows.length)throw new FinError(404,'Proyecto no encontrado');
+  const {funding}=await this.finance.documentFunding();
+  const r=(await this.query(`WITH rec AS (
+    SELECT r.customer_payment_id,r.document_id,a.allocated_amount FROM ledens.financial_records r
+    JOIN ledens.project_financial_allocations a ON a.record_id=r.id
+    WHERE a.project_id=$1 AND r.source_valid AND r.status<>'excluded' AND (r.customer_payment_id IS NOT NULL OR r.category IN ('revenue','advance'))
+   ), paid AS (
+    SELECT f.document_id,least(1,sum(abs(f.allocated_amount))/nullif(max(f.capacity),0)) frac FROM (${funding}) f
+    WHERE NOT EXISTS(SELECT 1 FROM ledens.financial_records p WHERE p.customer_payment_id IS NOT NULL AND p.status<>'excluded' AND p.bank_movement_id=f.bank_movement_id)
+    GROUP BY f.document_id
+   ) SELECT round(coalesce(sum(CASE WHEN x.customer_payment_id IS NOT NULL THEN x.allocated_amount ELSE x.allocated_amount*coalesce(p.frac,0) END),0),2)::text cobrado,
+     round(coalesce(sum(x.allocated_amount),0),2)::text registrado,count(*) FILTER(WHERE x.customer_payment_id IS NOT NULL)::int cobros
+    FROM rec x LEFT JOIN paid p ON x.customer_payment_id IS NULL AND p.document_id=x.document_id`,[projectId])).rows[0];
+  return {cobrado:r.cobrado,sinCobrar:(Math.max(0,Math.round((Number(r.registrado)-Number(r.cobrado))*100))/100).toFixed(2),cobros:r.cobros};
+ }
  async profitability(projectId){
   const s=await this.finance.summary(this.user,projectId);const [project]=await this.listProjects({ids:[projectId]});const monthly=await this.finance.evolution(this.user,projectId,{limit:100});
   const counts=(await this.query(`${BASE} SELECT l.type,count(*)::int n FROM listed l WHERE EXISTS(SELECT 1 FROM ledens.project_financial_allocations a WHERE a.record_id=l.record_id AND a.project_id=$3) GROUP BY l.type`,[...this.params(),projectId])).rows;

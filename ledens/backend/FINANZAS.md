@@ -16,6 +16,15 @@ Pruebas: test/finanzas.test.js verifica que interfaz y API usan una sola asignac
 
 El despliegue normal aplica la migración 010 después de las 005/006 ya desplegadas. No se sustituye la ingesta de facturas, el Bridge, Revolut ni la autenticación. Las sugerencias no asignan automáticamente proyectos desde la interfaz.
 
+## Cobrado de un proyecto
+
+`GET /api/finanzas/proyectos/:id/cobros` (`FinanzasService.projectCollections`; admin, o jefe con `finance_project_permissions` del proyecto) da lo que el proyecto **ha cobrado de verdad**, sobre los mismos registros que Rentabilidad por proyecto (asignados, válidos, no excluidos; validados o no):
+
+- un **cobro de cliente** (`customer_payments`: importado, registrado desde un cobro bancario o en efectivo) cuenta entero;
+- una **factura de venta** (ingreso de un documento `Cobrar`) cuenta solo por la parte que el Bridge ha pagado con cobros bancarios confirmados, y nunca por un cobro que ya está registrado como cobro de cliente (contaría dos veces).
+
+Responde `{ cobrado, sinCobrar, cobros }`; `sinCobrar` es lo registrado como ingreso que aún no se ha cobrado. La página de un proyecto en «Presupuestos y obras» lo usa para «Cobrado» y «Pendiente de cobro» (aprobado con IVA − cobrado) y para las sugerencias del 20/50/100 % de «Generar factura». Los «ingresos» de Rentabilidad siguen siendo el resultado económico (incluyen facturas registradas sin cobrar).
+
 ## Pendiente de conciliación
 
 La pantalla Pendiente de conciliación muestra exclusivamente movimientos bancarios sin enlaces Bridge, con enlaces en revisión o con diferencias entre su total firmado y las imputaciones confirmadas. Cada movimiento aparece una sola vez, con los números de documentos relacionados. Los materiales sin proyecto se gestionan en «Materiales pendiente de asignación» (solo lo que lista Materiales: nunca pagos a trabajadores ni cobros de clientes). Las vistas de registros financieros y documentos se conservan solo como consultas compatibles de API. Solo administrador puede consultar la bandeja global.

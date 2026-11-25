@@ -85,6 +85,37 @@ test('profitability facade returns recognized economics and independent cash onl
  assert.equal(Number(s.kpis.costeTotal),0);assert.equal(Number(s.kpis.cobros),0);assert.ok(s.kpis.pendientesRevision>0);assert.equal(s.kpis.margenDirectoPct,null);
  assert.equal(safeDocumentUrl('https://evil.example/a'),null);assert.ok(safeDocumentUrl('https://ledenses.sharepoint.com/a'));
 });
+test('cobrado de un proyecto: cobros de clientes y lo pagado de sus facturas, nunca lo facturado sin cobrar ni dos veces',async()=>{
+ const p5=(await db.query("INSERT INTO ledens.projects(name,project_id) VALUES('Antequera','OBRA-C5') RETURNING id")).rows[0].id;
+ assert.deepEqual(await svc.projectCollections(p5),{cobrado:'0.00',sinCobrar:'0.00',cobros:0});
+ // A sales invoice of 1.210 €, recorded and assigned but unpaid: income, not collected.
+ const doc=(await db.query("INSERT INTO ledens.documents(numerodocumento,tipo,total,document_on,tercero) VALUES('FAC-COBRO-1','Cobrar',1210,'2025-10-01','Ana') RETURNING id")).rows[0].id;
+ await svc.finance.transaction(c=>storeInvoiceLines(c,doc,[{line_number:1,description:'Reforma',net_amount:1000,vat_amount:210}],{direction:'Cobrar',currency:'EUR'}));
+ await db.query("UPDATE ledens.financial_records SET category='revenue' WHERE document_id=$1",[doc]);
+ const line=(await svc.listRecords({q:'FAC-COBRO-1'})).rows[0];await assign(line,p5);
+ assert.ok(Number((await svc.projectResults({project:p5})).totales.ingresos)>=1210,'Rentabilidad counts it as income');
+ let c=await svc.projectCollections(p5);assert.deepEqual([c.cobrado,c.sinCobrar],['0.00','1210.00']);
+ // The Bridge pays half of it with a bank receipt: half collected.
+ const bank=async(amount,ref)=>(await db.query("INSERT INTO ledens.bank_movements(total_amount,amount,currency,state,completed_on,description) VALUES($1,$1,'EUR','COMPLETED','2025-10-05',$2) RETURNING id",[amount,ref])).rows[0].id;
+ const b1=await bank(605,'TRANSFERENCIA ANA 1');
+ await db.query("INSERT INTO ledens.bank_document_allocations(document_id,bank_movement_id,allocated_amount,state) VALUES($1,$2,605,'Confirmado')",[doc,b1]);
+ c=await svc.projectCollections(p5);assert.deepEqual([c.cobrado,c.sinCobrar],['605.00','605.00']);
+ // A client payment (imported or in cash) is money received in full.
+ const cid=(await db.query("INSERT INTO ledens.customer_payments(total,cliente,occurred_on) VALUES(300,'Ana','2025-10-10') RETURNING id")).rows[0].id;
+ await assign(await svc.getRecord('cliente',cid),p5);
+ c=await svc.projectCollections(p5);assert.deepEqual([c.cobrado,c.cobros],['905.00',1]);
+ // The other half: a bank receipt registered as a client payment and also reconciled with the invoice counts once.
+ const b2=await bank(605,'TRANSFERENCIA ANA 2');
+ const cid2=(await db.query("INSERT INTO ledens.customer_payments(total,cliente,occurred_on,bank_movement_id) VALUES(605,'Ana','2025-10-20',$1) RETURNING id",[b2])).rows[0].id;
+ await assign(await svc.getRecord('cliente',cid2),p5);
+ await db.query("INSERT INTO ledens.bank_document_allocations(document_id,bank_movement_id,allocated_amount,state) VALUES($1,$2,605,'Confirmado')",[doc,b2]);
+ c=await svc.projectCollections(p5);assert.deepEqual([c.cobrado,c.cobros],['1510.00',2]);
+ // An excluded payment never counts.
+ await db.query("UPDATE ledens.financial_records SET status='excluded' WHERE customer_payment_id=$1",[cid]);
+ assert.equal((await svc.projectCollections(p5)).cobrado,'1210.00');
+ await assert.rejects(new FinanzasService(pool,jefe).projectCollections(p5),{status:403});
+ await assert.rejects(svc.projectCollections(randomUUID()),{status:404});
+});
 test('HTTP authentication, role check, CSRF and assignment version survive the adapter',async()=>{
  const app=express();app.use(express.json());app.use('/api/finanzas',createFinanzasRouter({service:svc,origin:'https://ledens.test',authenticate:(req,res,next)=>{if(!req.get('x-user'))return res.status(401).json({error:'login'});req.user={...admin,role:req.get('x-user')};next();}}));
  const server=app.listen(0),base='http://127.0.0.1:'+server.address().port+'/api/finanzas';
