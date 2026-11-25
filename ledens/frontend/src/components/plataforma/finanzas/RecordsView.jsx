@@ -20,10 +20,11 @@ const PERIODOS = [['semana', 'Semana'], ['mes', 'Mes'], ['anio', 'Año']];
 export default function RecordsView({ mode, summary, initialProject, onChanged, toast }) {
   const pending = mode === 'pendientes';
   const showQuantity = ['pendientes','material','concepto'].includes(mode);
-  // «Pagos a trabajadores» is read-only except for the periodo trabajado (the
-  // week, month or year each payment is for; one row or a selection at once):
-  // new payments are prepared and saved in «Pendiente de trabajador».
-  const readOnly = mode === 'trabajador';
+  // «Pagos a trabajadores»: new payments are prepared and saved in «Pendiente
+  // de trabajador»; here only their project (inline, or the selection; changing
+  // it asks for the reason, audited) and the periodo trabajado (the week, month
+  // or year each payment is for) change.
+  const workers = mode === 'trabajador';
   // «Devolver a pendientes» (Materiales): a material assigned to the wrong obra
   // loses its project and is listed again in «Materiales pendiente de asignación».
   const canReturn = mode === 'material';
@@ -65,7 +66,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
   }, [mode, pending, filters, sort, page, reload]);
 
   useEffect(() => {
-    if (!readOnly) return undefined;
+    if (!workers) return undefined;
     let cancelled = false;
     api.workerSeries({
       estado: filters.estado, proyecto: filters.proyecto?.id, q: filters.q, desde: filters.desde, hasta: filters.hasta,
@@ -75,7 +76,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
       (e) => { if (!cancelled) setChartError(e.message); },
     );
     return () => { cancelled = true; };
-  }, [readOnly, filters, periodo, reload]);
+  }, [workers, filters, periodo, reload]);
   const roles = [...new Set((chart?.trabajadores || []).flatMap((t) => t.roles || []))].sort((a, b) => a.localeCompare(b, 'es'));
 
   const refresh = useCallback(() => { setReload((n) => n + 1); onChanged?.(); }, [onChanged]);
@@ -90,6 +91,9 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
       setData((d) => d && ({ ...d, total: Math.max(0, d.total - 1), rows: d.rows.filter((r) => key(r) !== key(rec)) }));
       setSelected((s) => { if (!s.has(key(rec))) return s; const n = new Map(s); n.delete(key(rec)); return n; });
     } else replaceRow({ ...rec, suggestion: undefined });
+    // «Pagos a trabajadores» filtered by project: the table and the chart are
+    // fetched again, so a payment moved to another project leaves both.
+    if (workers && filters.proyecto) setReload((n) => n + 1);
   };
   // If saving emptied the page, show what moves up (or the previous page).
   // Only after local removals, so an empty server page never loops.
@@ -299,7 +303,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
             </div>
           </>
         )}
-        {readOnly ? (
+        {workers ? (
           <>
             <label className="fin-field">
               <span>Trabajador</span>
@@ -330,7 +334,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
         {hasFilters ? <button type="button" className="fin-btn is-ghost fin-self-end" onClick={() => { setDraftQ(''); setF({ ...EMPTY_FILTERS }); }}>Limpiar filtros</button> : null}
       </div>
 
-      {readOnly ? (
+      {workers ? (
         <div className="fin-card">
           <div className="fin-card-head">
             <h2>{`Pagado a cada trabajador por ${PERIODOS.find((x) => x[0] === periodo)[1].toLowerCase()}`}</h2>
@@ -346,7 +350,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
         </div>
       ) : null}
 
-      {!readOnly && stagedList.length ? (
+      {stagedList.length ? (
         <div className="fin-bulkbar is-staged" role="region" aria-label="Asignaciones sin guardar">
           <strong>{stagedList.length === 1 ? '1 asignación sin guardar' : `${stagedList.length} asignaciones sin guardar`}</strong>
           <span className="fin-grow"></span>
@@ -357,17 +361,20 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
         </div>
       ) : null}
 
-      {readOnly && sel.length ? (
+      {workers && sel.length ? (
         <div className="fin-bulkbar" role="region" aria-label="Acciones sobre la selección">
           <strong>{sel.length} {sel.length === 1 ? 'pago seleccionado' : 'pagos seleccionados'}</strong>
           <span className="fin-muted">{eur(sel.reduce((a, r) => a + Number(r.importe), 0))}</span>
           <span className="fin-grow"></span>
-          <button type="button" className="fin-btn is-primary" onClick={() => openPeriod(sel)}><i className="ri-calendar-line"></i>Periodo trabajado</button>
+          <button type="button" className="fin-btn is-primary" onClick={() => setDialog({ kind: 'bulk-assign', project: null, reason: '' })}>
+            <i className="ri-folder-transfer-line"></i>{withProject ? 'Cambiar proyecto' : 'Asignar proyecto'}
+          </button>
+          <button type="button" className="fin-btn" onClick={() => openPeriod(sel)}><i className="ri-calendar-line"></i>Periodo trabajado</button>
           <button type="button" className="fin-btn is-ghost" onClick={() => setSelected(new Map())}>Quitar selección</button>
         </div>
       ) : null}
 
-      {!readOnly && sel.length ? (
+      {!workers && sel.length ? (
         <div className="fin-bulkbar" role="region" aria-label="Acciones sobre la selección">
           <strong>{sel.length} {sel.length === 1 ? 'registro seleccionado' : 'registros seleccionados'}</strong>
           <span className="fin-muted">{eur(sel.reduce((a, r) => a + Number(r.importe), 0))}</span>
@@ -391,17 +398,17 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
               <thead>
                 <tr>
                   <th className="fin-col-check"><input type="checkbox" aria-label="Seleccionar todos los de esta página" checked={allOnPage} onChange={toggleAll} /></th>
-                  {th(readOnly ? 'Fecha de pago' : 'Fecha', 'fecha')}
-                  {readOnly ? <th>Periodo trabajado</th> : null}
+                  {th(workers ? 'Fecha de pago' : 'Fecha', 'fecha')}
+                  {workers ? <th>Periodo trabajado</th> : null}
                   <th>Nº de documento / línea</th>
                   {th(terceroLabel, 'tercero')}
-                  {readOnly ? <th>Rol</th> : null}
+                  {workers ? <th>Rol</th> : null}
                   {th('Concepto', 'concepto')}
                   {showQuantity ? <th className="fin-num">Cantidad</th> : null}
                   {th('Importe', 'importe', 'fin-num')}
                   <th className="fin-col-project">Proyecto</th>
                   {th('Estado', 'estado')}
-                  {readOnly ? null : <th><span className="fin-sr">Acciones</span></th>}
+                  {workers ? null : <th><span className="fin-sr">Acciones</span></th>}
                 </tr>
               </thead>
               <tbody>
@@ -413,7 +420,7 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
                     <tr key={k} className={(selected.has(k) ? 'is-selected' : '') + (st ? ' is-staged' : '')}>
                       <td className="fin-col-check"><input type="checkbox" aria-label="Seleccionar registro" checked={selected.has(k)} onChange={() => toggle(r)} /></td>
                       <td className="fin-nowrap">{fecha(r.fecha)}</td>
-                      {readOnly ? (
+                      {workers ? (
                         <td className="fin-nowrap">
                           <span className="fin-periodo-cell">
                             {r.periodo_trabajo ? periodText(r.periodo_trabajo, r.periodo_inicio) : <span className="fin-muted">{r.type === 'trabajador' ? 'Sin indicar' : '—'}</span>}
@@ -423,13 +430,11 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
                       ) : null}
                       <td className="fin-nowrap">{r.numerodocumento || (r.document_id ? 'Sin número' : <span className="fin-muted">Sin documento</span>)}{r.line_number&&r.line_number<10000?<div className="fin-muted">Línea {r.line_number}{r.product_code?' · Ref. '+r.product_code:''}</div>:null}</td>
                       <td className="fin-ellipsis" title={r.tercero || ''}>{r.tercero || <span className="fin-muted">—</span>}</td>
-                      {readOnly ? <td className="fin-nowrap">{r.rol || <span className="fin-muted">—</span>}</td> : null}
+                      {workers ? <td className="fin-nowrap">{r.rol || <span className="fin-muted">—</span>}</td> : null}
                       <td className="fin-ellipsis is-wide" title={r.concepto || ''}>{r.concepto || <span className="fin-muted">—</span>}</td>
                       {showQuantity ? <td className="fin-num fin-nowrap">{r.quantity != null ? `${num(r.quantity)} ${r.unidad || ''}` : '—'}</td> : null}
                       <td className="fin-num fin-nowrap"><strong>{eur(r.importe)}</strong></td>
-                      {readOnly ? (
-                        <td className="fin-col-project">{split ? `Distribuido en ${r.parts} proyectos` : r.project_label || <span className="fin-muted">Sin proyecto</span>}</td>
-                      ) : <td className="fin-col-project">
+                      <td className="fin-col-project">
                         {split ? (
                           <button type="button" className="fin-link" onClick={() => setOpen(r)}>{`Distribuido en ${r.parts} proyectos`}</button>
                         ) : (
@@ -452,9 +457,9 @@ export default function RecordsView({ mode, summary, initialProject, onChanged, 
                             <i className="ri-lightbulb-line"></i>Sugerido: {r.suggestion.label}
                           </button>
                         ) : null}
-                      </td>}
+                      </td>
                       <td>{busy[k] ? <span className="fin-muted">Guardando…</span> : st ? <Badge bg="#FBF1DE" fg="#7A4E0E">Sin guardar</Badge> : <Badge {...ESTADO[r.estado]}>{ESTADO[r.estado].label}</Badge>}</td>
-                      {readOnly ? null : <td className="fin-nowrap">
+                      {workers ? null : <td className="fin-nowrap">
                         {r.segregable || r.provisional ? <button type="button" className="fin-btn is-ghost is-small" title="Segregar en las líneas de la factura" onClick={() => setDialog({ kind: 'segregar', row: r })}><i className="ri-scissors-cut-line"></i>Segregar</button> : null}
                         {canReturn && hasProject(r) ? <button type="button" className="fin-iconbtn" aria-label="Devolver a Materiales pendiente de asignación" title="Devolver a Materiales pendiente de asignación" disabled={!!busy[k] || st?.saving} onClick={() => openReturn([r])}><i className="ri-arrow-go-back-line"></i></button> : null}
                         <button type="button" className="fin-iconbtn" aria-label="Ver detalle y editar" title="Ver detalle y editar" onClick={() => setOpen(r)}><i className="ri-side-bar-line"></i></button></td>}

@@ -25,6 +25,15 @@ El despliegue normal aplica la migración 010 después de las 005/006 ya despleg
 
 Responde `{ cobrado, sinCobrar, cobros }`; `sinCobrar` es lo registrado como ingreso que aún no se ha cobrado. La página de un proyecto en «Presupuestos y obras» lo usa para «Cobrado» y «Pendiente de cobro» (aprobado con IVA − cobrado) y para las sugerencias del 20/50/100 % de «Generar factura». Los «ingresos» de Rentabilidad siguen siendo el resultado económico (incluyen facturas registradas sin cobrar).
 
+## Gastos operacionales
+
+Pantalla «Gastos operacionales» (solo administrador, después de «Rentabilidad por proyecto»). Lo que gasta la empresa en funcionar, fuera de las obras: esos gastos (materiales, algunos trabajadores…) se imputan a un proyecto propio llamado «Gastos operacionales» o «Gastos operativos». Un proyecto es de gastos operacionales por su nombre (`OPEX_PROJECT_SQL`: «gasto(s) operacional(es)», «gastos operativos», «gastos de operación», sin distinguir mayúsculas); puede haber varios (p. ej. uno por año) y se suman.
+
+- Cuenta lo mismo que «Costes» de esos proyectos en Rentabilidad por proyecto: todo registro imputado, validado o no, por la parte imputada (un registro repartido entre obras cuenta solo su parte); un ingreso imputado ahí (un cobro de cliente) no es un gasto y queda fuera. Un reembolso de proveedor imputado ahí resta.
+- Mes = fecha del registro (`financial_records.occurred_on`). Tipo de gasto según la categoría, como en Rentabilidad: `materials`/`overhead` → Materiales, `labor` → Mano de obra, el resto → Otros costes. Los registros sin fecha no salen en el gráfico; la pantalla los cuenta y los lista aparte.
+- `GET /api/finanzas/gastos-operacionales` `proyecto` (uno de esos proyectos; otro → 400), `tipo` (`materiales|trabajadores|otros`), `desde`, `hasta`, `q`, `mes` (`YYYY-MM` o `sin-fecha`), `orden` (`fecha|importe|tercero|concepto|proyecto`), `dir`, `pagina`, `tam` → `proyectos` (todos los de gastos operacionales con su total, sin el filtro de proyecto), `meses` (`mes, total, materiales, trabajadores, otros, movimientos`, sin el filtro de mes), `totales`, `sinFecha`, `rows` (los registros, con el filtro de mes; `gasto` = parte imputada, `importe` = registro entero), `total`. Sin ningún proyecto de gastos operacionales devuelve `proyectos: []` y la pantalla explica cómo crearlo.
+- En la pantalla, pulsar un mes del gráfico filtra la tabla a ese mes; pulsarlo otra vez (o «Ver todos los meses») vuelve a todos. El detalle de cada fila abre la ficha del registro, donde se puede cambiar su proyecto.
+
 ## Pendiente de conciliación
 
 La pantalla Pendiente de conciliación muestra exclusivamente movimientos bancarios sin enlaces Bridge, con enlaces en revisión o con diferencias entre su total firmado y las imputaciones confirmadas. Cada movimiento aparece una sola vez, con los números de documentos relacionados. Los materiales sin proyecto se gestionan en «Materiales pendiente de asignación» (solo lo que lista Materiales: nunca pagos a trabajadores ni cobros de clientes). Las vistas de registros financieros y documentos se conservan solo como consultas compatibles de API. Solo administrador puede consultar la bandeja global.
@@ -112,6 +121,10 @@ Pantalla solo para administrador. **Una fila por movimiento conciliado**, nunca 
   - **Control:** exige la versión vigente y un motivo, y queda en `finance_events` (`reclassified`) y en Logs de transacciones.
 - Las pestañas Materiales y Pagos a trabajadores siguen la categoría, así que un registro reclasificado cambia de pestaña.
 - La validación contable acepta la categoría reclasificada de un origen importado.
+
+## Proyecto de un pago a trabajador
+
+En la pestaña Pagos a trabajadores, selector de proyecto en la columna Proyecto de cada fila, o «Cambiar proyecto» con varias filas seleccionadas. Es la misma imputación que en Materiales (`PUT /registros/trabajador/:id/proyecto` o `POST /registros/lote` `assign`, `FinanzasService.assign`): si ya tenía proyecto pide el motivo (auditado en `finance_events`), exige la versión vigente (409 si cambió) y `worker_payments.project_id` sigue a la imputación. El trabajador, el importe, la fecha y el periodo trabajado no cambian. Un pago distribuido entre varios proyectos se cambia desde su panel lateral.
 
 ## Periodo trabajado de los pagos a trabajadores (migración 031)
 
