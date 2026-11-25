@@ -7,18 +7,37 @@
 // The code is never typed: a new project takes the next P<año>-<NNN> of the
 // current year in Madrid (one more than the highest code of that form, imported
 // ones included, any case) and keeps it; a code sent in a form is ignored.
+//
+// The CIF del cliente lives in ledens.project_customer_tax_ids (migration 050),
+// one per project, since the client is often only a typed name; «Generar
+// factura» takes it from there.
 import {uuid} from '../finance/service.js';
 import {FinError} from './service.js';
+import {nifProblem,normalizeNif} from '../facturas/nif.js';
 
 const FIELDS=['name','customerId','customerName','salesman','address','municipio','provincia','statusId','startDate','endDate'];
 const COLUMN={code:'project_id',name:'name',customerId:'customer_id',customerName:'customer_name_source',salesman:'salesman',address:'address',
  municipio:'municipio',provincia:'provincia',statusId:'status_id',startDate:'start_date',endDate:'end_date'};
-const LABEL={code:'Código',name:'Nombre',customerId:'Cliente',customerName:'Cliente (texto)',salesman:'Comercial',address:'Dirección',
+const LABEL={code:'Código',cif:'CIF del cliente',name:'Nombre',customerId:'Cliente',customerName:'Cliente (texto)',salesman:'Comercial',address:'Dirección',
  municipio:'Municipio',provincia:'Provincia',statusId:'Estado',startDate:'Inicio',endDate:'Fin'};
-const SELECT=`SELECT p.id,p.project_id code,p.name,p.customer_id,coalesce(c.display_name,p.customer_name_source) cliente,p.customer_name_source,
+const JOINS=`LEFT JOIN ledens.customers c ON c.id=p.customer_id LEFT JOIN ledens.project_customer_tax_ids t ON t.project_id=p.id`;
+// The version covers the CIF too, so a CIF changed meanwhile is reported like any other field.
+const SELECT=`SELECT p.id,p.project_id code,p.name,p.customer_id,coalesce(c.display_name,p.customer_name_source) cliente,p.customer_name_source,t.tax_id cif,
  p.salesman,p.address,p.municipio,p.provincia,p.status_id,ps.name estado,p.start_date::text start_date,p.end_date::text end_date,(p.source_id IS NOT NULL) importado,
- md5(to_jsonb(p)::text) version
- FROM ledens.projects p LEFT JOIN ledens.customers c ON c.id=p.customer_id LEFT JOIN ledens.project_statuses ps ON ps.id=p.status_id`;
+ md5(to_jsonb(p)::text||coalesce(t.tax_id,'')) version
+ FROM ledens.projects p ${JOINS} LEFT JOIN ledens.project_statuses ps ON ps.id=p.status_id`;
+// CIF, NIF or NIE: upper case without spaces, dots, dashes or slashes, checked
+// with the same rule as an invoice's (the invoice takes it from here). Optional
+// in the project; «Generar factura» asks for it when it is missing.
+export function cleanTaxId(x){
+ if(x===null||x===undefined)return null;
+ if(typeof x!=='string')throw new FinError(400,'CIF del cliente no válido');
+ const id=normalizeNif(x);
+ if(!id)return null;
+ const problem=nifProblem(id);
+ if(problem)throw new FinError(400,problem);
+ return id;
+}
 
 export class ProjectsService {
  constructor(pool,user={role:'client',id:null},{now=()=>new Date()}={}){this.pool=pool;this.user=user;this.now=now;}
@@ -29,11 +48,11 @@ export class ProjectsService {
   const size=Math.min(100,Math.max(1,Number(pageSize)||25)),p=Math.max(1,Math.min(4000,Number(page)||1));
   const params=[this.user.role==='admin',this.user.id,'%'+String(q).slice(0,100)+'%'];const where=[
    `($1 OR EXISTS(SELECT 1 FROM ledens.finance_project_permissions fp WHERE fp.user_id=$2 AND fp.project_id=p.id))`,
-   `concat_ws(' ',p.project_id,p.name,p.address,p.municipio,p.provincia,p.salesman,c.display_name,p.customer_name_source) ILIKE $3`];
+   `concat_ws(' ',p.project_id,p.name,p.address,p.municipio,p.provincia,p.salesman,c.display_name,p.customer_name_source,t.tax_id) ILIKE $3`];
   if(estado){if(!uuid(estado))throw new FinError(400,'Estado no válido');params.push(estado);where.push('p.status_id=$'+params.length);}
   const w=' WHERE '+where.join(' AND ');
   const rows=(await this.pool.query(`${SELECT}${w} ORDER BY p.start_date DESC NULLS LAST,p.name,p.id LIMIT ${size} OFFSET ${(p-1)*size}`,params)).rows;
-  const total=(await this.pool.query(`SELECT count(*)::int n FROM ledens.projects p LEFT JOIN ledens.customers c ON c.id=p.customer_id${w}`,params)).rows[0].n;
+  const total=(await this.pool.query(`SELECT count(*)::int n FROM ledens.projects p ${JOINS}${w}`,params)).rows[0].n;
   return {rows,total,page:p,pageSize:size,canEdit:this.canEdit()};
  }
  // One project by its immutable id (used to reload after a conflict, when code
@@ -72,7 +91,13 @@ export class ProjectsService {
    // unchanged client keeps its stored text (imported rows may differ).
    if(!before||before.customer_id!==v.customerId||!v.customerName)v.customerName=cu.display_name;
   }
+  v.cif=cleanTaxId(body?.cif);
   return v;
+ }
+ async saveTaxId(c,id,cif){
+  if(cif===null)return c.query('DELETE FROM ledens.project_customer_tax_ids WHERE project_id=$1',[id]);
+  await c.query(`INSERT INTO ledens.project_customer_tax_ids(project_id,tax_id,updated_by) VALUES($1,$2,$3)
+   ON CONFLICT (project_id) DO UPDATE SET tax_id=excluded.tax_id,updated_by=excluded.updated_by,updated_at=now()`,[id,cif,this.user.id]);
  }
  year(){return new Intl.DateTimeFormat('en',{timeZone:'Europe/Madrid',year:'numeric'}).format(this.now());}
  // Next code of the year, without reserving it (the form shows it as a preview).
@@ -103,8 +128,9 @@ export class ProjectsService {
    v.code=await this.nextCode(c);
    const fields=['code',...FIELDS],cols=fields.map(f=>COLUMN[f]);
    const id=(await c.query(`INSERT INTO ledens.projects(${cols.join(',')}) VALUES(${cols.map((_,i)=>'$'+(i+1)).join(',')}) RETURNING id`,fields.map(f=>v[f]))).rows[0].id;
+   if(v.cif)await this.saveTaxId(c,id,v.cif);
    const p=await this.get(c,id);
-   await this.audit(c,'Proyecto creado',p,`${p.name}${p.code?` (${p.code})`:''}`);
+   await this.audit(c,'Proyecto creado',p,`${p.name}${p.code?` (${p.code})`:''}${p.cif?` · CIF del cliente ${p.cif}`:''}`);
    return p;
   });
  }
@@ -118,11 +144,13 @@ export class ProjectsService {
    if(!before)throw new FinError(404,'Proyecto no encontrado');
    if(body?.version!==before.version)throw new FinError(409,'Otra persona ha cambiado este proyecto. Se han recargado los datos: revísalos y vuelve a guardar.');
    const v=await this.clean(c,body,before);
-   const old={name:before.name,customerId:before.customer_id,customerName:before.customer_name_source,salesman:before.salesman,address:before.address,
+   const old={cif:before.cif,name:before.name,customerId:before.customer_id,customerName:before.customer_name_source,salesman:before.salesman,address:before.address,
     municipio:before.municipio,provincia:before.provincia,statusId:before.status_id,startDate:before.start_date,endDate:before.end_date};
-   const changed=FIELDS.filter(f=>(old[f]??null)!==(v[f]??null));
+   const changed=['cif',...FIELDS].filter(f=>(old[f]??null)!==(v[f]??null));
    if(!changed.length)return {...before,changed:false};
-   await c.query(`UPDATE ledens.projects SET ${changed.map((f,i)=>COLUMN[f]+'=$'+(i+2)).join(',')} WHERE id=$1`,[id,...changed.map(f=>v[f])]);
+   const columns=changed.filter(f=>f!=='cif');
+   if(columns.length)await c.query(`UPDATE ledens.projects SET ${columns.map((f,i)=>COLUMN[f]+'=$'+(i+2)).join(',')} WHERE id=$1`,[id,...columns.map(f=>v[f])]);
+   if(changed.includes('cif'))await this.saveTaxId(c,id,v.cif);
    const after=await this.get(c,id);
    await this.audit(c,'Proyecto editado',after,changed.map(f=>`${LABEL[f]}: ${f==='customerId'?before.cliente??'—':f==='statusId'?before.estado??'—':old[f]??'—'} → ${f==='customerId'?after.cliente??'—':f==='statusId'?after.estado??'—':v[f]??'—'}`).join(' · '));
    return {...after,changed:true};

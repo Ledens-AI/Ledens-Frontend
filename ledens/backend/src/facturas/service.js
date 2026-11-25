@@ -8,7 +8,13 @@ import { facturaPdf } from './pdf.js';
 // (migration 049). Admins only: an invoice is a legal document with a
 // correlative number, never changed or deleted once issued.
 //
-// Client data (name, CIF/NIF, address, phone, email) comes, field by field,
+// The client's CIF/NIF is the project's own, from Gestión financiera →
+// Proyectos (ledens.project_customer_tax_ids, migration 050), and nothing else:
+// the dialog shows it read-only and, when the project has none (or a wrong
+// one), sends the admin to the project's form to enter it; issue() refuses an
+// invoice without it, whatever the request carries.
+//
+// The other client data (name, address, phone, email) comes, field by field,
 // from the first source that has it: what the last invoice of the project used
 // (proyecto_facturacion), the client's record in the accounting
 // (ledens.customers, optional columns), an issued invoice already in the
@@ -98,8 +104,9 @@ export class FacturasService {
     if (!isUuid(projectId)) fail(404, 'Proyecto no encontrado');
     const p = (await db.query(`
       SELECT p.id, p.project_id code, p.name, p.address, to_jsonb(p)->>'municipio' municipio, to_jsonb(p)->>'provincia' provincia,
-             to_jsonb(p)->>'customer_name_source' customer_name, to_jsonb(c) customer
+             to_jsonb(p)->>'customer_name_source' customer_name, to_jsonb(c) customer, t.tax_id cif
         FROM ledens.projects p LEFT JOIN ledens.customers c ON c.id::text=to_jsonb(p)->>'customer_id'
+        LEFT JOIN ledens.project_customer_tax_ids t ON t.project_id=p.id
        WHERE p.id=$1`, [projectId])).rows[0];
     if (!p) fail(404, 'Proyecto no encontrado');
     return p;
@@ -183,12 +190,13 @@ export class FacturasService {
     const fromCustomer = (field) => CUSTOMER_COLUMNS[field].map((k) => clean(customer[k])).find(Boolean) || null;
     const candidates = {
       nombre: [[saved?.nombre, 'guardado'], [customer.display_name, 'proyecto'], [p.customer_name, 'proyecto'], [doc?.tercero, 'contabilidad'], [user?.name, 'plataforma']],
-      nif: [[saved?.nif, 'guardado'], [fromCustomer('nif'), 'ficha'], [doc?.nif, 'contabilidad']],
+      nif: [[p.cif, 'cifProyecto']],
       direccion: [[saved?.direccion, 'guardado'], [fromCustomer('direccion'), 'ficha'], [work, 'obra']],
       telefono: [[saved?.telefono, 'guardado'], [fromCustomer('telefono'), 'ficha']],
       email: [[saved?.email, 'guardado'], [fromCustomer('email'), 'ficha'], [user?.email, 'plataforma']],
     };
     const ORIGIN = {
+      cifProyecto: 'CIF del cliente del proyecto (Gestión financiera → Proyectos)',
       guardado: 'Usado en la última factura de este proyecto',
       proyecto: 'Cliente del proyecto',
       ficha: 'Ficha del cliente en la contabilidad',
@@ -203,12 +211,19 @@ export class FacturasService {
       if (hit) origen[field] = ORIGIN[hit[1]];
     }
     const faltan = Object.keys(FIELDS).filter((f) => FIELDS[f].required && !cliente[f]);
-    // A CIF/NIF that is there but would be refused also has to be filled in again.
-    if (cliente.nif && nifProblem(cliente.nif) && !faltan.includes('nif')) faltan.push('nif');
+    // A CIF/NIF that is there but would be refused also has to be entered again (in the project).
+    const cifProblema = cliente.nif ? nifProblem(cliente.nif) : null;
+    if (cifProblema && !faltan.includes('nif')) faltan.push('nif');
+    // Without one, what other sources say, only as a hint for the project's form.
+    const sugerido = cliente.nif && !cifProblema ? null
+      : [[saved?.nif, 'guardado'], [fromCustomer('nif'), 'ficha'], [doc?.nif, 'contabilidad']]
+        .map(([v, o]) => [normalizeNif(v), o]).find(([v]) => v && v !== normalizeNif(cliente.nif) && !nifProblem(v));
     const fecha = this.today();
     return {
       project: { id: p.id, code: p.code, name: p.name },
       cliente, origen, faltan,
+      // The project's CIF/NIF: entered only in Proyectos (null problema = fine).
+      cif: { falta: !cliente.nif, problema: cifProblema, sugerido: sugerido ? { nif: sugerido[0], origen: ORIGIN[sugerido[1]] } : null },
       fecha, numero: await this.nextNumber(this.pool, fecha), ivaPct,
       concepto: work ? `Reforma en ${work}` : `Reforma: ${clean(p.name) || 'obra'}`,
       emisor: EMISOR,
@@ -223,10 +238,8 @@ export class FacturasService {
     this.access();
     const c = body.cliente || {};
     const cliente = {};
-    for (const [f, rule] of Object.entries(FIELDS)) cliente[f] = text(c[f], rule.label, rule);
-    const nifError = nifProblem(cliente.nif);
-    if (nifError) fail(400, nifError);
-    cliente.nif = normalizeNif(cliente.nif);
+    // The CIF/NIF is the project's (below), never the one in the request.
+    for (const [f, rule] of Object.entries(FIELDS)) if (f !== 'nif') cliente[f] = text(c[f], rule.label, rule);
     if (cliente.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cliente.email)) fail(400, 'El email del cliente no es válido');
     const concepto = text(body.concepto, 'el concepto', { max: 500, required: true });
     const total = amount(body.total, 'Importe', { max: MAX_TOTAL });
@@ -244,6 +257,10 @@ export class FacturasService {
 
     const id = await this.tx(async (db) => {
       const p = await this.project(db, projectId);
+      if (!p.cif) fail(400, 'Falta el CIF del cliente: añádelo en el proyecto (Gestión financiera → Proyectos) antes de facturar');
+      const nifError = nifProblem(p.cif);
+      if (nifError) fail(400, `El CIF del cliente del proyecto no es válido (${nifError}): corrígelo en Gestión financiera → Proyectos`);
+      cliente.nif = normalizeNif(p.cif);
       // One invoice at a time: two never take the same number.
       await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 7))', ['facturas-numero']);
       const fecha = this.today();

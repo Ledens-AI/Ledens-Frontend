@@ -8,10 +8,12 @@ import { euros, facturaPdf } from '../src/facturas/pdf.js';
 import { EMISOR } from '../src/facturas/emisor.js';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createPresupuestosRouter } from '../src/routes/presupuestos.js';
+import { ProjectsService } from '../src/finanzas/projects.js';
 // Facturas a clientes of a project (migration 049) on PGlite: users/audit_log,
 // the presupuestos migrations and the ledens.* tables the invoices read
 // (projects, customers with an optional NIF column, documents and the
-// allocations that tie an accounting invoice to its project).
+// allocations that tie an accounting invoice to its project). The client's
+// CIF/NIF is the project's, entered in Gestión financiera → Proyectos (050).
 let db, pool, admin, jefe, cliente, velez, marbella, vacio;
 const NOW = () => new Date('2026-11-25T10:00:00Z');
 const as = (u, now = NOW) => new FacturasService(pool, u, { now });
@@ -39,7 +41,7 @@ before(async () => {
       project_id uuid NOT NULL REFERENCES ledens.projects(id), allocated_amount numeric NOT NULL);
     CREATE TABLE ledens.finance_project_permissions (user_id uuid NOT NULL, project_id uuid NOT NULL, PRIMARY KEY (user_id, project_id));`);
   for (const m of ['020_presupuestos_cliente.sql', '021_presupuestos_precision.sql', '023_invitaciones_cliente.sql', '025_presupuestos_dimpartida.sql',
-    '033_presupuestos_proyecto.sql', '048_partidas_eliminadas.sql', '049_facturas.sql']) await db.exec(await migration(m));
+    '033_presupuestos_proyecto.sql', '048_partidas_eliminadas.sql', '049_facturas.sql', '050_cif_cliente_proyecto.sql']) await db.exec(await migration(m));
   [admin, jefe, cliente] = (await db.query(`INSERT INTO users(email,name,role) VALUES
     ('admin@fa.test','Admin','admin'),('jefe@fa.test','Jefe','jefe'),('ana@fa.test','Ana María Pérez Rosa','client') RETURNING id,email,name,role`)).rows;
   const [monteAzul, ana] = (await db.query(`INSERT INTO ledens.customers(display_name, nif) VALUES ('Comunidad de propietarios Monte Azul', NULL), ('Ana María Pérez Rosa', NULL) RETURNING id`)).rows.map((r) => r.id);
@@ -56,6 +58,12 @@ before(async () => {
   await db.query('INSERT INTO ledens.project_financial_allocations(record_id,project_id,allocated_amount) VALUES ($1,$2,1200)', [rec, marbella]);
 });
 after(() => db?.close());
+// The CIF entered in the project's form, as Gestión financiera → Proyectos saves it.
+const setCif = async (projectId, cif) => {
+  const p = await new ProjectsService(pool, admin).one(projectId);
+  return new ProjectsService(pool, admin).update(projectId, { name: p.name, customerId: p.customer_id, customerName: p.customer_name_source, cif,
+    salesman: p.salesman, address: p.address, municipio: p.municipio, provincia: p.provincia, statusId: p.status_id, startDate: p.start_date, endDate: p.end_date, version: p.version });
+};
 
 test('the CIF/NIF is checked with its control character; amounts print in Spanish', () => {
   for (const ok of ['25333033M', '25333033-m', 'B19753805', 'X1234567L', 'H29123452', 'ESB19753805', 'FR40303265045']) assert.equal(nifProblem(ok), null, ok);
@@ -84,6 +92,7 @@ test('the dialog starts from the project: name and address known, the CIF/NIF mi
   assert.match(d.origen.direccion, /obra/);
   assert.equal(d.cliente.nif, '');
   assert.deepEqual(d.faltan, ['nif']);
+  assert.deepEqual(d.cif, { falta: true, problema: null, sugerido: null });
   assert.equal(d.fecha, '2026-11-25');
   // The series continues from the accounting's own sales invoices (4T2026-347), never a supplier's (4T2026-900).
   assert.equal(d.numero, '4T2026-348');
@@ -95,35 +104,56 @@ test('the dialog starts from the project: name and address known, the CIF/NIF mi
   assert.deepEqual((await as(admin).prepare(vacio)).faltan, ['nombre', 'nif', 'direccion']);
 });
 
-test('the CIF/NIF comes from an invoice of the project already in the accounting', async () => {
+test('the CIF/NIF is only the project\'s: an accounting invoice only suggests what to enter in Proyectos', async () => {
   const d = await as(admin).prepare(marbella);
-  assert.equal(d.cliente.nif, '25333033M');
-  assert.equal(d.origen.nif, 'Factura 4T2026-347 de la contabilidad');
+  assert.equal(d.cliente.nif, '', 'never taken from the accounting');
+  assert.deepEqual(d.faltan, ['nif']);
+  assert.deepEqual(d.cif, { falta: true, problema: null, sugerido: { nif: '25333033M', origen: 'Factura 4T2026-347 de la contabilidad' } });
   assert.equal(d.cliente.direccion, 'Urbanización parque sol bloque 4 primero A, Antequera 29200', 'the municipio is not repeated');
-  assert.deepEqual(d.faltan, []);
+  // Entered in the project's form, the dialog takes it from there.
+  await setCif(marbella, '25333033-m');
+  const e = await as(admin).prepare(marbella);
+  assert.equal(e.cliente.nif, '25333033M');
+  assert.equal(e.origen.nif, 'CIF del cliente del proyecto (Gestión financiera → Proyectos)');
+  assert.deepEqual(e.faltan, []);
+  assert.deepEqual(e.cif, { falta: false, problema: null, sugerido: null });
+});
+
+test('a wrong CIF stored for the project is not used: the dialog asks to correct it in Proyectos and issuing is refused', async () => {
+  // Written straight into the table (a value from before the check), not through the form.
+  await db.query("INSERT INTO ledens.project_customer_tax_ids(project_id,tax_id) VALUES ($1,'H29123453')", [vacio]);
+  const d = await as(admin).prepare(vacio);
+  assert.ok(d.faltan.includes('nif'));
+  assert.equal(d.cif.falta, false);
+  assert.match(d.cif.problema, /control/);
+  await assert.rejects(as(admin).issue(vacio, { cliente: datos(), concepto: 'x', total: '10', ivaPct: '21' }), { status: 400, message: /Proyectos/ });
+  await db.query('DELETE FROM ledens.project_customer_tax_ids WHERE project_id=$1', [vacio]);
 });
 
 test('issuing: base and VAT from the total, client data kept, numbers correlative and unique, audited', async () => {
   const s = as(admin);
-  await assert.rejects(s.issue(velez, { cliente: datos({ nif: '' }), concepto: 'Reforma', total: '1200', ivaPct: '21' }), { status: 400, message: 'Indica el CIF/NIF' });
-  await assert.rejects(s.issue(velez, { cliente: datos({ nif: 'H29123453' }), concepto: 'Reforma', total: '1200', ivaPct: '21' }), { status: 400, message: /control/ });
+  // Without a CIF in the project, no invoice: not even with one in the request.
+  await assert.rejects(s.issue(velez, { cliente: datos(), concepto: 'Reforma', total: '1200', ivaPct: '21' }), { status: 400, message: /Falta el CIF del cliente.*Proyectos/ });
+  assert.equal((await db.query('SELECT count(*)::int n FROM facturas')).rows[0].n, 0);
+  await setCif(velez, 'H29123452');
   await assert.rejects(s.issue(velez, { cliente: datos(), concepto: 'Reforma', total: '0', ivaPct: '21' }), { status: 400 });
   await assert.rejects(s.issue(velez, { cliente: datos(), concepto: 'Reforma', total: '12,345', ivaPct: '21' }), { status: 400 });
   await assert.rejects(s.issue(velez, { cliente: datos({ email: 'no-es-un-email' }), concepto: 'Reforma', total: '10', ivaPct: '21' }), { status: 400 });
   await assert.rejects(s.issue(velez, { cliente: datos(), concepto: '', total: '10', ivaPct: '21' }), { status: 400 });
 
-  const f = await s.issue(velez, { cliente: datos({ nif: 'h-29123452 ' }), concepto: 'Reforma en C/ Concepción 12', total: '1.200,00', ivaPct: '21', porcentaje: 50 });
+  // Another CIF in the request is ignored: the invoice carries the project's.
+  const f = await s.issue(velez, { cliente: datos({ nif: 'B19753805' }), concepto: 'Reforma en C/ Concepción 12', total: '1.200,00', ivaPct: '21', porcentaje: 50 });
   assert.equal(f.numero, '4T2026-348');
   assert.equal(f.fecha, '2026-11-25');
   assert.deepEqual([f.base, f.iva, f.total, f.ivaPct, f.porcentaje], ['991.74', '208.26', '1200.00', '21', '50']);
   const row = (await db.query('SELECT cliente_nif, emisor FROM facturas WHERE id=$1', [f.id])).rows[0];
-  assert.equal(row.cliente_nif, 'H29123452', 'stored normalized');
+  assert.equal(row.cliente_nif, 'H29123452', 'the project\'s CIF');
   assert.equal(row.emisor.cif, 'B19753805');
 
   // The next dialog offers what this invoice used, and the next number.
   const d = await s.prepare(velez);
   assert.equal(d.cliente.nif, 'H29123452');
-  assert.equal(d.origen.nif, 'Usado en la última factura de este proyecto');
+  assert.equal(d.origen.nif, 'CIF del cliente del proyecto (Gestión financiera → Proyectos)');
   assert.deepEqual(d.faltan, []);
   assert.equal(d.numero, '4T2026-349');
   assert.equal(d.facturas.length, 1);

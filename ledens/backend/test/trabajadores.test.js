@@ -7,7 +7,7 @@ import {FinanzasService} from '../src/finanzas/service.js';
 import {createFinanzasRouter} from '../src/routes/finanzas.js';
 // Trabajadores on PGlite: the shared finance fixture plus the production columns
 // of ledens.employees. Synthetic rows only.
-let db,pool,admin,jefe,client,oficial,peon,legacy;
+let db,pool,admin,jefe,client,oficial,peon,legacy,first;
 const as=(u)=>new WorkersService(pool,u);
 before(async()=>{
  const {PGlite}=await import('@electric-sql/pglite');db=new PGlite();pool={query:(...a)=>db.query(...a),connect:async()=>({query:(...a)=>db.query(...a),release(){}})};
@@ -26,34 +26,46 @@ after(()=>db?.close());
 
 test('an admin registers a worker with the real fields; the change is audited',async()=>{
  const w=await as(admin).create({name:'Trabajador Nuevo',code:' EMP-010 ',positionId:peon,tipo:'Fijo',dailyPay:'85,50',hours:'8'});
- assert.equal(w.name,'Trabajador Nuevo');assert.equal(w.code,'EMP-010');assert.equal(w.puesto,'Peón');assert.equal(w.tipo,'Fijo');
+ first=w.id;
+ assert.equal(w.name,'Trabajador Nuevo');assert.equal(w.code,'EMP-002','the next code after the imported EMP-001, never the one sent');assert.equal(w.puesto,'Peón');assert.equal(w.tipo,'Fijo');
  assert.equal(Number(w.daily_pay),85.5);assert.equal(Number(w.hours),8);assert.equal(w.activo,true);assert.equal(w.importado,false);assert.equal(w.pagos,0);
  const a=(await db.query("SELECT actor_label,detail FROM audit_log WHERE action='Trabajador dado de alta' ORDER BY id DESC LIMIT 1")).rows[0];
- assert.equal(a.actor_label,'Admin Test');assert.equal(a.detail,'Trabajador Nuevo · Peón (EMP-010)');
+ assert.equal(a.actor_label,'Admin Test');assert.equal(a.detail,'Trabajador Nuevo · Peón (EMP-002)');
 });
 
-test('validation: name required, unique code (any case), sane pay and hours, real position',async()=>{
+test('validation: name required, sane pay and hours, real position',async()=>{
  await assert.rejects(as(admin).create({name:' '}),{status:400,message:/nombre/});
- await assert.rejects(as(admin).create({name:'X',code:'emp-001'}),{status:409,message:/Importado Uno/});
  await assert.rejects(as(admin).create({name:'X',dailyPay:'-10'}),{status:400,message:/Pago diario/});
  await assert.rejects(as(admin).create({name:'X',dailyPay:'10.123'}),{status:400});
  await assert.rejects(as(admin).create({name:'X',hours:'25'}),{status:400,message:/Horas/});
  await assert.rejects(as(admin).create({name:'X',positionId:'00000000-0000-0000-0000-000000000000'}),{status:400,message:/Puesto/});
+ assert.equal((await as(admin).options()).nextCode,'EMP-003','a refused alta spends no number');
+});
+
+test('codes go up by one after the highest EMP code (imported, any case, with or without dash)',async()=>{
+ await db.query(`INSERT INTO ledens.employees(name,empleadoid,activo,source_id,raw_id) VALUES
+  ('Importado Quince',' emp015 ',true,'legacy-e15',gen_random_uuid()),('Otro formato','EMP-0099X',true,'legacy-ex',gen_random_uuid()),
+  ('Otro prefijo','E-100',true,'legacy-e100',gen_random_uuid())`);
+ assert.equal((await as(admin).options()).nextCode,'EMP-016','preview of the next code');
+ const a=await as(admin).create({name:'Siguiente'}),b=await as(admin).create({name:'Y otro'});
+ assert.deepEqual([a.code,b.code],['EMP-016','EMP-017']);
+ assert.equal((await as(jefe).options()).nextCode,undefined,'only who can create sees it');
 });
 
 test('editing checks the version and audits only real changes (85.5 equals 85.50)',async()=>{
- const w=(await as(admin).list({q:'EMP-010'})).rows[0];
+ const w=await as(admin).one(first);
  const same=await as(admin).update(w.id,{...form(w),dailyPay:'85.50',version:w.version});assert.equal(same.changed,false);
  const u=await as(admin).update(w.id,{...form(w),positionId:oficial,dailyPay:'95',version:w.version});
  assert.equal(u.changed,true);assert.equal(u.puesto,'Oficial 1ª');assert.equal(Number(u.daily_pay),95);
  const a=(await db.query("SELECT detail FROM audit_log WHERE action='Trabajador editado' ORDER BY id DESC LIMIT 1")).rows[0].detail;
  assert.equal(a,'Puesto: Peón → Oficial 1ª · Pago diario: 85.50 → 95');
  await assert.rejects(as(admin).update(w.id,{...form(w),name:'Pisado',version:w.version}),{status:409});
- await assert.rejects(as(admin).update(u.id,{...form(u),code:'EMP-001',version:u.version}),{status:409});
+ const kept=await as(admin).update(u.id,{...form(u),code:'EMP-001',version:u.version});
+ assert.equal(kept.changed,false,'a code sent in the form is ignored');assert.equal(kept.code,'EMP-002');
 });
 
 test('baja keeps the worker and its payments, hides it from new payments, and can be undone',async()=>{
- let w=(await as(admin).list({q:'EMP-010'})).rows[0];
+ let w=await as(admin).one(first);
  await db.query("INSERT INTO ledens.worker_payments(amount,occurred_on,employee_id,empleado) VALUES(-60,'2026-09-01',$1,$2)",[w.id,w.name]);
  w=await as(admin).setActive(w.id,{activo:false,version:w.version,reason:'Fin de contrato'});
  assert.equal(w.activo,false);assert.equal(w.pagos,1,'payments stay with the worker');
@@ -99,16 +111,16 @@ test('HTTP: writes need the allowed origin and an admin',async()=>{
   const post=(headers)=>fetch(base,{method:'POST',headers:{'content-type':'application/json',...headers},body:JSON.stringify({name:'Desde HTTP',code:'HTTP-W1'})});
   assert.equal((await post({origin:'https://evil.test'})).status,403);
   assert.equal((await post({origin:'https://ledens.test','x-role':'client'})).status,403);
-  const ok=await post({origin:'https://ledens.test'});assert.equal(ok.status,201);const {worker}=await ok.json();
+  const ok=await post({origin:'https://ledens.test'});assert.equal(ok.status,201);const {worker}=await ok.json();assert.match(worker.code,/^EMP-\d{3}$/);
   const off=await fetch(`${base}/${worker.id}/estado`,{method:'PUT',headers:{'content-type':'application/json',origin:'https://ledens.test'},body:JSON.stringify({activo:false,version:worker.version})});
   assert.equal(off.status,200);assert.equal((await off.json()).worker.activo,false);
  }finally{server.close();}
 });
 
 test('a worker reloads by id, with the pay hidden from jefes',async()=>{
- const w=await as(admin).create({name:'Recarga Trabajador',code:'RW-1',dailyPay:'70'});
- await as(admin).update(w.id,{...form(w),code:'RW-2',version:w.version});
- assert.equal((await as(admin).one(w.id)).code,'RW-2');assert.equal(Number((await as(admin).one(w.id)).daily_pay),70);
+ const w=await as(admin).create({name:'Recarga Trabajador',dailyPay:'70'});
+ await as(admin).update(w.id,{...form(w),name:'Recarga Trabajador 2',version:w.version});
+ assert.equal((await as(admin).one(w.id)).name,'Recarga Trabajador 2');assert.equal((await as(admin).one(w.id)).code,w.code);assert.equal(Number((await as(admin).one(w.id)).daily_pay),70);
  assert.equal((await as(jefe).one(w.id)).daily_pay,null);
  await assert.rejects(as(client).one(w.id),{status:403});
 });
