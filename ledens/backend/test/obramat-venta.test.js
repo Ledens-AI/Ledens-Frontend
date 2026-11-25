@@ -38,8 +38,8 @@ test('a line with a discount is read: its unit price is its total ÷ quantity ro
  const {data}=parseObramatSale(pages({rows,summary:'21.00 115.00 24.16 139,16'}));
  assert.deepEqual([data.gross,data.net,data.vat],['139.16','115.00','24.16']);
  assert.deepEqual(data.lines.map(l=>[l.line_number,l.quantity,l.gross_amount]),[[1,10,'10.00'],[2,2,'50.50'],[3,12,'78.66']]);
- assert.equal(data.lines[2].evidence.unit_discount,'0.28');
- assert.equal(data.lines[0].evidence.unit_discount,undefined);
+ // Its evidence has the same fields as any line: what was read before keeps its fingerprint.
+ assert.deepEqual(Object.keys(data.lines[2].evidence),Object.keys(data.lines[0].evidence));
  // Beyond that rounding, or on a line without discount, it is still a misread.
  assert.equal(parseObramatSale(pages({rows:rows.replace('6,56 78,66','6,56 78,50'),summary:'21.00 114.87 24.13 139,00'})).reason,'sale_item_quantity_amount_mismatch');
  assert.equal(parseObramatSale(pages({rows:ROWS.replace('1,00 10,00','1,00 10,01'),summary:'21.00 50.01 10.50 60,51'})).reason,'sale_item_quantity_amount_mismatch');

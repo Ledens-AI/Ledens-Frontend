@@ -16,13 +16,16 @@ function allocateNet(rows,net,rate){
 // with a discount («Descu. Unid.» not 0): its amount is the discounted line total and
 // its unit price that total ÷ quantity rounded to the cent (12 × 6,56 printed for
 // 78,66, which is 12 × 6,555), so there they may differ by that rounding alone.
+// Nothing is added to the evidence for it: a delivery invoice's fingerprint hashes
+// its lines' evidence, and one read before (a discounted line that matched exactly)
+// must keep it, or a copy of it would be refused as purchase_identity_conflict.
 function itemRows(text){
  const rows=[];const lines=text.split('\n').map(s=>s.trim());
  const row=/^(\d{1,3})\s+(.+?)\s+(\d+(?:[.,]\d+)?)\s+(?:(UNID\.)\s+)?(-?[\d.,]+)\s+(-?[\d.,]+)\s+(-?[\d.,]+)\s+(\d+[.,]\d{2})\s+(-?[\d.,]+)\s+(-?[\d.,]+)$/;
  for(let i=0;i<lines.length;i++){const m=lines[i].match(row);if(!m)continue;const sku=lines[i+1];check(/^\d{8}$/.test(sku),'item_reference_missing');const gross=money(m[10]),quantity=m[3].replace(',','.');check(gross!==null&&gross!==0n,'invalid_item_amount');
   const q=Number(quantity),unitGross=money(m[9]),discount=money(m[6]);check(Number.isInteger(q)&&q>0&&unitGross!==null,'item_quantity_amount_mismatch');
   const off=unitGross*BigInt(q)-gross;check(off===0n||(discount!==null&&discount!==0n&&2n*(off<0n?-off:off)<=BigInt(q)),'item_quantity_amount_mismatch');
-  rows.push({line_number:Number(m[1]),description:m[2],product_code:sku,quantity:q,gross_amount:decimal(gross),rate:money(m[8]),evidence:{origin:'native-pdf-obramat-v1',product_code:sku,unit_price:m[5].replace(',','.'),unit_gross:decimal(unitGross),...(discount?{unit_discount:decimal(discount)}:{}),unit:'UNID.',line_kind:/PALET RETORNABLE/i.test(m[2])?'returnable_deposit':/PREPARACION MERCANCIA/i.test(m[2])?'preparation_service':'product'}});
+  rows.push({line_number:Number(m[1]),description:m[2],product_code:sku,quantity:q,gross_amount:decimal(gross),rate:money(m[8]),evidence:{origin:'native-pdf-obramat-v1',product_code:sku,unit_price:m[5].replace(',','.'),unit_gross:decimal(unitGross),unit:'UNID.',line_kind:/PALET RETORNABLE/i.test(m[2])?'returnable_deposit':/PREPARACION MERCANCIA/i.test(m[2])?'preparation_service':'product'}});
  }
  return rows;
 }
