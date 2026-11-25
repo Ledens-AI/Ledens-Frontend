@@ -9,10 +9,11 @@
 // ones included, any case) and keeps it; a code sent in a form is ignored.
 //
 // The CIF del cliente lives in ledens.project_customer_tax_ids (migration 050),
-// one per project, since the client is often only a typed name.
+// one per project, since the client is often only a typed name; «Generar
+// factura» takes it from there.
 import {uuid} from '../finance/service.js';
 import {FinError} from './service.js';
-import {validSpanishTaxId} from '../ingestion/ocr.js';
+import {nifProblem,normalizeNif} from '../facturas/nif.js';
 
 const FIELDS=['name','customerId','customerName','salesman','address','municipio','provincia','statusId','startDate','endDate'];
 const COLUMN={code:'project_id',name:'name',customerId:'customer_id',customerName:'customer_name_source',salesman:'salesman',address:'address',
@@ -25,18 +26,17 @@ const SELECT=`SELECT p.id,p.project_id code,p.name,p.customer_id,coalesce(c.disp
  p.salesman,p.address,p.municipio,p.provincia,p.status_id,ps.name estado,p.start_date::text start_date,p.end_date::text end_date,(p.source_id IS NOT NULL) importado,
  md5(to_jsonb(p)::text||coalesce(t.tax_id,'')) version
  FROM ledens.projects p ${JOINS} LEFT JOIN ledens.project_statuses ps ON ps.id=p.status_id`;
-// CIF, NIF or NIE: upper case without spaces, dots, dashes or slashes, and without
-// the «ES» of a NIF-IVA. A Spanish one must pass its control character; anything
-// else must be a foreign NIF-IVA with its country prefix (two letters, not ES).
-const SPANISH=/^(\d{8}[A-Z]|[XYZ]\d{7}[A-Z]|[A-HJNPQRSUVW]\d{7}[0-9A-J])$/;
+// CIF, NIF or NIE: upper case without spaces, dots, dashes or slashes, checked
+// with the same rule as an invoice's (the invoice takes it from here). Optional
+// in the project; «Generar factura» asks for it when it is missing.
 export function cleanTaxId(x){
  if(x===null||x===undefined)return null;
  if(typeof x!=='string')throw new FinError(400,'CIF del cliente no válido');
- const id=x.toUpperCase().replace(/[\s.\-/]/g,'').replace(/^ES(?=[A-Z0-9]{9}$)/,'');
+ const id=normalizeNif(x);
  if(!id)return null;
- if(SPANISH.test(id)){if(validSpanishTaxId(id))return id;throw new FinError(400,`El CIF/NIF ${id} no es válido: revisa la letra o el dígito de control`);}
- if(/^(?!ES)[A-Z]{2}[A-Z0-9]{2,18}$/.test(id))return id;
- throw new FinError(400,'CIF del cliente no válido: escribe un CIF, NIF o NIE español o un NIF-IVA extranjero con el prefijo de su país');
+ const problem=nifProblem(id);
+ if(problem)throw new FinError(400,problem);
+ return id;
 }
 
 export class ProjectsService {

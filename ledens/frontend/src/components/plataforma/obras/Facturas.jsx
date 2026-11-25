@@ -2,12 +2,15 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api } from './api.js';
 import { eur, fecha } from '../finanzas/format.js';
 import { Dialog, ErrorBox } from '../finanzas/ui.jsx';
+import { ProyectoDialog } from '../finanzas/Proyectos.jsx';
 import { CLIENT_FIELDS, breakdown, clientProblems, missingLabels, parseCents, suggestions, toEuros } from './facturas.js';
 
 /* Facturas a clientes of a project («Presupuestos y obras» → a project; admins).
  * «Generar factura» first makes sure the client's billing data is there (name,
- * CIF/NIF, address — taken from the project, its accounting or the last
- * invoice; asked for when missing) and then offers 20 %, 50 % or 100 % of what
+ * address — taken from the project, its accounting or the last invoice; asked
+ * for when missing — and the CIF/NIF, which is only the project's own: shown
+ * read-only and, when missing or wrong, entered in the project's window of
+ * Gestión financiera → Proyectos, opened from here) and then offers 20 %, 50 % or 100 % of what
  * is still to be collected, or another amount. The backend numbers, stores and
  * prints it (ledens/backend/src/facturas/); the PDF downloads right away and
  * stays in the project's list. Spanish only, like the rest of the team screens. */
@@ -29,6 +32,7 @@ export function FacturaDialog({ projectId, pendiente, onClose, onDone }) {
   const [numero, setNumero] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [cifEdit, setCifEdit] = useState(false);
 
   const load = () => {
     setLoadError('');
@@ -42,6 +46,8 @@ export function FacturaDialog({ projectId, pendiente, onClose, onDone }) {
     }, (e) => setLoadError(e.message));
   };
   useEffect(load, [projectId]);
+  // After the project's window: only the CIF changes, what was typed here stays.
+  const reloadCif = () => api.facturacion(projectId).then((x) => { setD(x); setCli((c) => ({ ...c, nif: x.cliente.nif })); }, (e) => setLoadError(e.message));
 
   const options = useMemo(() => suggestions(pendiente), [pendiente]);
   const problems = cli ? clientProblems(cli) : {};
@@ -72,21 +78,47 @@ export function FacturaDialog({ projectId, pendiente, onClose, onDone }) {
   if (loadError) return <Dialog title="Generar factura" onClose={onClose}><ErrorBox message={loadError} onRetry={load} /></Dialog>;
   if (!d || !cli) return <Dialog title="Generar factura" onClose={onClose}><p className="fin-muted">Cargando los datos del cliente…</p></Dialog>;
 
+  if (cifEdit) {
+    return <ProyectoDialog projectId={projectId} requireCif cifHint={d.cif?.sugerido || null}
+      onClose={() => setCifEdit(false)} onSaved={() => { setCifEdit(false); reloadCif(); }} />;
+  }
+
   if (step === 'cliente') {
-    const missing = d.faltan.filter((k) => !String(cli[k] ?? '').trim() || problems[k]);
+    // The CIF/NIF has its own notice: it is entered in the project, not here.
+    const missing = d.faltan.filter((k) => k !== 'nif' && (!String(cli[k] ?? '').trim() || problems[k]));
+    const cifBad = !String(cli.nif ?? '').trim() || !!problems.nif;
     return (
       <Dialog title="Generar factura · Datos del cliente" wide onClose={onClose} actions={<>
         <button type="button" className="fin-btn" onClick={onClose}>Cancelar</button>
         <button type="button" className="fin-btn is-primary" disabled={!clientOk}
           onClick={() => setStep('importe')}>Continuar<i className="ri-arrow-right-line"></i></button></>}>
-        {d.faltan.length ? (
+        {cifBad ? (
+          <p className="fin-warn"><i className="ri-error-warning-line" aria-hidden="true"></i>
+            <span>{String(cli.nif ?? '').trim()
+              ? `El CIF del cliente de este proyecto (${cli.nif}) no es válido: ${problems.nif}. Corrígelo en el proyecto para poder facturar.`
+              : 'Este proyecto no tiene el CIF del cliente. Añádelo en el proyecto (Gestión financiera → Proyectos) para poder facturar: se usará en todas sus facturas.'}
+              {d.cif?.sugerido ? ` ${d.cif.sugerido.origen} usa ${d.cif.sugerido.nif}.` : ''}</span></p>
+        ) : null}
+        {d.faltan.some((k) => k !== 'nif') ? (
           <p className="fin-warn"><i className="ri-error-warning-line" aria-hidden="true"></i>
             <span>{missing.length
               ? `Faltan datos del cliente para poder facturar: ${missingLabels(missing).join(', ')}. Complétalos; se guardan para las próximas facturas de este proyecto.`
               : 'Datos completos. Se guardan para las próximas facturas de este proyecto.'}</span></p>
-        ) : <p className="fin-muted">Revisa los datos que aparecerán en la factura. Se guardan para las próximas facturas de este proyecto.</p>}
+        ) : cifBad ? null : <p className="fin-muted">Revisa los datos que aparecerán en la factura. Se guardan para las próximas facturas de este proyecto.</p>}
         <div className="fin-grid-form obr-fact-client">
           {CLIENT_FIELDS.map((f) => {
+            if (f.key === 'nif') {
+              return (
+                <div key="nif" className="fin-field">
+                  <span>{`${f.label} *`}</span>
+                  <input value={cli.nif ?? ''} readOnly disabled placeholder="Sin CIF en el proyecto" aria-invalid={cifBad ? 'true' : undefined}
+                    className={cifBad ? 'obr-fact-missing' : undefined} />
+                  {!cifBad && d.origen.nif ? <span className="fin-muted fin-small obr-fact-hint">{d.origen.nif}</span> : null}
+                  <button type="button" className={'fin-btn is-small' + (cifBad ? ' is-primary' : '')} onClick={() => setCifEdit(true)}>
+                    <i className="ri-edit-line"></i>{!String(cli.nif ?? '').trim() ? 'Añadir el CIF en Proyectos' : cifBad ? 'Corregir el CIF en Proyectos' : 'Cambiar en Proyectos'}</button>
+                </div>
+              );
+            }
             // An error shows once the field was left or changed, or at once for a stored value that is refused (a wrong CIF/NIF).
             const show = touched[f.key] || cli[f.key] !== d.cliente[f.key] || (d.faltan.includes(f.key) && String(cli[f.key] ?? '').trim());
             const err = show ? problems[f.key] : null;
