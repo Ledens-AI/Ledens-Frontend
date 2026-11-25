@@ -20,7 +20,7 @@ before(async()=>{
   ALTER TABLE ledens.projects ADD COLUMN source_id text UNIQUE,ADD COLUMN raw_id uuid UNIQUE,ADD COLUMN customer_name_source text,ADD COLUMN salesman text,
    ADD COLUMN start_date date,ADD COLUMN municipio text,ADD COLUMN provincia text,ADD COLUMN customer_id uuid REFERENCES ledens.customers(id),
    ADD COLUMN status_id uuid REFERENCES ledens.project_statuses(id),ADD COLUMN end_date date,ADD CHECK ((source_id IS NULL)=(raw_id IS NULL));`);
- await db.exec(await fs.readFile(new URL('../src/db/migrations/049_cif_cliente_proyecto.sql',import.meta.url),'utf8'));
+ await db.exec(await fs.readFile(new URL('../src/db/migrations/050_cif_cliente_proyecto.sql',import.meta.url),'utf8'));
  [admin,jefe]=(await db.query("INSERT INTO users(email,role,name) VALUES('admin@pr.test','admin','Admin Test'),('jefe@pr.test','jefe','Jefe Test') RETURNING id,role,name")).rows;
  client={id:jefe.id,role:'client'};
  [st1,st2]=(await db.query("INSERT INTO ledens.project_statuses(id,code,name) VALUES(gen_random_uuid(),'EN_CURSO','En curso'),(gen_random_uuid(),'CERRADO','Cerrado') RETURNING id")).rows.map(r=>r.id);

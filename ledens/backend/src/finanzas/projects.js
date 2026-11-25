@@ -8,7 +8,7 @@
 // current year in Madrid (one more than the highest code of that form, imported
 // ones included, any case) and keeps it; a code sent in a form is ignored.
 //
-// The CIF del cliente lives in ledens.project_customer_tax_ids (migration 049),
+// The CIF del cliente lives in ledens.project_customer_tax_ids (migration 050),
 // one per project, since the client is often only a typed name.
 import {uuid} from '../finance/service.js';
 import {FinError} from './service.js';

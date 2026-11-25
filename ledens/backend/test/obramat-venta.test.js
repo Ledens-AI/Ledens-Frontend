@@ -32,6 +32,19 @@ test('a plain Obramat sale is read from its text: every product, its net and VAT
  assert.equal(parseObramatPages(pages({rows:ROWS,summary:'21.00 50.00 10.50 60,50'})),null);
 });
 
+test('a line with a discount is read: its unit price is its total ÷ quantity rounded to the cent',()=>{
+ // 12 × 6,90 with a 5 % discount is 78,66; the invoice prints 6,56 (6,555) as the unit price.
+ const rows=`${ROWS}\n3 ADHESIVO PRUEBA 290ML 12 UNID. 5,70 0,28 5,42 21.00 6,56 78,66\n12345680`;
+ const {data}=parseObramatSale(pages({rows,summary:'21.00 115.00 24.16 139,16'}));
+ assert.deepEqual([data.gross,data.net,data.vat],['139.16','115.00','24.16']);
+ assert.deepEqual(data.lines.map(l=>[l.line_number,l.quantity,l.gross_amount]),[[1,10,'10.00'],[2,2,'50.50'],[3,12,'78.66']]);
+ // Its evidence has the same fields as any line: what was read before keeps its fingerprint.
+ assert.deepEqual(Object.keys(data.lines[2].evidence),Object.keys(data.lines[0].evidence));
+ // Beyond that rounding, or on a line without discount, it is still a misread.
+ assert.equal(parseObramatSale(pages({rows:rows.replace('6,56 78,66','6,56 78,50'),summary:'21.00 114.87 24.13 139,00'})).reason,'sale_item_quantity_amount_mismatch');
+ assert.equal(parseObramatSale(pages({rows:ROWS.replace('1,00 10,00','1,00 10,01'),summary:'21.00 50.01 10.50 60,51'})).reason,'sale_item_quantity_amount_mismatch');
+});
+
 test('a sale that does not add up, of another buyer or with a page missing is not read',()=>{
  assert.equal(parseObramatSale(pages({rows:ROWS,summary:'21.00 50.00 10.50 61,50'})).reason,'sale_tax_summary_missing');
  assert.equal(parseObramatSale(pages({rows:ROWS,summary:'21.00 50.00 10.50 60,50',buyer:'B00000000'})).reason,'sale_buyer_not_verified');
