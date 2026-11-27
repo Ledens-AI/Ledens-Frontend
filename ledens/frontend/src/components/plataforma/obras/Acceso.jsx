@@ -64,6 +64,8 @@ export function AccesoObra({ obra, titled, readOnly, toast, onOpenClientes, onCh
 
   const principal = data.miembros.find((m) => m.rol === 'principal');
   const readers = data.miembros.filter((m) => m.rol === 'lectura');
+  // Who may become the principal: not someone invited who has not accepted yet (backend: 409 invitacion_pendiente).
+  const candidates = readers.filter((m) => m.canBePrincipal);
   const activeLinks = data.enlaces.filter((e) => e.status === 'activo');
   const ended = data.enlaces.length - activeLinks.length;
   const canEdit = !readOnly && data.can.roles;
@@ -71,7 +73,7 @@ export function AccesoObra({ obra, titled, readOnly, toast, onOpenClientes, onCh
     setActionError('');
     if (rol === m.rol) return;
     // Either way someone becomes the principal: choose (or confirm) who.
-    setDialog({ kind: 'principal', candidate: rol === 'principal' ? m.userId : readers.length === 1 ? readers[0].userId : null });
+    setDialog({ kind: 'principal', candidate: rol === 'principal' ? m.userId : candidates.length === 1 ? candidates[0].userId : null });
   };
   const startJefe = () => {
     setActionError('');
@@ -132,7 +134,7 @@ export function AccesoObra({ obra, titled, readOnly, toast, onOpenClientes, onCh
                 {st ? <span title={st.title}><Badge bg={st.bg} fg={st.fg} icon={st.icon}>{st.label}</Badge></span> : null}
                 {canEdit ? (
                   <select aria-label={`Rol de ${label(m)}`} value={m.rol} disabled={busy} onChange={(e) => onRole(m, e.target.value)}>
-                    {Object.entries(ROLES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                    {Object.entries(ROLES).map(([k, l]) => <option key={k} value={k} disabled={k === 'principal' && !m.canBePrincipal}>{k === 'principal' && !m.canBePrincipal ? `${l} (al aceptar la invitación)` : l}</option>)}
                   </select>
                 ) : <Badge bg={m.rol === 'principal' ? '#DEF3F0' : '#EDEDEA'} fg={m.rol === 'principal' ? '#2F6B63' : '#3A3A38'}>{ROLES[m.rol]}</Badge>}
                 {canEdit && m.rol === 'lectura' ? (
@@ -185,7 +187,7 @@ export function AccesoObra({ obra, titled, readOnly, toast, onOpenClientes, onCh
       <p className="fin-muted fin-small">Los administradores de Ledens ven todas las obras.</p>
 
       {dialog?.kind === 'principal' ? (
-        <PrincipalDialog principal={principal} readers={readers} candidate={dialog.candidate} busy={busy} error={actionError} onClose={() => setDialog(null)}
+        <PrincipalDialog principal={principal} readers={candidates} candidate={dialog.candidate} busy={busy} error={actionError} onClose={() => setDialog(null)}
           onConfirm={(userId) => act(() => invitaciones.setRole(obra.id, userId, 'principal'), 'Cliente principal cambiado', { project: true })} />
       ) : null}
       {dialog?.kind === 'remove' ? (
@@ -225,7 +227,7 @@ function PrincipalDialog({ principal, readers, candidate, busy, error, onClose, 
           ) : null}
           {chosen ? <p><strong>{label(chosen)}</strong>{' pasará a ser el cliente principal'}{principal ? <>{' y '}<strong>{label(principal)}</strong>{' pasará a solo lectura.'}</> : '.'}</p> : null}
         </>
-      ) : <p>{`Para cambiar el cliente principal, antes tiene que tener acceso a la obra la persona que lo será: compártela o invítala por email. ${principal ? `${label(principal)} seguirá siendo el principal hasta entonces.` : ''}`}</p>}
+      ) : <p>{`Para cambiar el cliente principal, antes tiene que tener acceso a la obra la persona que lo será (si la invitaste por email, cuando acepte la invitación): compártela o invítala. ${principal ? `${label(principal)} seguirá siendo el principal hasta entonces.` : ''}`}</p>}
       {error ? <span className="fin-error-inline" role="alert">{error}</span> : null}
     </Dialog>
   );

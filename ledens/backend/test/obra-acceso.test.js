@@ -94,6 +94,13 @@ test('a read-only client invited and not accepted yet shows what the invitation 
   const m = (await json(await call(`/obras/${obraId}/acceso`, jefe))).body.miembros.find((x) => x.userId === nuevo.id);
   assert.deepEqual([m.name, m.email, m.estado, m.via], ['Escrito a mano', 'NUEVO@acc.test', 'invitacion', 'invitacion'], 'never «Nuevo Test»: inviting must not tell who has an account');
   assert.ok(!JSON.stringify((await json(await call(`/obras/${obraId}/acceso`, jefe))).body).includes('Nuevo Test'));
+  assert.equal(m.canBePrincipal, false);
+  // Promoting them would show the account's own data as the principal: not until they accept.
+  const promote = await json(await call(`/obras/${obraId}/acceso/${nuevo.id}`, jefe, { method: 'PUT', body: { rol: 'principal' } }));
+  assert.deepEqual([promote.status, promote.body.code], [409, 'invitacion_pendiente']);
+  const after = (await json(await call(`/obras/${obraId}/acceso`, jefe))).body;
+  assert.equal(after.miembros.find((x) => x.rol === 'principal').userId, titular.id, 'nothing changed');
+  assert.ok(!JSON.stringify(after).includes('Nuevo Test'));
 });
 
 test('making a read-only client the principal: the previous one becomes read-only, the ampliaciones follow', async () => {

@@ -72,13 +72,14 @@ export class AccesoService extends InvitacionesService {
       obra: { id: p.id, ref: p.ref, title: p.title },
       jefe: jefe ? { userId: jefe.id, name: jefe.name || jefe.email, email: jefe.email } : null,
       miembros: [
-        ...(titular ? [{ ...person(titular), rol: 'principal', via: null, since: null }] : []),
+        ...(titular ? [{ ...person(titular), rol: 'principal', via: null, since: null, canBePrincipal: true }] : []),
         ...readers.map((r) => {
           // Invited and not accepted yet: what the invitation says, as the «Clientes» tab shows it.
           const masked = r.invitacion_id && !r.accepted_at;
           return {
             ...(masked ? { userId: r.id, name: r.inv_name || null, email: r.inv_email, estado: 'invitacion' } : person(r)),
             rol: 'lectura', via: r.enlace_id ? 'enlace' : r.invitacion_id ? 'invitacion' : 'equipo', since: r.since, addedBy: r.added_by || null,
+            canBePrincipal: !masked,
           };
         }),
       ],
@@ -98,13 +99,18 @@ export class AccesoService extends InvitacionesService {
     await tx(this.pool, async (db) => {
       const p = await this.obra(db, obraId, { lock: true });
       const isPrincipal = p.client_id === userId;
-      const member = isPrincipal || (await db.query('SELECT 1 FROM obra_clientes WHERE presupuesto_id=$1 AND user_id=$2 FOR UPDATE', [p.id, userId])).rows.length > 0;
-      if (!member) fail(404, 'Esa persona no tiene acceso a esta obra');
+      const row = isPrincipal ? null : (await db.query(`SELECT oc.invitacion_id, i.accepted_at FROM obra_clientes oc LEFT JOIN invitaciones i ON i.id=oc.invitacion_id
+                                                          WHERE oc.presupuesto_id=$1 AND oc.user_id=$2 FOR UPDATE OF oc`, [p.id, userId])).rows[0];
+      if (!isPrincipal && !row) fail(404, 'Esa persona no tiene acceso a esta obra');
       if (body.rol === 'lectura') {
         if (isPrincipal) fail(409, 'La obra necesita un cliente principal: haz antes principal a otra persona y esta pasará a solo lectura');
         return;
       }
       if (isPrincipal) return;
+      // Invited and not accepted yet: the list shows what the invitation says, and the
+      // principal is shown with the account's own data, so promoting them would tell
+      // whoever invites who is behind the email. They become principal once they accept.
+      if (row.invitacion_id && !row.accepted_at) fail(409, 'Esta persona aún no ha aceptado la invitación: podrá ser el cliente principal cuando la acepte', 'invitacion_pendiente');
       const account = async (id) => (await db.query('SELECT id, name, email, role FROM users WHERE id=$1', [id])).rows[0];
       const next = await account(userId), prev = await account(p.client_id);
       if (next?.role !== 'client') fail(400, 'El cliente principal debe ser una cuenta de cliente');
