@@ -345,6 +345,8 @@ export class PresupuestosService {
     const approved = versions.some((v) => v.status === 'approved');
     const ampliaciones = p.parent_id ? [] : (await this.list()).filter((r) => r.parent?.id === p.id);
     const obra = !p.parent_id && approved ? await this.obra(p) : null;
+    // A client (principal or read-only) also sees what has been paid for the obra.
+    if (obra && this.isClient) obra.cobrado = await this.clientCollected(p);
     const projectId = !team ? null : p.parent_id ? (await this.pool.query('SELECT project_id FROM presupuestos WHERE id=$1', [p.parent_id])).rows[0]?.project_id : p.project_id;
     const project = projectId ? (await this.projectsById([projectId])).get(projectId) : null;
     return {
@@ -404,6 +406,28 @@ export class PresupuestosService {
       executionPct: pct(tot.executed, tot.base), consumedPct: pct(tot.consumed, tot.base),
       chapters: groups.map((g) => ({ ...g, base: money(g.base), executedAmount: money(g.executed), consumed: money(g.consumed), executionPct: pct(g.executed, g.base), consumedPct: pct(g.consumed, g.base), executed: undefined })),
     };
+  }
+
+  // «Cobrado» for the client of an obra: the same figure as the project page
+  // (FinanzasService.projectCollections: money really received), read on the
+  // team's side because a client never reaches Gestión financiera. Only when
+  // that figure is this obra's alone: no presupuesto of another client and no
+  // other approved obra in the project. null otherwise, or when the
+  // accounting tables are not there. Pendiente de cobro, costes and resultado
+  // stay on the team's project page.
+  async clientCollected(p) {
+    if (!p.project_id) return null;
+    const { shared } = (await this.pool.query(`SELECT EXISTS (SELECT 1 FROM presupuestos x WHERE x.project_id=$1 AND x.parent_id IS NULL AND x.id<>$2
+        AND (x.client_id<>$3 OR EXISTS (SELECT 1 FROM presupuesto_versiones v WHERE v.presupuesto_id=x.id AND v.status='approved'))) shared`,
+    [p.project_id, p.id, p.client_id])).rows[0];
+    if (shared) return null;
+    try {
+      const { FinanzasService } = await import('../finanzas/service.js');
+      return (await new FinanzasService(this.pool, { role: 'admin', id: null, name: 'Área de cliente' }).projectCollections(p.project_id)).cobrado;
+    } catch (e) {
+      if (e?.code !== '42P01' && e?.status !== 404) console.warn('[presupuestos] cobrado de la obra no disponible:', e?.message);
+      return null;
+    }
   }
 
   // New-budget form: clients to send to and jefes to assign. A jefe creates
@@ -695,10 +719,10 @@ export class PresupuestosService {
 
   // Turns an obra (root presupuesto) created on its own into an ampliación of
   // another obra of the same client, so one obra gathers every presupuesto of
-  // the work: its ampliaciones, photos and documents, invited clients and open
-  // invitations move with it; the target keeps its own jefe and dates (taking
-  // this one's when it has none) and its project (taking this one's when it
-  // has none). Nothing else changes: versions, approvals, lines and their
+  // the work: its ampliaciones, photos and documents, invited clients, open
+  // invitations and links to share it move with it; the target keeps its own
+  // jefe and dates (taking this one's when it has none) and its project
+  // (taking this one's when it has none). Nothing else changes: versions, approvals, lines and their
   // production stay as they are, and approved lines now add to the target.
   async joinObra(id, body = {}) {
     if (!isUuid(body.obraId)) fail(400, 'Selecciona la obra a la que se une');
@@ -726,10 +750,12 @@ export class PresupuestosService {
       await db.query('UPDATE presupuestos SET parent_id=$2, jefe_id=$3, project_id=NULL, start_date=NULL, end_date=NULL, updated_at=now() WHERE id=$1', [p.id, target.id, target.jefe_id]);
       // What hangs from the obra (root presupuesto) moves to the target.
       await db.query('UPDATE obra_archivos SET presupuesto_id=$2 WHERE presupuesto_id=$1', [p.id, target.id]);
-      await db.query(`INSERT INTO obra_clientes (presupuesto_id, user_id, invitacion_id, added_by, created_at)
-                      SELECT $2, user_id, invitacion_id, added_by, created_at FROM obra_clientes WHERE presupuesto_id=$1
+      await db.query(`INSERT INTO obra_clientes (presupuesto_id, user_id, invitacion_id, enlace_id, added_by, created_at)
+                      SELECT $2, user_id, invitacion_id, enlace_id, added_by, created_at FROM obra_clientes WHERE presupuesto_id=$1
                       ON CONFLICT (presupuesto_id, user_id) DO NOTHING`, [p.id, target.id]);
       await db.query('DELETE FROM obra_clientes WHERE presupuesto_id=$1', [p.id]);
+      // Links to share it (migration 051) now give access to the target.
+      await db.query('UPDATE obra_enlaces SET presupuesto_id=$2 WHERE presupuesto_id=$1', [p.id, target.id]);
       // Open invitations move unless the person already has one open on the target (then it ends here).
       const OPEN = 'accepted_at IS NULL AND revoked_at IS NULL';
       await db.query(`UPDATE invitaciones i SET presupuesto_id=$2 WHERE i.presupuesto_id=$1

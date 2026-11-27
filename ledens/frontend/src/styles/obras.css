@@ -323,3 +323,27 @@
   .obr-linecards .obr-pct-edit { display: flex; align-items: center; gap: 12px; width: 100%; }
   .obr-linecards .obr-pct-edit input[type=range] { flex: 1 1 auto; min-width: 0; height: 32px; }
 }
+
+/* «Usuarios con acceso» of an obra and «Compartir» (Acceso.jsx). */
+.obr-access { display: flex; flex-direction: column; gap: 14px; }
+.obr-access > p { margin: 0; }
+.obr-access-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.obr-access-head h2 { margin: 0 0 4px; }
+.obr-access-head p { margin: 0; max-width: 720px; }
+.obr-access-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.obr-access-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 0; border-top: 1px solid #EDEDEA; }
+.obr-access-row:first-child { border-top: 0; }
+.obr-access-row.is-pending .obr-access-who strong { color: #6B6B68; }
+.obr-access-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.obr-access-role { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.obr-access-role select { font: inherit; font-size: 14px; border: 1px solid #D9D9D9; border-radius: 8px; padding: 7px 9px; min-height: 36px; background: #fff; width: 210px; max-width: 100%; }
+.obr-access-links { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid #EDEDEA; padding-top: 12px; }
+.obr-access-links p { margin: 0; }
+.obr-share-url { display: flex; gap: 8px; flex-wrap: wrap; }
+.obr-share-url input { flex: 1 1 240px; min-width: 0; font: inherit; font-size: 14px; border: 1px solid #D9D9D9; border-radius: 8px; padding: 9px 10px; background: #F8F9FC; }
+@media (max-width: 600px) {
+  .obr-access-row { flex-direction: column; align-items: stretch; }
+  .obr-access-role { justify-content: flex-start; }
+  .obr-access-role select, .obr-share-url input { font-size: 16px; }
+  .obr-access-role select { flex: 1 1 auto; width: auto; }
+}

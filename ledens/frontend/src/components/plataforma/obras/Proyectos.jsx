@@ -8,6 +8,7 @@ import { useObrasI18n } from './i18n.js';
 import Gantt from './Gantt.jsx';
 import CuentasPorPagarProyecto from './CuentasPorPagarProyecto.jsx';
 import { FacturaDialog, FacturasProyecto } from './Facturas.jsx';
+import UsuariosProyecto from './Acceso.jsx';
 
 /* «Presupuestos y obras» by project: every presupuesto belongs to a project of
  * Gestión financiera (ledens.projects) through its obra. The team (admin and
@@ -211,8 +212,9 @@ export function ObraCard({ p, onClick, team, cta }) {
 
 const pctOf = (part, whole) => (whole > 0 ? Math.round(part / whole * 1000) / 10 : null);
 
-/* One project: its data, what its presupuestos add up to, its obras, its
- * presupuestos and, for whoever may see Gestión financiera of this project,
+/* One project: its data, what its presupuestos add up to, its obras, who has
+ * access to each of them, its presupuestos and, for whoever may see Gestión
+ * financiera of this project,
  * ingresos, costes and the latest movements assigned to it; for admins, the
  * cuentas por pagar of the workers of its cuadrillas. */
 export function Proyecto({ projectId, readOnly, canInvoice, toast, onNew, onImport, onAgente, onBack, onOpen }) {
@@ -324,6 +326,9 @@ export function Proyecto({ projectId, readOnly, canInvoice, toast, onNew, onImpo
           <div className="obr-cards">{obras.map((p) => <ObraCard key={p.id} p={p} team onClick={() => onOpen(p, 'obra')} />)}</div>
         </>
       ) : null}
+
+      {/* Who sees each obra of the project (jefe, cliente principal, read-only clients) and «Compartir». */}
+      <UsuariosProyecto rows={rows} readOnly={readOnly} toast={toast} onChanged={load} onOpenClientes={(p) => onOpen(p, 'clientes')} />
 
       <h3 className="obr-h3">{`Presupuestos · ${rows.length}`}</h3>
       {rows.length ? <PresupuestosTable rows={rows} onOpen={onOpen} showProject={false} />

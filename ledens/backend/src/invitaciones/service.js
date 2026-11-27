@@ -41,7 +41,7 @@ export function status(i) {
   return 'pendiente';
 }
 
-async function tx(pool, fn) {
+export async function tx(pool, fn) {
   const c = await pool.connect();
   try {
     await c.query('BEGIN');

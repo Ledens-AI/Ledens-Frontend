@@ -22,9 +22,12 @@ const STATE_MAX_AGE_MS = 10 * 60 * 1000;
 // handoff code on MOBILE_OAUTH_REDIRECT_URI instead of a session cookie.
 const MOBILE_COOKIE = 'oauth_mobile';
 // The web version of Ledens Mobile (/movil/, Safari): `?destino=movil` brings
-// the person back there instead of to the landing page. A fixed value, never
-// a URL from the request, so there is no open redirect.
+// the person back there instead of to the landing page; `?destino=obra`, to
+// the page of a link to share an obra (/obra-compartida), which then joins it.
+// Fixed values, never a URL from the request, so there is no open redirect.
 const DEST_COOKIE = 'oauth_destino';
+const DESTINATIONS = { movil: { ok: '/movil/', error: '/movil/acceso' }, obra: { ok: '/obra-compartida', error: '/obra-compartida' } };
+const destinationOf = (v) => (Object.hasOwn(DESTINATIONS, v) ? v : null);
 const AUTH_PATH = '/api/auth';
 const mobileRedirectUri = () => process.env.MOBILE_OAUTH_REDIRECT_URI || 'ledens://auth/callback';
 const flowCookie = (req) => ({ ...sessionCookieOptions(req), path: AUTH_PATH, maxAge: STATE_MAX_AGE_MS });
@@ -35,8 +38,11 @@ const flowCookie = (req) => ({ ...sessionCookieOptions(req), path: AUTH_PATH, ma
 function setFlow(req, res, { mobileChallenge = null } = {}) {
   if (mobileChallenge) res.cookie(MOBILE_COOKIE, mobileChallenge, flowCookie(req));
   else res.clearCookie(MOBILE_COOKIE, { path: AUTH_PATH });
-  if (!mobileChallenge && req.query.destino === 'movil') res.cookie(DEST_COOKIE, 'movil', flowCookie(req));
+  const dest = mobileChallenge ? null : destinationOf(req.query.destino);
+  if (dest) res.cookie(DEST_COOKIE, dest, flowCookie(req));
   else res.clearCookie(DEST_COOKIE, { path: AUTH_PATH });
+  // A login started from a shared obra's page is not an invitation's, whatever an abandoned attempt left.
+  if (dest === 'obra') res.clearCookie(INVITE_COOKIE, { path: AUTH_PATH });
 }
 
 const toApp = (params) => `${mobileRedirectUri()}?${new URLSearchParams(params)}`;
@@ -58,7 +64,7 @@ async function signIn(req, res, provider, profile) {
     console.info('[auth] mobile oauth handoff', { user: user.id, provider });
     return res.redirect(toApp({ code }));
   }
-  const toMovil = req.cookies?.[DEST_COOKIE] === 'movil';
+  const dest = destinationOf(req.cookies?.[DEST_COOKIE]);
   res.clearCookie(DEST_COOKIE, { path: AUTH_PATH });
   const invite = req.cookies?.[INVITE_COOKIE];
   let user;
@@ -77,19 +83,21 @@ async function signIn(req, res, provider, profile) {
   }
   const { token } = await createSession(user.id, { userAgent: req.get('user-agent'), ip: req.ip });
   res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
-  res.redirect(invite ? '/plataforma' : toMovil ? '/movil/' : '/');
+  res.redirect(invite ? '/plataforma' : dest ? DESTINATIONS[dest].ok : '/');
 }
 
 // A failed or cancelled provider login goes back to the page it started from:
-// the invitation page while a link is in progress, /auth otherwise.
+// /movil/ or a shared obra's page (destino), the invitation page while a link
+// is in progress, /auth otherwise.
 function failTo(req, res, code) {
   if (req.cookies?.[MOBILE_COOKIE]) {
     res.clearCookie(MOBILE_COOKIE, { path: AUTH_PATH });
     return res.redirect(toApp({ error: code }));
   }
-  if (req.cookies?.[DEST_COOKIE] === 'movil') {
+  const dest = destinationOf(req.cookies?.[DEST_COOKIE]);
+  if (dest) {
     res.clearCookie(DEST_COOKIE, { path: AUTH_PATH });
-    return res.redirect(`/movil/acceso?error=${code}`);
+    return res.redirect(`${DESTINATIONS[dest].error}?error=${code}`);
   }
   if (!req.cookies?.[INVITE_COOKIE]) return res.redirect(`/auth?error=${code}`);
   res.clearCookie(INVITE_COOKIE, { path: '/api/auth' });
@@ -167,7 +175,7 @@ function onCallbackHost(req, res, provider, redirectUri, path = 'inicio') {
   // Only the known, validated parameters travel to the other host.
   const keep = new URLSearchParams();
   if (path === 'mobile' && isChallenge(req.query.code_challenge)) keep.set('code_challenge', req.query.code_challenge);
-  if (path === 'inicio' && req.query.destino === 'movil') keep.set('destino', 'movil');
+  if (path === 'inicio' && destinationOf(req.query.destino)) keep.set('destino', req.query.destino);
   const qs = keep.toString();
   res.redirect(`${target.origin}/api/auth/${provider}/${path}${qs ? `?${qs}` : ''}`);
   return true;

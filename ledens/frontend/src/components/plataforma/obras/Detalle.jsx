@@ -496,7 +496,7 @@ const pctOf = (i) => Math.round(Number(i.executed) / Number(i.quantity) * 10000)
 const pctText = (n) => String(n).replace('.', ',');
 
 function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
-  const { t, eur, num, fecha, fechaHora, tr } = useObrasI18n();
+  const { t, eur, num, fecha, fechaHora, tr, pct } = useObrasI18n();
   const o = doc.obra;
   const items = o.chapters.flatMap((c) => c.items);
   const initial = () => Object.fromEntries(items.map((i) => [i.id, pctText(pctOf(i))]));
@@ -536,10 +536,14 @@ function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
   ) : null;
   return (
     <div className="fin-stack">
+      {/* What a client sees of the obra: total aprobado, ejecución, consumido and, when the
+          backend can tell it for this obra alone, cobrado (only to clients: the team has it on
+          the project page, with pendiente de cobro, costes and resultado). */}
       <div className="fin-kpis">
-        <div className="fin-kpi"><span className="fin-kpi-label"><i className="ri-hammer-line"></i>{t.execution}</span><Progress value={o.executionPct} color="#5567AE" /><span className="fin-kpi-hint">{t.executed(eur(o.executedAmount))}</span></div>
-        <div className="fin-kpi"><span className="fin-kpi-label"><i className="ri-pie-chart-line"></i>{t.consumed}</span><Progress value={o.consumedPct} color={o.consumedPct > 100 ? '#D14A4A' : '#55A89D'} /><span className="fin-kpi-hint">{t.ofExVat(eur(o.consumed), eur(o.base))}</span></div>
         <Kpi label={t.current} value={eur(o.total)} icon="ri-money-euro-circle-line" hint={t.currentHint(eur(o.base), eur(o.vat), doc.ampliaciones.some((a) => a.phase === 'aprobado'))} />
+        <div className="fin-kpi"><span className="fin-kpi-label"><i className="ri-hammer-line"></i>{t.executionObra}</span><Progress value={o.executionPct} color="#5567AE" /><span className="fin-kpi-hint">{t.executed(eur(o.executedAmount))}</span></div>
+        <div className="fin-kpi"><span className="fin-kpi-label"><i className="ri-pie-chart-line"></i>{t.consumed}</span><Progress value={o.consumedPct} color={o.consumedPct > 100 ? '#D14A4A' : '#55A89D'} /><span className="fin-kpi-hint">{t.ofExVat(eur(o.consumed), eur(o.base))}</span></div>
+        {o.cobrado != null ? <Kpi label={t.paid} value={eur(o.cobrado)} icon="ri-hand-coin-line" hint={t.paidHint(Number(o.total) > 0 ? pct(Math.round(Number(o.cobrado) / Number(o.total) * 1000) / 10) : null)} /> : null}
         <Kpi label={t.dates} value={fecha(o.startDate)} icon="ri-calendar-line" hint={o.endDate ? t.plannedEnd(fecha(o.endDate)) : t.noEnd} />
       </div>
       <p className="fin-muted fin-small">{t.obraExplain}</p>
