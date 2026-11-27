@@ -7,8 +7,8 @@ import { apiErrorText } from '../../../i18n/apiErrors.js';
 // X-Ledens-Lang: in English a presupuesto also comes with its chapters, lines
 // and notes translated (`nameEn`, `descriptionEn`, `notesEn`; see `tr` in i18n.js).
 const MSG = {
-  es: { net: 'Error de conexión. Comprueba tu red e inténtalo de nuevo.', 401: 'Tu sesión ha caducado. Vuelve a iniciar sesión.', 403: 'No tienes permiso para esta acción.', other: 'No se pudo completar la operación.' },
-  en: { net: 'Connection error. Check your network and try again.', 401: 'Your session has expired. Please log in again.', 403: 'You don’t have permission for this action.', other: 'The operation could not be completed.' },
+  es: { net: 'Error de conexión. Comprueba tu red e inténtalo de nuevo.', 401: 'Tu sesión ha caducado. Vuelve a iniciar sesión.', 403: 'No tienes permiso para esta acción.', other: 'No se pudo completar la operación.', download: 'No se pudo descargar el PDF.' },
+  en: { net: 'Connection error. Check your network and try again.', 401: 'Your session has expired. Please log in again.', 403: 'You don’t have permission for this action.', other: 'The operation could not be completed.', download: 'The PDF could not be downloaded.' },
 };
 const lang = () => (document.documentElement.lang === 'en' ? 'en' : 'es');
 
@@ -26,6 +26,32 @@ async function request(method, url, body) {
     throw new ApiError(r.status, data.error ? apiErrorText(data.error, lang(), fallback) : fallback, data);
   }
   return data;
+}
+
+// A PDF from the API saved as a file (blob + <a download>): the session
+// cookie, «Ver como» and the language go with it like with any other call.
+async function download(url, fallbackName) {
+  const m = MSG[lang()];
+  let r;
+  try {
+    r = await fetch(url, { headers: { 'X-Ledens-Lang': lang(), ...viewAsHeaders() } });
+  } catch {
+    throw new ApiError(0, m.net);
+  }
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    const fallback = m[r.status] || m.download;
+    throw new ApiError(r.status, data.error ? apiErrorText(data.error, lang(), fallback) : fallback, data);
+  }
+  const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || fallbackName;
+  const href = URL.createObjectURL(await r.blob());
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 30000);
 }
 
 const base = '/api/presupuestos';
@@ -115,27 +141,12 @@ export const api = {
   // issuing one { cliente, concepto, total, ivaPct, numero, porcentaje }, and its PDF.
   facturacion: (projectId) => request('GET', `${base}/proyectos/${projectId}/facturacion`),
   emitirFactura: (projectId, body) => request('POST', `${base}/proyectos/${projectId}/facturas`, body),
-  descargarFactura: async (projectId, facturaId) => {
-    let r;
-    try {
-      r = await fetch(`${base}/proyectos/${projectId}/facturas/${facturaId}/pdf`, { headers: viewAsHeaders() });
-    } catch {
-      throw new ApiError(0, MSG[lang()].net);
-    }
-    if (!r.ok) {
-      const data = await r.json().catch(() => ({}));
-      throw new ApiError(r.status, data.error || 'No se pudo descargar la factura.', data);
-    }
-    const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || 'factura.pdf';
-    const url = URL.createObjectURL(await r.blob());
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
-  },
+  descargarFactura: (projectId, facturaId) => download(`${base}/proyectos/${projectId}/facturas/${facturaId}/pdf`, 'factura.pdf'),
+  // PDFs for the client to print or forward (backend: presupuestos/informes.js), in the screen's language:
+  // the presupuesto (an approved obra: original + approved ampliaciones; else the version on screen) …
+  pdfPresupuesto: (id, version) => download(`${base}/${id}/pdf/presupuesto${version ? `?version=${encodeURIComponent(version)}` : ''}`, 'presupuesto.pdf'),
+  // … and the progress of every partida of the obra.
+  pdfAvance: (id) => download(`${base}/${id}/pdf/avance`, 'avance.pdf'),
   // Planificación (Gantt) of a project with an approved presupuesto (backend: presupuestos/gantt.js).
   gantt: (projectId) => request('GET', `${base}/proyectos/${projectId}/gantt`),
   saveGantt: (projectId, partidaId, body) => request('PUT', `${base}/proyectos/${projectId}/gantt/${partidaId}`, body),

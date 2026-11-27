@@ -19,6 +19,9 @@
 .obr-decide p { margin: 4px 0 0; }
 .obr-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
 .obr-actions.obr-start { justify-content: flex-start; }
+/* A PDF download (Detalle.jsx PdfButton): the button with its hint and error beside it. */
+.obr-pdf { display: flex; gap: 4px 12px; flex-wrap: wrap; align-items: center; }
+.obr-spin { display: inline-block; animation: obr-spin 0.8s linear infinite; }
 .obr-chapter-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; padding: 16px 20px; border-bottom: 1px solid #EDEDEA; }
 .obr-chapter-figs { display: flex; gap: 20px; flex-wrap: wrap; font-size: 13px; color: #3A3A38; }
 .obr-chapter-figs > span { display: flex; flex-direction: column; gap: 4px; min-width: 200px; }

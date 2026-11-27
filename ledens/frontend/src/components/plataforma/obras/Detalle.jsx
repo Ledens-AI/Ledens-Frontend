@@ -79,6 +79,7 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
     setEditing('edit');
   };
   const options = v.chapters.flatMap((c) => c.items).filter((i) => i.kind === 'decision' || i.kind === 'opcion');
+  const approvedAmps = doc.ampliaciones.some((a) => a.version.status === 'approved');
   const optionalChosen = options.filter((i) => selected.includes(i.id)).reduce((a, i) => a + Number(i.amount), 0);
   // Photos and documents belong to the obra: an approved root presupuesto.
   // «Clientes» is the team's (jefe asignado or admin) on the root presupuesto; «Ver como» keeps it to read.
@@ -131,6 +132,10 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
           ) : null}
           {v.status === 'changes_requested' && !can.edit ? <p className="fin-warn"><i className="ri-chat-3-line"></i>{t.changesPending}</p> : null}
           {can.schedule ? <Schedule doc={doc} busy={busy} onSave={(body) => act(() => api.schedule(doc.id, body), 'Fechas de obra guardadas')} error={dialog === null ? dialogError : ''} /> : null}
+
+          {/* For whoever reads it on paper: an approved obra prints the budget in force (original + approved ampliaciones), anything else the version on screen. */}
+          {doc.obra ? <PdfButton label={t.pdfBudgetObra} hint={t.pdfBudgetObraHint(approvedAmps)} run={() => api.pdfPresupuesto(doc.id)} />
+            : v.chapters.length ? <PdfButton label={t.pdfBudget} hint={t.pdfBudgetHint} run={() => api.pdfPresupuesto(doc.id, v.id)} /> : null}
 
           <div className="fin-kpis">
             <Kpi label={t.base} value={eur(v.base)} icon="ri-file-list-3-line" />
@@ -543,6 +548,10 @@ function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
         <Kpi label={t.dates} value={fecha(o.startDate)} icon="ri-calendar-line" hint={o.endDate ? t.plannedEnd(fecha(o.endDate)) : t.noEnd} />
       </div>
       <p className="fin-muted fin-small">{t.obraExplain}</p>
+      <div className="obr-actions obr-start">
+        <PdfButton label={t.pdfProgress} hint={t.pdfProgressHint} primary run={() => api.pdfAvance(doc.id)} />
+        <PdfButton label={t.pdfBudgetObra} run={() => api.pdfPresupuesto(doc.id)} />
+      </div>
       {actions}
       {editing ? <p className="fin-warn"><i className="ri-information-line"></i>Indica el avance de cada partida de 0 a 100 %. Solo se guardan las que cambies, y el cliente lo verá al momento.</p> : null}
       {o.chapters.map((c) => (
@@ -588,6 +597,27 @@ function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
         </div>
       ))}
       {editing ? actions : null}
+    </div>
+  );
+}
+
+// Downloads a PDF built by the server (presupuestos/informes.js), with its own
+// busy state and error: clients print or forward it without the platform.
+function PdfButton({ label, hint, run, primary }) {
+  const { t } = useObrasI18n();
+  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const go = async () => {
+    setBusy(true); setError('');
+    try { await run(); } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+  return (
+    <div className="obr-pdf">
+      <button type="button" className={'fin-btn' + (primary ? ' is-primary' : '')} onClick={go} disabled={busy} aria-busy={busy}>
+        <i className={busy ? 'ri-loader-4-line obr-spin' : 'ri-file-pdf-2-line'} aria-hidden="true"></i>{busy ? t.pdfPreparing : label}
+      </button>
+      {hint ? <span className="fin-muted fin-small">{hint}</span> : null}
+      {error ? <span className="fin-error-inline" role="alert">{error}</span> : null}
     </div>
   );
 }

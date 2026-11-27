@@ -8,6 +8,7 @@ import { PresupuestosService, PresupuestoError } from '../presupuestos/service.j
 import { pdfDraft, LayoutOcr } from '../presupuestos/pdf.js';
 import { translatorFromEnv } from '../presupuestos/translate.js';
 import { translateDoc } from '../presupuestos/traducciones.js';
+import { InformesService } from '../presupuestos/informes.js';
 import { PropuestasService } from '../presupuestos/propuestas.js';
 import { PartidasService } from '../presupuestos/partidas.js';
 import { RecetasService } from '../presupuestos/recetas.js';
@@ -44,6 +45,22 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   const inLang = (req, doc) => (doc?.version?.chapters ? translateDoc(pool || getPool(), translate, doc, req.get('x-ledens-lang')) : doc);
   const handle = (fn) => async (req, res, next) => {
     try { res.json(await inLang(req, await fn(req))); } catch (e) {
+      if (e instanceof PresupuestoError) return res.status(e.status).json({ error: e.message });
+      next(e);
+    }
+  };
+
+  // A PDF ({ filename, bytes }) as a download.
+  const sendPdf = (fn) => async (req, res, next) => {
+    try {
+      const { filename, bytes } = await fn(req);
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        'Cache-Control': 'private, no-store',
+      });
+      res.send(Buffer.from(bytes));
+    } catch (e) {
       if (e instanceof PresupuestoError) return res.status(e.status).json({ error: e.message });
       next(e);
     }
@@ -111,20 +128,7 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   router.get('/proyectos/:projectId/facturacion', handle((req) => facturas(req).prepare(req.params.projectId)));
   router.post('/proyectos/:projectId/facturas', rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false }),
     handle(async (req) => ({ factura: await facturas(req).issue(req.params.projectId, req.body || {}) })));
-  router.get('/proyectos/:projectId/facturas/:facturaId/pdf', async (req, res, next) => {
-    try {
-      const { filename, bytes } = await facturas(req).pdf(req.params.projectId, req.params.facturaId);
-      res.set({
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-        'Cache-Control': 'private, no-store',
-      });
-      res.send(Buffer.from(bytes));
-    } catch (e) {
-      if (e instanceof PresupuestoError) return res.status(e.status).json({ error: e.message });
-      next(e);
-    }
-  });
+  router.get('/proyectos/:projectId/facturas/:facturaId/pdf', sendPdf((req) => facturas(req).pdf(req.params.projectId, req.params.facturaId)));
   // Planificación (Gantt) of a project with an approved presupuesto.
   const gantt =(req) => new GanttService(pool || getPool(), req.user);
   router.get('/proyectos/:projectId/gantt', handle((req) => gantt(req).get(req.params.projectId)));
@@ -150,6 +154,15 @@ export function createPresupuestosRouter({ authenticate, findUser, pool, ocr, tr
   // itself (src/presupuestos/ganttAgente.js). Same Anthropic client as /agente.
   router.post('/proyectos/:projectId/gantt/agente', rateLimit({ windowMs: 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false }),
     handle((req) => ganttAgenteDraft(req.user, req.params.projectId, { db: pool || getPool(), anthropic: agent })));
+  // PDFs to print or forward (presupuestos/informes.js), in the screen's language:
+  // the presupuesto (an approved obra: original + approved ampliaciones; else the
+  // version on screen) and the progress of every partida of the obra.
+  const informes = (req) => {
+    const lang = req.get('x-ledens-lang');
+    return new InformesService(svc(req), { lang, localize: (d) => translateDoc(pool || getPool(), translate, d, lang) });
+  };
+  router.get('/:id/pdf/presupuesto', sendPdf((req) => informes(req).presupuesto(req.params.id, { versionId: req.query.version || undefined })));
+  router.get('/:id/pdf/avance', sendPdf((req) => informes(req).avance(req.params.id)));
   // Materials and tools its lines need (version on screen, or the whole obra). Team only.
   router.get('/:id/necesidades', handle((req) => recetas(req).necesidades(req.params.id, { versionId: req.query.version || undefined, ambito: req.query.ambito })));
   router.get('/:id', handle((req) => svc(req).get(req.params.id, { versionId: req.query.version || undefined })));

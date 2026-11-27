@@ -79,6 +79,11 @@ const TXT = {
     comments: 'Comentarios', reasonOpt: 'Motivo (opcional)',
     // Obra tab
     budgetDocs: 'Documentos del presupuesto',
+    // PDFs (presupuestos/informes.js)
+    pdfBudget: 'Descargar presupuesto (PDF)', pdfBudgetHint: 'Para imprimirlo o enviarlo.',
+    pdfBudgetObra: 'Descargar presupuesto vigente (PDF)', pdfBudgetObraHint: (amp) => (amp ? 'Con todas las ampliaciones aprobadas, para imprimirlo o enviarlo.' : 'Para imprimirlo o enviarlo.'),
+    pdfProgress: 'Descargar informe de avance (PDF)', pdfProgressHint: 'El porcentaje hecho de cada partida, para imprimirlo o enviarlo.',
+    pdfPreparing: 'Preparando el PDF…',
     noStart: 'Obra pendiente de fecha de inicio', noStartText: 'El presupuesto está aprobado. Cuando el equipo fije la fecha de inicio, aquí verás el avance.',
     executed: (a) => `${a} ejecutado`, current: 'Presupuesto vigente',
     currentHint: (b, v, amp) => `${b} + ${v} de IVA${amp ? ' · incluye ampliaciones aprobadas' : ''}`,
@@ -137,6 +142,10 @@ const TXT = {
     rejectIntro: 'The quote will be closed. If you like, tell us why.',
     comments: 'Comments', reasonOpt: 'Reason (optional)',
     budgetDocs: 'Quote documents',
+    pdfBudget: 'Download quote (PDF)', pdfBudgetHint: 'To print or send.',
+    pdfBudgetObra: 'Download current budget (PDF)', pdfBudgetObraHint: (amp) => (amp ? 'With every approved extension, to print or send.' : 'To print or send.'),
+    pdfProgress: 'Download progress report (PDF)', pdfProgressHint: 'How much of each item is done, to print or send.',
+    pdfPreparing: 'Preparing the PDF…',
     noStart: 'Works awaiting a start date', noStartText: 'The quote is approved. When the team sets the start date, you’ll see the progress here.',
     executed: (a) => `${a} carried out`, current: 'Current budget',
     currentHint: (b, v, amp) => `${b} + ${v} VAT${amp ? ' · includes approved extensions' : ''}`,
