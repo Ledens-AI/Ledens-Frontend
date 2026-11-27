@@ -29,6 +29,15 @@ Los **enlaces para crear o restablecer la contraseña** (migración 025, `src/au
 
 `PUBLIC_APP_URL` (opcional) es la base del enlace; por defecto el host de SWA de producción.
 
+## Aviso de cada alta de usuario
+
+La migración 052 añade un trigger en `users` (`users_registered_alert`): cuando `registered_at` pasa de vacío a una fecha — la primera sesión de una cuenta creada al registrarse con contraseña, con Google/Microsoft, al aceptar una invitación o con un enlace para compartir una obra, o un registro que toma la fila que el equipo había preparado para ese email — encola **un** mensaje con `event_type = 'user_registered'` y `payload = { user_id }` (clave `user_registered:<id>`, así que nunca se repite). Las cuentas ya dadas de alta al aplicar la migración no se avisan.
+
+- Al reclamar, `AlertService` llama a `userRegisteredMessage` (`src/notifications/altas.js`), que compone el correo en ese momento: nombre, email, rol, fecha de alta (hora de Madrid), con qué entra (Google, Microsoft, email y contraseña), si el email está verificado, las obras que ya ve (cliente principal o solo lectura, y si llegó por invitación o enlace) y un aviso si la cuenta espera a confirmar su email (`access_held`).
+- Destinatario propio (campo `to`): `AVISO_ALTAS_TO` si está definida (varios separados por «;»), si no `alvaro.navarro@ledens.es`. No va a los destinatarios fijos de los avisos de transacciones.
+- Si el usuario ya no existe al reclamar, el mensaje se cierra sin enviarse (`user_registered_not_pending`).
+- Misma Logic App y misma entrega al menos una vez que el resto de mensajes; un correo puede llegar hasta unos 5 minutos después del alta.
+
 ## Despliegue
 
 1. Fusionar y desplegar backend; el mecanismo habitual aplica migración 011. CI ejecuta integración PostgreSQL 16.

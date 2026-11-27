@@ -49,6 +49,9 @@ test('register creates an account, sets a session cookie, and hides the password
     assert.equal(body.user.email, email);
     assert.ok(!('password_hash' in body.user), 'the hash must never be sent to the client');
     assert.match(res.headers.get('set-cookie') || '', /ledens_session=/);
+    // «Nueva alta» email (migration 052): queued once for the new account.
+    const queued = await getPool().query("SELECT count(*)::int n FROM ledens.transaction_alerts WHERE event_type='user_registered' AND payload->>'user_id'=$1", [body.user.id]);
+    assert.equal(queued.rows[0].n, 1);
   } finally {
     await cleanupUser(email);
   }

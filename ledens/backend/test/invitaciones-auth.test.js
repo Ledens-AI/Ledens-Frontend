@@ -22,10 +22,28 @@ let server, base, google, googleBase, obraId, nextUserinfo;
 const cookieFrom = (res, name) => (res.headers.getSetCookie?.() || []).find((c) => c.startsWith(`${name}=`))?.split(';')[0] || null;
 const post = (path, body, cookie) => fetch(`${base}${path}`, { method: 'POST', redirect: 'manual',
   headers: { 'content-type': 'application/json', origin: ORIGIN, ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body || {}) });
+// The queue is shared with other test files running at the same time (and their
+// «Nueva alta» emails, migration 052): claim batches until this email's message
+// shows up, then give back the lease of the others so their own tests find them.
+// Another file may be holding this one for a moment: an empty batch waits a little.
+async function claimFor(email) {
+  const alerts = new AlertService(getPool());
+  const others = [];
+  try {
+    for (let i = 0; i < 50; i++) {
+      const { messages } = await alerts.claim();
+      const m = messages.find((x) => x.to === email);
+      others.push(...messages.filter((x) => x !== m).map((x) => x.id));
+      if (m) return m;
+      if (!messages.length) await new Promise((r) => setTimeout(r, 100));
+    }
+  } finally {
+    if (others.length) await getPool().query('UPDATE ledens.transaction_alerts SET lease_token=NULL, lease_until=NULL WHERE id=ANY($1::uuid[]) AND delivered_at IS NULL', [others]);
+  }
+  assert.fail(`a message for ${email}`);
+}
 async function linkFor(email) {
-  const { messages } = await new AlertService(getPool()).claim();
-  const m = messages.find((x) => x.to === email);
-  assert.ok(m, `a message for ${email}`);
+  const m = await claimFor(email);
   return m.html.match(/\/invitacion#([A-Za-z0-9_-]{43})/)[1];
 }
 const cleanup = () => getPool().query(`DELETE FROM presupuestos WHERE title='Obra de invitación'`)
