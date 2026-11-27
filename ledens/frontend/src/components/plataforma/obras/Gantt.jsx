@@ -673,7 +673,9 @@ function Chart({ data }) {
           {months.map((m) => (
             <g key={`${m.year}-${m.month}`}>
               <line x1={m.from * DW} x2={m.from * DW} y1={0} y2={height} stroke="#E6E6E1" />
-              <text x={m.from * DW + 6} y={16} fontSize="12" fontWeight="700" fill="#3A3A38">{`${MONTHS[m.month]} ${m.year}`}</text>
+              {/* A month with only a few days on screen gets a shorter label (or none), so it never covers the next one. */}
+              {m.n * DW >= 66 ? <text x={m.from * DW + 6} y={16} fontSize="12" fontWeight="700" fill="#3A3A38">{`${MONTHS[m.month]} ${m.year}`}</text>
+                : m.n * DW >= 30 ? <text x={m.from * DW + 4} y={16} fontSize="11" fontWeight="700" fill="#3A3A38">{MONTHS[m.month]}</text> : null}
             </g>
           ))}
           {cols.map((c) => <text key={c.i} x={c.i * DW + DW / 2} y={36} fontSize="10" textAnchor="middle" fill={c.weekend ? '#B0B0AB' : c.festivo ? '#C0702A' : '#6B6B68'}>{c.day}</text>)}

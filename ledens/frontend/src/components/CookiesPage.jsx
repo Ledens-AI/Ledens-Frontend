@@ -224,7 +224,7 @@ function CookiesPageEs() {
           <section id="terceros">
             <h2><span className="num">05</span>Cookies de terceros</h2>
             <p>Determinados servicios prestados en la web requieren la intervención de terceros que pueden instalar sus propias cookies en tu dispositivo. Estos terceros actúan como responsables del tratamiento sobre los datos recogidos a través de sus cookies, y aplican sus propias políticas que te recomendamos consultar:</p>
-            <table>
+            <table className="cookie-table">
               <thead><tr><th>Tercero</th><th>Servicio</th><th>Política de privacidad</th></tr></thead>
               <tbody>
                 <tr><td>Google LLC</td><td>Analytics, Maps, reCAPTCHA, Ads</td><td><a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">policies.google.com</a></td></tr>

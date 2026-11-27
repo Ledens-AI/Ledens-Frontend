@@ -153,15 +153,15 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
             <div className="fin-card is-flush" key={c.id}>
               <div className="obr-chapter-head"><h2>{`${ci + 1}. ${tr(c, 'name')}`}</h2><span className="fin-strong">{eur(c.base)}</span></div>
               <div className="fin-table-wrap">
-                <table className="fin-table">
+                <table className="fin-table obr-linecards">
                   <thead><tr><th>{t.hCode}</th><th>{t.hItem}</th><th>{t.hUnit}</th><th className="fin-num">{t.hQty}</th><th className="fin-num">{t.hPrice}</th><th className="fin-num">{t.hAmount}</th>{can.removeLine ? <th aria-label="Eliminar"></th> : null}</tr></thead>
                   <tbody>
                     {c.items.map((i) => {
                       const optional = i.kind === 'decision' || i.kind === 'opcion';
                       return (
                         <tr key={i.id} className={(i.removed ? 'obr-removed ' : '') + (!i.counted && !(can.decide && selected.includes(i.id)) ? 'obr-optional' : '')}>
-                          <td className="fin-nowrap">{i.code || '—'}</td>
-                          <td>
+                          <td className="fin-nowrap obr-c-code">{i.code || '—'}</td>
+                          <td className="obr-c-full">
                             <div className="obr-line-name">
                               {can.decide && optional ? <input type="checkbox" aria-label={t.include(tr(i, 'name'))} checked={selected.includes(i.id)} onChange={(e) => setSelected((s) => (e.target.checked ? [...s, i.id] : s.filter((x) => x !== i.id)))} /> : null}
                               <strong>{tr(i, 'name')}</strong>
@@ -172,12 +172,12 @@ export default function Detalle({ id, initialTab, initialEdit, readOnly, toast, 
                             {i.removed?.reason ? <div className="fin-small obr-removed-why">{`Eliminada por ${i.removed.by || '—'} el ${fecha(i.removed.at)}: ${i.removed.reason}`}</div> : null}
                             <BaseMatch item={i} />
                           </td>
-                          <td>{i.unit}</td>
-                          <td className="fin-num">{num(i.quantity)}</td>
-                          <td className="fin-num fin-nowrap">{eur(i.unitPrice)}</td>
-                          <td className="fin-num fin-nowrap">{eur(i.amount)}</td>
+                          <td data-label={t.hUnit}>{i.unit}</td>
+                          <td className="fin-num" data-label={t.hQty}>{num(i.quantity)}</td>
+                          <td className="fin-num fin-nowrap" data-label={t.hPrice}>{eur(i.unitPrice)}</td>
+                          <td className="fin-num fin-nowrap" data-label={t.hAmount}>{eur(i.amount)}</td>
                           {can.removeLine ? (
-                            <td>{i.removed ? null : <button type="button" className="fin-btn is-ghost is-small" aria-label={`Eliminar ${i.name}`} title="Eliminar partida" disabled={busy}
+                            <td className="obr-c-actions">{i.removed ? null : <button type="button" className="fin-btn is-ghost is-small" aria-label={`Eliminar ${i.name}`} title="Eliminar partida" disabled={busy}
                               onClick={() => { setDialogError(''); setText(''); setRemoving(i); }}><i className="ri-delete-bin-line"></i></button>}</td>
                           ) : null}
                         </tr>
@@ -555,21 +555,21 @@ function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
             </div>
           </div>
           <div className="fin-table-wrap">
-            <table className="fin-table">
+            <table className="fin-table obr-linecards">
               <thead><tr><th>{t.hCode}</th><th>{t.hItem}</th><th className="fin-num">{t.hBudgeted}</th><th className="fin-num">{t.hExecuted}</th><th className="obr-col-avance">{t.hProgress}</th><th className="fin-num">{t.hPrice}</th><th className="fin-num">{t.hConsumed}</th></tr></thead>
               <tbody>
                 {c.items.map((i) => {
                   const p = parseDecimal(values[i.id], 2);
                   return (
                     <tr key={i.id}>
-                      <td className="fin-nowrap">{i.code || '—'}</td>
-                      <td><strong>{tr(i, 'name')}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{i.lastDeclared.by ? `${t.declaredBy(i.lastDeclared.by, fechaHora(i.lastDeclared.at))}${i.lastDeclared.note ? ` · ${tr(i.lastDeclared, 'note')}` : ''}` : (tr(i.lastDeclared, 'note') || t.imported)}</div> : null}</td>
-                      <td className="fin-num fin-nowrap">{`${num(i.quantity)} ${i.unit}`}</td>
-                      <td className="fin-num fin-nowrap">
+                      <td className="fin-nowrap obr-c-code">{i.code || '—'}</td>
+                      <td className="obr-c-full"><strong>{tr(i, 'name')}</strong>{i.lastDeclared ? <div className="fin-muted fin-small">{i.lastDeclared.by ? `${t.declaredBy(i.lastDeclared.by, fechaHora(i.lastDeclared.at))}${i.lastDeclared.note ? ` · ${tr(i.lastDeclared, 'note')}` : ''}` : (tr(i.lastDeclared, 'note') || t.imported)}</div> : null}</td>
+                      <td className="fin-num fin-nowrap" data-label={t.hBudgeted}>{`${num(i.quantity)} ${i.unit}`}</td>
+                      <td className="fin-num fin-nowrap" data-label={t.hExecuted}>
                         {editing ? (p === null ? '—' : `${num(Number(i.quantity) * Number(p) / 100)} ${i.unit}`) : `${num(i.executed)} ${i.unit}`}
                         {i.excess && !editing ? <div className="fin-danger fin-small">{t.excess}</div> : null}
                       </td>
-                      <td className="obr-col-avance">
+                      <td className="obr-col-avance obr-c-full" data-label={t.hProgress}>
                         {editing ? (
                           <span className="obr-pct-edit">
                             <input type="range" min="0" max="100" step="1" aria-label={`Avance de ${i.name}`} value={Math.min(100, Number(p ?? 0))} onChange={(e) => setPct(i.id, e.target.value)} />
@@ -577,8 +577,8 @@ function ObraTab({ doc, can, busy, onDeclare, error, autoEdit }) {
                           </span>
                         ) : <Progress value={i.executionPct} color={i.executionPct >= 100 ? '#55A89D' : '#5567AE'} compact />}
                       </td>
-                      <td className="fin-num fin-nowrap">{eur(i.unitPrice)}</td>
-                      <td className="fin-num fin-nowrap">{eur(i.consumed)}</td>
+                      <td className="fin-num fin-nowrap" data-label={t.hPrice}>{eur(i.unitPrice)}</td>
+                      <td className="fin-num fin-nowrap" data-label={t.hConsumed}>{eur(i.consumed)}</td>
                     </tr>
                   );
                 })}

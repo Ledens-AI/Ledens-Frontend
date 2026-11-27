@@ -23,14 +23,71 @@
 .plat-nav > button { flex-shrink: 0; }
 .plat-nav-group { padding: 14px 12px 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #9A9A96; }
 
-/* The design is laid out for desktop. Below 900px the sidebar stacks on top
-   and the top bar wraps (inline styles need !important to be overridden). */
+/* Menu button and backdrop only exist on phones (below). */
+.plat-menu-btn, .plat-backdrop { display: none; }
+
+/* ------------------------------------------------------------------
+ * Phones and small tablets (≤900px; designed on an iPhone 15, 393×852).
+ * The design's inline styles need !important to be overridden.
+ * - The sidebar becomes a drawer opened with ☰ from the top bar, so a
+ *   screen opens on its content instead of on the whole menu.
+ * - The top bar keeps only the current crumb; panels fit the screen.
+ * - Two-column layouts (.plat-cols) stack; tables keep scrolling inside
+ *   their card.
+ * ------------------------------------------------------------------ */
 @media (max-width: 900px) {
-  .plat > div { grid-template-columns: 1fr !important; }
-  .plat > div > aside { position: static !important; height: auto !important; }
-  .plat > div > aside, .plat-nav { overflow: visible !important; }
-  .plat header { height: auto !important; flex-wrap: wrap; padding: 12px 16px !important; }
-  .plat main { padding: 20px 16px !important; }
+  .plat-shell { grid-template-columns: minmax(0, 1fr) !important; }
+  .plat-aside {
+    position: fixed !important; top: 0 !important; left: 0; bottom: 0; z-index: 60;
+    width: min(86vw, 320px); height: 100dvh !important;
+    padding: calc(18px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom)) !important;
+    transform: translateX(-102%); transition: transform 0.22s ease; visibility: hidden;
+    box-shadow: 0 0 0 rgba(12, 6, 43, 0);
+  }
+  .plat-nav-open .plat-aside { transform: none; visibility: visible; box-shadow: 0 16px 48px rgba(12, 6, 43, 0.22); }
+  .plat-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 55; background: rgba(12, 6, 43, 0.38);
+    opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+  }
+  .plat-nav-open .plat-backdrop { opacity: 1; pointer-events: auto; }
+  .plat-nav-open { overflow: hidden; }
+  body:has(.plat-nav-open) { overflow: hidden; }
+
+  .plat-top {
+    height: auto !important; min-height: 56px; gap: 8px !important;
+    padding: env(safe-area-inset-top) 12px 0 !important;
+  }
+  .plat-menu-btn {
+    display: grid; place-items: center; flex: 0 0 auto; width: 44px; height: 44px; margin-left: -6px;
+    border: 0; border-radius: 10px; background: transparent; color: #0C062B; font-size: 24px; cursor: pointer;
+  }
+  .plat-menu-btn:active { background: #F2F4FA; }
+  /* Only the current crumb: the parents are one tap away in the menu. */
+  .plat-crumb:not(:last-child) { display: none !important; }
+  .plat-crumb i { display: none; }
+  .plat-crumb button { max-width: 100% !important; font-size: 16px !important; }
+  .plat-notif-panel {
+    position: fixed !important; top: calc(60px + env(safe-area-inset-top)) !important; left: 12px; right: 12px !important;
+    width: auto !important; max-height: calc(100dvh - 80px - env(safe-area-inset-top)); overflow-y: auto !important;
+  }
+
+  .plat-main {
+    padding: 16px 16px calc(28px + env(safe-area-inset-bottom)) !important; gap: 20px !important;
+  }
+  .plat-main h1 { font-size: 24px !important; line-height: 1.2; }
+  .plat-cols { grid-template-columns: minmax(0, 1fr) !important; }
+  .plat-cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .plat-sticky { position: static !important; }
+  /* Tables laid out as grids scroll sideways inside their card. */
+  .plat-scroll-x { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+
+  /* Auditoría: each entry as a short card (date · who, then what). */
+  .plat-audit-head { display: none !important; }
+  .plat-audit-row { grid-template-columns: minmax(0, 1fr) !important; gap: 2px !important; padding: 12px 16px !important; }
+  .plat-audit-row > span:first-child { font-size: 12px; }
+
+  /* iOS zooms into any field under 16px when it gets the focus. */
+  .plat input:not([type=checkbox]):not([type=radio]):not([type=range]), .plat select, .plat textarea { font-size: 16px !important; }
 }
 
 /* The cookie-settings button sits bottom-left by default, which is where the

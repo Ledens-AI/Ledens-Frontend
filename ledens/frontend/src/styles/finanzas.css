@@ -308,3 +308,38 @@
 .fin-cxp-dot.is-paid { background: #DEF3F0; border: 1px solid #A9D8D0; }
 .fin-cxp-dot.is-forecast { background: #fff; border: 1px dashed #B9C1E0; }
 .fin-cxp-dot.is-off { background: #F2F2EF; border: 1px solid #D9D9D9; }
+
+/* ------------------------------------------------------------------
+ * Phones (≤600px, designed on an iPhone 15, 393 px wide). Shared by every
+ * team screen that uses these classes (Gestión financiera, obras,
+ * herramientas).
+ * ------------------------------------------------------------------ */
+@media (max-width: 600px) {
+  /* Figures two by two instead of one card per row. */
+  .fin-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .fin-kpi { padding: 12px 14px; gap: 4px; }
+  .fin-kpi-value { font-size: 20px; }
+  .fin-kpi-label { font-size: 12px; }
+  /* Filters: every field fits its column (the project picker had a 220px floor). */
+  .fin-filters .fin-field, .fin-picker, .fin-picker.is-compact { min-width: 0; }
+  .fin-filters .fin-field > * { max-width: 100%; }
+  /* A table scrolls sideways with its natural height: a box that also
+     scrolls vertically inside the page traps the finger on a phone. */
+  .fin-table-wrap.is-fit { max-height: none; overflow-y: visible; }
+  .fin-table-wrap.is-fit .fin-table th { position: static; }
+  /* Columns keep a readable width; the table scrolls instead of squeezing. */
+  .fin-table-wrap > .fin-table { min-width: 640px; }
+  .fin-table th, .fin-table td { padding-left: 10px; padding-right: 10px; }
+  .fin-btn { min-height: 44px; }
+  .fin-btn.is-small { min-height: 36px; }
+  .fin-page-head h1 { font-size: 24px; }
+  /* Dialogs and drawers fit the visible screen: Safari's 100vh includes
+     the part behind its toolbar, which hid the dialogs' buttons. */
+  .fin-overlay { padding: 12px; }
+  .fin-dialog { padding: 20px 18px; max-height: calc(100dvh - 24px); border-radius: 14px; }
+  .fin-dialog h2 { font-size: 19px; }
+  .fin-dialog-actions .fin-btn { flex: 1 1 auto; }
+  .fin-drawer { height: 100dvh; width: 100vw; }
+  .fin-drawer-body { padding: 16px 16px calc(28px + env(safe-area-inset-bottom)); }
+  .fin-drawer-amount { font-size: 26px; }
+}

@@ -300,3 +300,26 @@
 .obr-fact-totals dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 600; }
 .obr-fact-totals .is-total { background: #8B96C8; color: #fff; }
 .obr-fact-totals .is-total dt, .obr-fact-totals .is-total dd { color: #fff; font-weight: 700; }
+
+/* ------------------------------------------------------------------
+ * Phones (≤600px): the lines of a presupuesto and of an obra en curso
+ * (.obr-linecards, Detalle.jsx) read as one card per partida instead of a
+ * table to scroll sideways — the name on top, the figures labelled two by
+ * two below (data-label), the progress bar and its % field full width, so
+ * «Actualizar avance» works with one thumb at the obra.
+ * ------------------------------------------------------------------ */
+@media (max-width: 600px) {
+  .fin-table-wrap > .fin-table.obr-linecards { min-width: 0; }
+  .obr-linecards, .obr-linecards tbody, .obr-linecards tr, .obr-linecards td { display: block; }
+  .obr-linecards thead { display: none; }
+  .obr-linecards tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; padding: 14px 16px; border-bottom: 1px solid #EDEDEA; }
+  .obr-linecards tbody tr:last-child { border-bottom: 0; }
+  .obr-linecards td { padding: 0 !important; border: 0 !important; text-align: left !important; white-space: normal; min-width: 0; }
+  .obr-linecards td.obr-c-full { grid-column: 1 / -1; }
+  .obr-linecards td.obr-col-avance { width: auto; min-width: 0; }
+  .obr-linecards td.obr-c-code { grid-column: 1 / -1; font-size: 12px; color: #6B6B68; margin-bottom: -6px; }
+  .obr-linecards td.obr-c-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
+  .obr-linecards td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: #6B6B68; }
+  .obr-linecards .obr-pct-edit { display: flex; align-items: center; gap: 12px; width: 100%; }
+  .obr-linecards .obr-pct-edit input[type=range] { flex: 1 1 auto; min-width: 0; height: 32px; }
+}

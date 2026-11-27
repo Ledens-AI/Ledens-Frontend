@@ -212,7 +212,7 @@ export default function CookiesEn() {
           <section id="terceros">
             <h2><span className="num">05</span>Third-party cookies</h2>
             <p>Some services on the website require third parties who may set their own cookies on your device. These third parties act as controllers of the data collected through their cookies and apply their own policies, which we recommend you read:</p>
-            <table>
+            <table className="cookie-table">
               <thead><tr><th>Third party</th><th>Service</th><th>Privacy policy</th></tr></thead>
               <tbody>
                 <tr><td>Google LLC</td><td>Analytics, Maps, reCAPTCHA, Ads</td><td><a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">policies.google.com</a></td></tr>
