@@ -45,9 +45,13 @@ class PlataformaView extends React.Component {
   // Screens belong to one role each (c_ client, w_ jefe de obra, a_ admin);
   // anything else is ignored. The backend enforces the same split for data.
   // Gestión financiera is w_fin / a_fin (jefe de obra and admin), never c_.
-  go=(screen,x)=>{if(!screen.startsWith(PREFIX[this.state.role]))return;this.setState(st=>Object.assign({screen,notifOpen:false,navTick:(st.navTick||0)+1},x||{}));window.scrollTo(0,0);};
+  go=(screen,x)=>{if(!screen.startsWith(PREFIX[this.state.role]))return;this.setState(st=>Object.assign({screen,notifOpen:false,navOpen:false,navTick:(st.navTick||0)+1},x||{}));window.scrollTo(0,0);};
+  // Phones (≤900px, plataforma.css): the sidebar is a drawer opened from the top bar.
+  toggleNav=()=>this.setState(st=>({navOpen:!st.navOpen,notifOpen:false}));
+  closeNav=()=>this.state.navOpen&&this.setState({navOpen:false});
+  onKey=e=>{if(e.key==='Escape'&&(this.state.navOpen||this.state.notifOpen))this.setState({navOpen:false,notifOpen:false});};
   mainRef=React.createRef();
-  componentDidMount(){if(this.toolToken){try{window.history.replaceState(null,'',window.location.pathname);}catch{/* ignore */}if(this.state.role==='client')this.flash('Las herramientas solo están disponibles para el equipo de Ledens.');}this.loadTools();if(this.mainRef.current)this._unfit=fitTables(this.mainRef.current);if(this.state.role==='admin'){this.loadUsers();this.loadAudit();this.getJSON('/api/bridge/workspace/counts').then(d=>this.setState({finBridgePending:d.pending,finConciliationPending:d.reconciliation??d.pending}),()=>{});this.getJSON('/api/finanzas/movimientos/pendientes').then(d=>this.setState({finConceptPending:d.pendientes}),()=>{});}if(this.state.role!=='client'){this.getJSON('/api/finanzas/pendiente-trabajador/resumen').then(d=>this.setState({finWorkerPending:Number(d.importe)||0}),()=>{});}if(this.state.role!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.materiales?.pendientes??d.pendientes,finClientPending:d.clientes?.pendientes??0}),()=>{});this.loadPresu();}
+  componentDidMount(){window.addEventListener('keydown',this.onKey);if(this.toolToken){try{window.history.replaceState(null,'',window.location.pathname);}catch{/* ignore */}if(this.state.role==='client')this.flash('Las herramientas solo están disponibles para el equipo de Ledens.');}this.loadTools();if(this.mainRef.current)this._unfit=fitTables(this.mainRef.current);if(this.state.role==='admin'){this.loadUsers();this.loadAudit();this.getJSON('/api/bridge/workspace/counts').then(d=>this.setState({finBridgePending:d.pending,finConciliationPending:d.reconciliation??d.pending}),()=>{});this.getJSON('/api/finanzas/movimientos/pendientes').then(d=>this.setState({finConceptPending:d.pendientes}),()=>{});}if(this.state.role!=='client'){this.getJSON('/api/finanzas/pendiente-trabajador/resumen').then(d=>this.setState({finWorkerPending:Number(d.importe)||0}),()=>{});}if(this.state.role!=='client')this.getJSON('/api/finanzas/resumen').then(d=>this.setState({finPending:d.materiales?.pendientes??d.pendientes,finClientPending:d.clientes?.pendientes??0}),()=>{});this.loadPresu();}
   // Badge and notification counts: presupuestos waiting for this user.
   loadPresu=()=>{this.getJSON('/api/presupuestos').then(d=>{const n=k=>d.presupuestos.filter(p=>p.phase===k&&(k!=='pendiente'||p.decides!==false)).length;this.setState({presu:{pendiente:n('pendiente'),cambios:n('cambios')}});},()=>this.setState({presu:null}));
     if(this.props.user.role==='admin'&&this.state.role==='admin')this.getJSON('/api/presupuestos/propuestas').then(d=>this.setState({propuestas:d.propuestas.length}),()=>{});}
@@ -56,7 +60,7 @@ class PlataformaView extends React.Component {
   getJSON=async(url)=>{const r=await fetch(url,{headers:viewAsHeaders()});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'No se pudieron cargar los datos.');return d;};
   loadUsers=()=>this.getJSON('/api/admin/users').then(d=>this.setState({adminUsers:d.users}),e=>{this.setState({adminUsers:[]});this.flash(e.message);});
   loadAudit=()=>this.getJSON('/api/admin/audit').then(d=>this.setState({adminAudit:d.entries}),e=>this.flash(e.message));
-  componentWillUnmount(){clearTimeout(this._t);this._unfit?.();setViewAs(null);}
+  componentWillUnmount(){window.removeEventListener('keydown',this.onKey);clearTimeout(this._t);this._unfit?.();setViewAs(null);}
   // «Ver como» (admins only): open another panel, optionally as one user sees it.
   // Viewing as a user is recorded first (POST /api/admin/view-as); from then on
   // finance requests carry X-Ledens-View-As and the backend answers read-only.
@@ -131,7 +135,7 @@ class PlataformaView extends React.Component {
       logout:()=>this.props.onLogout(),
       isRealAdmin:U.role==='admin',panel:role,viewAs:s.viewAs||null,switching:!!s.switching,viewUsers:s.adminUsers||[],
       switchView:this.switchView,exitView:()=>this.switchView('admin',null),barsFrom:sb.from,barsTo:sb.to,roleOpts,
-      toggleNotif:()=>this.setState({notifOpen:!s.notifOpen}),readAll:()=>this.setState({notifOpen:false}),
+      toggleNotif:()=>this.setState({notifOpen:!s.notifOpen,navOpen:false}),navOpen:!!s.navOpen,toggleNav:this.toggleNav,closeNav:this.closeNav,readAll:()=>this.setState({notifOpen:false}),
       askBudget:()=>this.props.onOpenLead?this.props.onOpenLead():this.flash(L.askBudgetFallback),
       toast:s.toast,hasToast:!!s.toast,L,
       closeModal:()=>this.setState({modal:null}),
@@ -164,9 +168,10 @@ class PlataformaView extends React.Component {
     // (and whatever they embed) are Spanish whatever the saved choice.
     return (
       <LangOverride lang={v.isClient ? null : 'es'}>
-      <div className={"plat" + (v.toolsScreen ? " plat-tools" : "")}>
-    <div style={{ display: "grid", gridTemplateColumns: "248px minmax(0,1fr)", minHeight: "100vh" }}>
-      <aside style={{ background: "#fff", borderRight: "1px solid #EDEDEA", display: "flex", flexDirection: "column", gap: "24px", padding: "22px 16px", position: "sticky", top: "0", height: "100vh", overflowY: "auto" }}>
+      <div className={"plat" + (v.toolsScreen ? " plat-tools" : "") + (v.navOpen ? " plat-nav-open" : "")}>
+    <div className="plat-shell" style={{ display: "grid", gridTemplateColumns: "248px minmax(0,1fr)", minHeight: "100vh" }}>
+      <div className="plat-backdrop" onClick={v.closeNav} aria-hidden="true"></div>
+      <aside id="plat-sidebar" className="plat-aside" style={{ background: "#fff", borderRight: "1px solid #EDEDEA", display: "flex", flexDirection: "column", gap: "24px", padding: "22px 16px", position: "sticky", top: "0", height: "100vh", overflowY: "auto" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "0 8px" }}>
           <img src={logo} alt="" style={{ width: "34px", height: "34px" }} />
           <span style={{ fontWeight: "700", fontSize: "27px", letterSpacing: "-0.07em", color: "#5567AE", lineHeight: "1" }}>
@@ -231,11 +236,14 @@ class PlataformaView extends React.Component {
         </div>
       </aside>
       <div style={{ display: "flex", flexDirection: "column", minWidth: "0" }}>
-        <header style={{ height: "64px", background: "#fff", borderBottom: "1px solid #EDEDEA", display: "flex", alignItems: "center", gap: "16px", padding: "0 32px", position: "sticky", top: "0", zIndex: "20" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", flex: "1", minWidth: "0", fontSize: "14px" }}>
+        <header className="plat-top" style={{ height: "64px", background: "#fff", borderBottom: "1px solid #EDEDEA", display: "flex", alignItems: "center", gap: "16px", padding: "0 32px", position: "sticky", top: "0", zIndex: "20" }}>
+          <button type="button" className="plat-menu-btn" onClick={v.toggleNav} aria-label={v.isClient ? v.L.menu : "Menú"} aria-expanded={v.navOpen} aria-controls="plat-sidebar">
+            <i className={v.navOpen ? "ri-close-line" : "ri-menu-line"} aria-hidden="true"></i>
+          </button>
+          <div className="plat-crumbs" style={{ display: "flex", alignItems: "center", gap: "6px", flex: "1", minWidth: "0", fontSize: "14px" }}>
             {(v.crumbs || []).map((c, c_i) => (
               <React.Fragment key={c_i}>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: "0" }}>
+                <div className="plat-crumb" style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: "0" }}>
                   {c.sep ? (
                     <>
                       <i className="ri-arrow-right-s-line" style={{ color: "#9A9A96" }}></i>
@@ -269,7 +277,7 @@ class PlataformaView extends React.Component {
             </button>
             {v.notifOpen ? (
               <>
-                <div style={{ position: "absolute", right: "0", top: "52px", width: "400px", background: "#fff", border: "1px solid #EDEDEA", borderRadius: "12px", boxShadow: "0 12px 32px rgba(12,6,43,0.12),0 4px 8px rgba(12,6,43,0.06)", overflow: "hidden" }}>
+                <div className="plat-notif-panel" style={{ position: "absolute", right: "0", top: "52px", width: "400px", background: "#fff", border: "1px solid #EDEDEA", borderRadius: "12px", boxShadow: "0 12px 32px rgba(12,6,43,0.12),0 4px 8px rgba(12,6,43,0.06)", overflow: "hidden" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 18px", borderBottom: "1px solid #EDEDEA" }}>
                     <span style={{ fontWeight: "700", fontSize: "16px" }}>
                       {v.L.notifications}
@@ -302,7 +310,7 @@ class PlataformaView extends React.Component {
             ) : null}
           </div>
         </header>
-        <main ref={this.mainRef} style={{ padding: "32px", maxWidth: "1240px", width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: "28px" }}>
+        <main ref={this.mainRef} className="plat-main" style={{ padding: "32px", maxWidth: "1240px", width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: "28px" }}>
           {v.isRealAdmin ? <VerComoBanner panel={v.panel} viewAs={v.viewAs} onExit={v.exitView} /> : null}
           {v.isFin ? (
             <React.Suspense fallback={<div style={{ padding: "32px", color: "#6B6B68" }}>{"Cargando Gestión financiera…"}</div>}>
@@ -321,8 +329,8 @@ class PlataformaView extends React.Component {
           ) : null}
           {v.is_c_perfil ? (
             <>
-              <div style={{ display: "grid", gridTemplateColumns: "300px minmax(0,1fr)", gap: "24px", alignItems: "start" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "16px", position: "sticky", top: "96px" }}>
+              <div className="plat-cols plat-cols-side" style={{ display: "grid", gridTemplateColumns: "300px minmax(0,1fr)", gap: "24px", alignItems: "start" }}>
+                <div className="plat-sticky" style={{ display: "flex", flexDirection: "column", gap: "16px", position: "sticky", top: "96px" }}>
                   <div style={{ background: "#fff", border: "1px solid #EDEDEA", borderRadius: "16px", padding: "22px", display: "flex", flexDirection: "column", gap: "14px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                       <div style={{ width: "56px", height: "56px", borderRadius: "99px", background: "#EC6090", color: "#fff", display: "grid", placeItems: "center", fontWeight: "700", fontSize: "18px" }}>
@@ -377,7 +385,7 @@ class PlataformaView extends React.Component {
                     <h2 style={{ fontSize: "18px", fontWeight: "700" }}>
                       {v.L.personalInfo}
                     </h2>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "16px" }}>
+                    <div className="plat-cols" style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "16px" }}>
                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
                         {v.L.firstName}
                         <input value={v.meFirst} readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px", background: "#fff" }} />
@@ -407,13 +415,13 @@ class PlataformaView extends React.Component {
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600", gridColumn: "1 / -1" }}>
                         {v.L.address}
-                        <input defaultValue="C/ Mart\u00ednez de la Rosa, 41 \u00b7 3\u00ba B" readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
+                        <input defaultValue={"C/ Mart\u00ednez de la Rosa, 41 \u00b7 3\u00ba B"} readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
                         {v.L.city}
-                        <input defaultValue="M\u00e1laga" readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
+                        <input defaultValue={"M\u00e1laga"} readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                       </label>
-                      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: "16px" }}>
+                      <div className="plat-cols" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: "16px" }}>
                         <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
                           {v.L.postcode}
                           <input defaultValue="29010" readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
@@ -452,10 +460,10 @@ class PlataformaView extends React.Component {
                     </div>
                     {v.isFisica ? (
                       <>
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "16px" }}>
+                        <div className="plat-cols" style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "16px" }}>
                           <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
                             {v.L.taxName}
-                            <input defaultValue="Luc\u00eda Fern\u00e1ndez Ortiz" readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
+                            <input defaultValue={"Luc\u00eda Fern\u00e1ndez Ortiz"} readOnly style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                           </label>
                           <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
                             {v.L.taxId}
@@ -476,7 +484,7 @@ class PlataformaView extends React.Component {
                     ) : null}
                     {v.isEmpresa ? (
                       <>
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "16px" }}>
+                        <div className="plat-cols" style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "16px" }}>
                           <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
                             {v.L.companyName}
                             <input placeholder={v.L.companyNamePh} style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
@@ -491,7 +499,7 @@ class PlataformaView extends React.Component {
                           </label>
                           <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: "600" }}>
                             {v.L.contact}
-                            <input defaultValue="Luc\u00eda Fern\u00e1ndez" style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
+                            <input defaultValue={"Luc\u00eda Fern\u00e1ndez"} style={{ height: "46px", border: "1px solid #D9D9D9", borderRadius: "8px", padding: "0 14px", fontSize: "15px" }} />
                           </label>
                         </div>
                       </>
@@ -611,7 +619,7 @@ class PlataformaView extends React.Component {
                     {"Altas, revisiones y permisos. Las acciones sensibles piden confirmación y quedan en auditoría."}
                   </p>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: "14px" }}>
+                <div className="plat-cols-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: "14px" }}>
                   {(v.kpis || []).map((k, k_i) => (
                     <React.Fragment key={k_i}>
                       <div style={{ background: "#fff", border: "1px solid #EDEDEA", borderRadius: "14px", padding: "18px", display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -628,7 +636,7 @@ class PlataformaView extends React.Component {
                     </React.Fragment>
                   ))}
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: "20px", alignItems: "start" }}>
+                <div className="plat-cols" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: "20px", alignItems: "start" }}>
                   <div style={{ background: "#fff", border: "1px solid #EDEDEA", borderRadius: "16px", padding: "22px", display: "flex", flexDirection: "column", gap: "16px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                       <h2 style={{ fontSize: "18px", fontWeight: "700" }}>
@@ -840,7 +848,7 @@ class PlataformaView extends React.Component {
                     {v.user.roleL}
                   </span>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: "20px", alignItems: "start" }}>
+                <div className="plat-cols" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: "20px", alignItems: "start" }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
                     <div style={{ background: "#fff", border: "1px solid #EDEDEA", borderRadius: "16px", padding: "22px", display: "flex", flexDirection: "column", gap: "12px" }}>
                       <h2 style={{ fontSize: "17px", fontWeight: "700" }}>
@@ -1084,7 +1092,7 @@ class PlataformaView extends React.Component {
                   {"Auditoría"}
                 </h1>
                 <div style={{ background: "#fff", border: "1px solid #EDEDEA", borderRadius: "16px", overflow: "hidden" }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "130px 200px 190px 200px minmax(0,1fr)", gap: "14px", padding: "12px 20px", fontSize: "11px", fontWeight: "700", letterSpacing: "0.04em", color: "#6B6B68", textTransform: "uppercase", background: "#FAFAF8" }}>
+                  <div className="plat-audit-head" style={{ display: "grid", gridTemplateColumns: "130px 200px 190px 200px minmax(0,1fr)", gap: "14px", padding: "12px 20px", fontSize: "11px", fontWeight: "700", letterSpacing: "0.04em", color: "#6B6B68", textTransform: "uppercase", background: "#FAFAF8" }}>
                     <span>
                       {"Fecha"}
                     </span>
@@ -1103,7 +1111,7 @@ class PlataformaView extends React.Component {
                   </div>
                   {(v.audit || []).map((a, a_i) => (
                     <React.Fragment key={a_i}>
-                      <div style={{ display: "grid", gridTemplateColumns: "130px 200px 190px 200px minmax(0,1fr)", gap: "14px", padding: "13px 20px", borderTop: "1px solid #F0F0EC", fontSize: "14px" }}>
+                      <div className="plat-audit-row" style={{ display: "grid", gridTemplateColumns: "130px 200px 190px 200px minmax(0,1fr)", gap: "14px", padding: "13px 20px", borderTop: "1px solid #F0F0EC", fontSize: "14px" }}>
                         <span style={{ color: "#6B6B68" }}>
                           {a.when}
                         </span>
