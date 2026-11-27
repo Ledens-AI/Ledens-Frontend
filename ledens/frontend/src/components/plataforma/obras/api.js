@@ -197,6 +197,13 @@ export const invitaciones = {
   invite: (id, body) => request('POST', inv(id), body),
   resend: (id, invId) => request('POST', `${inv(id)}/${invId}/reenviar`),
   revoke: (id, invId) => request('POST', `${inv(id)}/${invId}/revocar`),
+  // «Usuarios con acceso» (backend: invitaciones/acceso.js): jefe, cliente principal and
+  // read-only clients; rol 'principal' | 'lectura'; links to share the obra ({ dias }).
+  acceso: (id) => request('GET', `${inv(id)}/acceso`),
+  setRole: (id, userId, rol) => request('PUT', `${inv(id)}/acceso/${userId}`, { rol }),
+  removeAccess: (id, userId) => request('DELETE', `${inv(id)}/acceso/${userId}`),
+  createLink: (id, dias) => request('POST', `${inv(id)}/enlaces`, { dias }),
+  revokeLink: (id, enlaceId) => request('POST', `${inv(id)}/enlaces/${enlaceId}/revocar`),
 };
 
 // Labels and colours from the platform design.

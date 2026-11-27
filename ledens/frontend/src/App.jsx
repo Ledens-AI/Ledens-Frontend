@@ -21,11 +21,12 @@ import CookieConsent from './components/CookieConsent.jsx';
 import RegistroPage from './components/RegistroPage.jsx';
 import InvitacionPage from './components/InvitacionPage.jsx';
 import ContrasenaPage from './components/ContrasenaPage.jsx';
+import ObraCompartidaPage from './components/ObraCompartidaPage.jsx';
 import Plataforma from './components/plataforma/Plataforma.jsx';
 import RequireAuth from './components/RequireAuth.jsx';
 
 // Full-screen pages that bring their own logo/navigation instead of Header.
-const NO_HEADER = ['/registro', '/plataforma', '/invitacion', '/contrasena'];
+const NO_HEADER = ['/registro', '/plataforma', '/invitacion', '/contrasena', '/obra-compartida'];
 
 /* A Ledens Tools label (QR): https://<app>/h/<token>. The token is opaque and
  * grants nothing — it only names the tool; /plataforma asks to log in first
@@ -86,6 +87,8 @@ export default function App() {
         <Route path="/invitacion" element={<InvitacionPage />} />
         {/* Create or reset a password; the email's link carries the token in the #fragment */}
         <Route path="/contrasena" element={<ContrasenaPage />} />
+        {/* A link to share an obra («Compartir»): create an account or log in, then follow it read-only. */}
+        <Route path="/obra-compartida" element={<ObraCompartidaPage />} />
         <Route
           path="/plataforma"
           element={

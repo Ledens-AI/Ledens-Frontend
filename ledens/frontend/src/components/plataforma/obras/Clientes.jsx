@@ -2,10 +2,13 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { invitaciones } from './api.js';
 import { Badge, Dialog, Empty, ErrorBox } from '../finanzas/ui.jsx';
 import { fecha, fechaHora } from '../finanzas/format.js';
+import { AccesoObra } from './Acceso.jsx';
 
-/* «Clientes» of an obra (root presupuesto): the jefe de obra assigned or an
- * admin invites clients by email. The titular client approves and comments;
- * whoever else is invited sees the obra without deciding on it. The email goes
+/* «Clientes» of an obra (root presupuesto): who has access (Acceso.jsx: jefe,
+ * cliente principal, read-only clients, «Compartir») and the invitations by
+ * email that the jefe de obra assigned or an admin sends. The cliente
+ * principal approves and comments; whoever else is invited sees the obra
+ * without deciding on it. The email goes
  * out through the notification queue with a one-time link (/invitacion).
  * Team only, so Spanish only; readOnly is «Ver como». */
 const STATUS = {
@@ -46,14 +49,15 @@ export default function Clientes({ obraId, readOnly, toast }) {
     try { await fn(); toast?.(message); setRevoking(null); await load(); } catch (err) { setRowError((r) => ({ ...r, [i.id]: err.message })); setRevoking(null); }
     setBusy(false);
   };
-  const { titular } = data.obra;
 
   return (
     <div className="fin-stack">
+      {/* Who sees the obra and «Compartir»; reloaded whenever an invitation changes. */}
+      <AccesoObra key={data.invitaciones.map((i) => `${i.id}:${i.status}:${i.sentCount}`).join('|')} obra={data.obra} readOnly={readOnly} toast={toast} />
       <div className="fin-card">
-        <div className="fin-card-head"><h2>Clientes de la obra</h2></div>
+        <div className="fin-card-head"><h2>Invitar por email</h2></div>
         <p className="fin-muted obr-mb">
-          {`Titular: ${titular ? `${titular.name || titular.email} · ${titular.email}` : '—'}. El titular aprueba y comenta; los demás clientes invitados ven la obra (presupuesto, avance, fotos y documentos) sin decidir sobre ella.`}
+          Una invitación personal a un email: la persona entra como cliente de solo lectura y ve la obra (presupuesto, avance, fotos y documentos) sin decidir sobre ella. Para que sea el cliente principal, cámbiale el rol arriba cuando tenga acceso.
         </p>
         {readOnly ? <p className="fin-warn"><i className="ri-eye-line"></i>Estás en «Ver como»: solo lectura.</p> : (
           <form className="fin-form" onSubmit={send}>
